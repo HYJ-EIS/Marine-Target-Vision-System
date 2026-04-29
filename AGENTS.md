@@ -1,0 +1,28 @@
+# AGENTS.md
+
+## Environment
+
+- 所有 `python` / `pytest` 命令使用 `conda run -n ship_detect ...`
+- 依赖文件：`files/requirements.txt`
+- 当前入口脚本还直接依赖 `Flask`、`Flask-CORS`、`onnxruntime`；执行前不要假设 `files/requirements.txt` 已完整覆盖运行时依赖
+
+## Entry Points
+
+- `image_main.py`：图片检测 HTTP 服务
+- `image_main copy.py`：调试副本；除手动测试分支外，和 `image_main.py` 的请求处理逻辑应保持同步
+- `video_main.py`：视频检测与跟踪入口
+- 统一检测入口：`target_module/image_detect_module/target_detection.py` → `detect_targets(image_input, output_dir=None, enable_tracking=False)`
+
+## Execution Rules
+
+1. 涉及磁盘图片路径读写时，不要直接使用 `cv2.imread` / `cv2.imwrite`；使用 `cv_utils.imread_unicode()` / `imwrite_unicode()`。
+2. 不要在调用处重复写死检测类别、模型路径、置信度阈值、NMS 阈值或图片输入输出目录；以 `target_module/image_detect_module/config.py` 的 `Config` 为准。
+3. 修改 `image_main.py` 的请求解析、检测调用、结果图保存或返回结构时，同步检查 `image_main copy.py` 的对应逻辑；`image_main copy.py` 允许额外保留 `TEST_MODE` 调试分支。
+4. 当前 `detect_targets()` 实际只支持图片路径字符串；不要把内存帧或 `np.ndarray` 直接传给它。
+5. 不要假设 HTTP 成功响应等于检测结果；当前 `image_main.py` / `image_main copy.py` 中的 `APIResponse.success()` 未返回标准成功体。若修改图片 API 返回契约，需同步更新 `README.md`。
+6. `video_main.py` 和端到端测试依赖外部服务或本地数据时，先确认 RTSP、RabbitMQ、模型文件和输入样本可用，再运行完整流程。
+7. 修改视频默认输入源、RTSP 输出地址或默认输出文件时，统一改 `target_module/image_detect_module/config.py` 中的 `Config.VIDEO_RTSP_INPUT`、`Config.VIDEO_RTSP_OUTPUT`、`Config.VIDEO_OUTPUT_PATH`；不要在 `video_main.py` 重新写死。
+
+## Reference
+
+- 需要接口细节、目录说明或变更记录时，查 `README.md`

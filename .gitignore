@@ -1,0 +1,10 @@
+# large/virtualenv/build artifacts
+output_rtsp_video/ffmpeg
+yolo_detect/
+__pycache__/
+**/__pycache__/
+results/
+runs/
+uploads/
+output_rtsp_video/**/__pycache__/
+*.pyc

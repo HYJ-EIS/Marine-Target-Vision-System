@@ -1,0 +1,88 @@
+
+# MediaMTX配置文件  
+# 抗H.264解码错误优化配置
+
+# 日志配置
+logLevel: info
+logDestinations: [stdout]
+
+# API服务器配置
+api: no
+
+# 指标配置
+metrics: no
+
+# PPROFs配置
+pprof: no
+
+# 运行时配置
+runOnConnect: ""
+runOnConnectRestart: no
+runOnDisconnect: ""
+
+# RTSP服务器配置
+rtspAddress: :8554
+
+# 关闭其他不需要的协议
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+
+# 超时设置（大幅增加容错性）
+readTimeout: 120s
+writeTimeout: 120s
+# 额外的错误恢复设置
+readBufferCount: 2048    # 增加读缓冲区数量
+writeQueueSize: 2048     # 增加写队列大小
+
+# 路径配置 - 专门针对H.264解码错误优化
+paths:
+  # 输入视频流（抗错误配置）
+  "video":
+    source: publisher
+    readTimeout: 120s
+    writeTimeout: 120s
+    # 大缓冲区应对解码错误
+    readBufferSize: 4194304    # 4MB
+    writeBufferSize: 4194304   # 4MB
+    # 强制TCP传输（更稳定）
+    rtspTransport: tcp
+    rtspRangeType: time
+    rtspRangeStart: now
+    # 错误恢复优化
+    sourceOnDemand: no
+    sourceOnDemandStartTimeout: 30s
+    sourceOnDemandCloseAfter: 30s
+    # H.264解码优化
+    rtspDisableMulticast: yes   # 禁用组播避免包丢失
+    rtspAnyPort: yes           # 允许任意端口
+    
+  # 输出视频流（超级稳定配置）
+  "output":
+    source: publisher
+    readTimeout: 120s
+    writeTimeout: 120s
+    # 超大缓冲区
+    readBufferSize: 8388608    # 8MB - 处理突发损坏数据
+    writeBufferSize: 8388608   # 8MB
+    rtspTransport: tcp
+    # 最大错误容忍
+    sourceOnDemand: no
+    sourceOnDemandStartTimeout: 60s
+    sourceOnDemandCloseAfter: 60s
+    # 专门的H.264处理优化
+    rtspDisableMulticast: yes
+    rtspAnyPort: yes
+    # 额外的稳定性设置
+    rtspSessionTimeout: 300s   # 5分钟会话超时
+    
+  # 所有其他路径的默认配置
+  "~^.*$":
+    source: publisher
+    readTimeout: 120s
+    writeTimeout: 120s
+    readBufferSize: 2097152    # 2MB
+    writeBufferSize: 2097152   # 2MB
+    rtspTransport: tcp
+    rtspDisableMulticast: yes

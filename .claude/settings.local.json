@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda run:*)",
+      "Bash(curl -s \"https://api.github.com/search/repositories?q=BoostTrack+multi+object&sort=stars&order=desc&per_page=5\")",
+      "Bash(python -c \":*)",
+      "Bash(curl -s https://api.github.com/repos/hustvl/SparseTrack)",
+      "WebFetch(domain:github.com)",
+      "Bash(ls:*)",
+      "Bash(python:*)"
+    ]
+  }
+}
