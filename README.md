@@ -104,14 +104,13 @@ flowchart LR
 - `Flask`
 - `Flask-CORS`
 - `onnxruntime`
-- `matplotlib`（`tracking_stats.py` 生成图表时需要）
 - `pytest`（运行测试时需要）
 
 安装示例：
 
 ```powershell
 pip install -r files\requirements.txt
-pip install flask flask-cors onnxruntime matplotlib pytest
+pip install flask flask-cors onnxruntime pytest
 ```
 
 ---
@@ -149,7 +148,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--input` | 本地视频文件路径；为空时使用 RTSP 输入 | 空 |
-| `--tracker` | `bytetrack` / `ocsort` / `botsort` | 配置默认值 |
+| `--tracker` | `bytetrack` / `ocsort` / `botsort` / `official_ocsort` / `official_botsort` | 配置默认值 |
 | `--output` | 输出视频路径 | `Config.VIDEO_OUTPUT_PATH`（默认 `results/output.mp4`） |
 | `--no-display` | 不显示预览窗口 | 关闭 |
 
@@ -179,7 +178,8 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 ### 5.3 当前默认跟踪配置
 
 - 默认跟踪器：`botsort`
-- 可选跟踪器：`bytetrack`、`ocsort`、`botsort`
+- 可选跟踪器：`bytetrack`、`ocsort`、`botsort`、`official_ocsort`、`official_botsort`
+- `official_ocsort` / `official_botsort` 是 vendored 官方源码适配层；默认 `botsort` 仍是项目轻量 baseline，`official_botsort` 第一版不启用 ReID。
 - `IMAGE_TRACKER_MIN_HITS = 1`
 - `IMAGE_TRACKER_FRAME_RATE = 1.0`
 - `VIDEO_RTSP_INPUT = rtsp://localhost:8554/video`
@@ -372,65 +372,60 @@ cd output_rtsp_video\mediamtx
 
 ---
 
-## 10. 常用脚本
+## 10. 常用工具
 
-### 9.1 `onnx_predict_car.py`
+### 10.1 `onnx_predict_car.py`
 
 离线单图 ONNX 推理验证脚本，用于快速验证模型和后处理逻辑。
 
-### 9.2 `image_main copy.py`
+### 10.2 `image_main copy.py`
 
 `image_main.py` 的调试副本，包含手工测试模式 `TEST_MODE`。适合本地排查问题，不建议作为正式服务入口。
 
-### 9.3 `video_test_tracking.py`
+### 10.3 `tools/validation/video_test_tracking.py`
 
 本地 MP4 跟踪测试脚本，支持低帧率模拟、指定跟踪器和最大处理帧数。
 
 示例：
 
 ```powershell
-python video_test_tracking.py --input "D:\path\to\video.mp4"
-python video_test_tracking.py --input "D:\path\to\video.mp4" --tracker botsort --fps-override 5
+conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4"
+conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4" --tracker botsort --fps-override 5
 ```
 
-### 9.4 `tracking_stats.py`
+### 10.4 `tools/evaluation/export_mot_results.py`
 
-按不同 FPS 梯度重跑跟踪，统计 ID 切换率、位移指标，并输出 CSV 与 PNG 图表。
+将某个 tracker 在完整视频上的输出导出为 MOTChallenge tracker result 文件，目录形式为 `<output-root>/<tracker>/data/<seq>.txt`。正式评测时不要使用抽帧或低帧率模式，结果帧号必须与 GT 的 `seqinfo.ini` / `gt/gt.txt` 对齐。
 
 示例：
-
 ```powershell
-python tracking_stats.py --input "D:\path\to\video.mp4"
-python tracking_stats.py --input "D:\path\to\video.mp4" --fps-levels 25 12 8 5 3 2 1
+conda run -n ship_detect python tools/evaluation/export_mot_results.py --input "D:\path\to\video.mp4" --tracker official_botsort --seq-name "seq01" --output-root "results\motchallenge_trackers"
 ```
 
-### 9.5 `extract_tracking_frames.py`
+### 10.5 `tools/evaluation/motchallenge_eval.py`
+
+调用 vendored TrackEval 计算正式 MOTChallenge 风格指标：HOTA、MOTA、IDF1。输入必须包含真实跨帧身份标注，GT 目录结构为 `<gt-root>/<seq>/seqinfo.ini` 和 `<gt-root>/<seq>/gt/gt.txt`。
+
+示例：
+```powershell
+conda run -n ship_detect python tools/evaluation/motchallenge_eval.py --gt-root "D:\path\to\mot_gt" --trackers-root "results\motchallenge_trackers" --trackers official_botsort --sequences seq01 --output-root "results\motchallenge_eval"
+```
+
+### 10.6 `tools/dataset/extract_tracking_frames.py`
 
 批量抽帧脚本，递归扫描 `_V`/`_T` 视频，复用 ONNX 检测与 `botsort` 跟踪，按位移、目标自身姿态角、面积变化和图像相似度导出训练帧、空标签文件与清单 CSV。
 
 示例：
 ```powershell
-python extract_tracking_frames.py
-python extract_tracking_frames.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --output-root "D:\Desktop\烟台项目数据\原始数据集\external_frames" --resume
+conda run -n ship_detect python tools/dataset/extract_tracking_frames.py
+conda run -n ship_detect python tools/dataset/extract_tracking_frames.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --output-root "D:\Desktop\烟台项目数据\原始数据集\external_frames" --resume
 ```
 
-### 9.6 `test_discrete_tracking.py`
-
-从视频按固定时间间隔抽帧，验证低帧率/离散图片输入下的 ID 稳定性。
-
-### 9.7 `test_image_tracking_api.py`
+### 10.7 `tools/validation/test_image_tracking_api.py`
 
 验证 `detect_targets(..., enable_tracking=True)` 的跨帧跟踪行为、延迟和回归项。
 
-### 9.8 `run_compare_trackers.py`
-
-对比不同跟踪算法的表现，通常用于 OC-SORT / BoT-SORT 对比实验。
-
-### 9.9 `run_full_experiment.py`
-
-批量编排实验脚本，用于完整实验或对比流程。
-
-### 9.10 `run_compare_ir_models.py`
+### 10.8 `tools/experiments/run_compare_ir_models.py`
 
 用于比较两版红外模型：
 
@@ -440,7 +435,7 @@ python extract_tracking_frames.py --input-root "D:\Desktop\烟台项目数据\�
 示例：
 
 ```powershell
-python run_compare_ir_models.py
+conda run -n ship_detect python tools/experiments/run_compare_ir_models.py
 ```
 
 输出示例：
@@ -463,16 +458,18 @@ pip install pytest
 pytest -q
 ```
 
-仓库中还包含以下测试或验证脚本：
+仓库中还包含以下测试或验证入口：
 
-- `test_discrete_tracking.py`
-- `test_image_tracking_api.py`
+- `test/test_extract_tracking_frames.py`
+- `test/test_video_dataset_classify.py`
+- `tools/validation/test_image_tracking_api.py`
 - `output_rtsp_video/test_output_rtsp_video.py`
-- `run_all_tests.py`
+- `tools/experiments/run_all_tests.py`
 
 说明：
 
 - 部分测试依赖 RTSP、FFmpeg、RabbitMQ 或本地数据文件
+- `tools/validation/` 和 `tools/experiments/` 是人工验证/实验脚本，不等同于 pytest 单元测试
 - 运行前请先确认外部服务和测试数据已准备好
 
 ---
@@ -483,12 +480,10 @@ pytest -q
 - `image_main copy.py`：图片检测调试副本
 - `video_main.py`：视频检测与跟踪入口
 - `visualization.py`：可视化绘制
-- `tracking_stats.py`：FPS 梯度统计
-- `video_test_tracking.py`：本地视频跟踪测试
-- `extract_tracking_frames.py`：RGB/IR 批量抽帧与清单导出
-- `run_compare_trackers.py`：跟踪器对比
-- `run_compare_ir_models.py`：红外模型对比
-- `run_full_experiment.py`：实验编排
+- `tools/README.md`：离线工具目录说明
+- `tools/dataset/`：数据集整理、抽帧、批量分析和 YOLO 标签可视化工具
+- `tools/validation/`：人工验证、调试和本地效果检查脚本
+- `tools/experiments/`：跟踪器、模型和帧率实验编排脚本
 - `target_module/`：检测核心模块与模型
 - `messaging/`：RabbitMQ 配置与发布
 - `output_rtsp_video/`：RTSP 输出与推流管理
@@ -499,15 +494,15 @@ pytest -q
 
 ## 12.5 Dataset Batch Classification
 
-新增 `video_dataset_classify.py` 作为目录级离线批处理入口，用于对 `_V` / `_T` 视频做全量解码、时间窗场景分类、目标统计、双模态校准和报表导出。
+新增 `tools/dataset/video_dataset_classify.py` 作为目录级离线批处理入口，用于对 `_V` / `_T` 视频做全量解码、时间窗场景分类、目标统计、双模态校准和报表导出。
 
 ### Command
 
 ```powershell
-conda run -n ship_detect python video_dataset_classify.py
-conda run -n ship_detect python video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频"
-conda run -n ship_detect python video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume
-conda run -n ship_detect python video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume --workers 2
+conda run -n ship_detect python tools/dataset/video_dataset_classify.py
+conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频"
+conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume
+conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume --workers 2
 ```
 
 ### Key Config
@@ -600,14 +595,14 @@ conda run -n ship_detect python video_dataset_classify.py --input-root "D:\Deskt
 ### 2026-04-23
 
 - `refactor`: 将 `video_main.py` 的 RTSP 输入、RTSP 输出和默认输出视频路径迁移到 `Config`
-- `feat`: 新增 `video_dataset_classify.py`，支持递归遍历 `_V` / `_T` 视频，输出预检查、时间窗级结果、视频级汇总和缺口报表
+- `feat`: 新增 `tools/dataset/video_dataset_classify.py`，支持递归遍历 `_V` / `_T` 视频，输出预检查、时间窗级结果、视频级汇总和缺口报表
 - `feat`: `config.py` 新增数据集批处理配置，包括时间窗退化、红外低置信度规则、双模态重叠对齐、`usable` 阈值和 `T` 小目标校准参数
 - `test`: 新增 `test/test_video_dataset_classify.py`，覆盖场景分类、低置信度、窗口退化、重叠对齐、`usable` 规则和汇总字段
 - `docs`: README 补充离线批处理入口、输出文件、窗口级列定义与规则说明
 
 ### 2026-04-16
 
-- `feat`: 新增 `extract_tracking_frames.py`，支持递归遍历 `_V`/`_T` 视频、基于检测/跟踪事件抽帧、导出 YOLO 标签与训练清单
+- `feat`: 新增 `tools/dataset/extract_tracking_frames.py`，支持递归遍历 `_V`/`_T` 视频、基于检测/跟踪事件抽帧、导出 YOLO 标签与训练清单
 - `feat`: `ImageProcessor` 新增 `process_frame(frame, file_type)`，支持内存帧直接推理
 - `fix`: `detectors.py` 放宽对 `torch` 的依赖，缺少 `torch` 时仍可导入并使用 ONNX Runtime
 
@@ -621,8 +616,8 @@ conda run -n ship_detect python video_dataset_classify.py --input-root "D:\Deskt
 ### 2026-03-30
 
 - `feat`: 增加 `tracker.py`、`kalman_bbox.py`、`gmc.py`，形成多算法跟踪基础能力
-- `feat`: 增加 `video_test_tracking.py`、`tracking_stats.py`、`run_compare_trackers.py`、`run_all_tests.py`
-- `refactor`: 调整配置与可视化逻辑，强化低帧率场景下的 ID 稳定性分析能力
+- `feat`: 增加 `tools/validation/video_test_tracking.py`、`tools/experiments/run_all_tests.py`
+- `refactor`: 调整配置与可视化逻辑，强化低帧率场景下的跟踪验证能力
 
 ### 2026-03-27
 

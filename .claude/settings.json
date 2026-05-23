@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(cat d:/Desktop/无人项目代码/yolo_img_detect/.claude/rules/*.md)",
-      "Read(//d D:/Desktop/无人项目代码/**)"
-    ]
-  }
-}

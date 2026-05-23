@@ -5,6 +5,8 @@
     - "bytetrack" : supervision.ByteTrack（原始实现，纯 IoU 匹配）
     - "ocsort"    : OC-SORT（Observation-Centric，虚拟轨迹重更新 + 方向一致性）
     - "botsort"   : BoT-SORT-Lite（OC-SORT + 全局相机运动补偿 GMC）
+    - "official_ocsort"  : vendored 官方 OC-SORT 适配层
+    - "official_botsort" : vendored 官方 BoT-SORT 适配层（默认关闭 ReID）
 
 通过 Config.TRACKER_TYPE 选择算法，或在构造时指定 tracker_type 参数。
 
@@ -25,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.utils.kalman_bbox import KalmanBoxTracker
 from target_module.image_detect_module.utils.gmc import GMC
+from target_module.image_detect_module.utils.official_adapter import OfficialTrackerAdapter
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -347,6 +350,7 @@ class MultiObjectTracker:
         "bytetrack" — supervision ByteTrack
         "ocsort"    — OC-SORT（推荐低帧率场景）
         "botsort"   — OC-SORT + GMC（推荐无人机场景）
+        "official_ocsort" / "official_botsort" — 官方源码适配层
     """
 
     _CLASS_TO_ID: dict[str, int] = {c: i for i, c in enumerate(Config.CLASSES)}
@@ -389,6 +393,12 @@ class MultiObjectTracker:
                 )
             else:
                 self._gmc = None
+        elif self.tracker_type in ("official_ocsort", "official_botsort"):
+            self._official = OfficialTrackerAdapter(
+                tracker_type=self.tracker_type,
+                frame_rate=self.frame_rate,
+                min_hits=self._min_hits,
+            )
         else:
             raise ValueError(f"不支持的追踪器类型: {self.tracker_type}")
 
@@ -411,6 +421,8 @@ class MultiObjectTracker:
         """
         if self.tracker_type == "bytetrack":
             return self._update_bytetrack(detections, frame_shape)
+        elif self.tracker_type in ("official_ocsort", "official_botsort"):
+            return self._official.update(detections, frame_shape, frame=frame)
         else:
             return self._update_ocsort(detections, frame_shape, frame)
 
@@ -423,6 +435,8 @@ class MultiObjectTracker:
                 minimum_matching_threshold=Config.TRACKER_MATCH_THRESH,
                 frame_rate=int(self.frame_rate),
             )
+        elif self.tracker_type in ("official_ocsort", "official_botsort"):
+            self._official.reset()
         else:
             self._ocsort.reset()
             if self._gmc:
@@ -432,7 +446,7 @@ class MultiObjectTracker:
         """Return short-gap predicted tracks for extraction fallback."""
         if max_time_since_update <= 0:
             return []
-        if self.tracker_type == "bytetrack":
+        if self.tracker_type in ("bytetrack", "official_ocsort", "official_botsort"):
             return []
 
         results = []

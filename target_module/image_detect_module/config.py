@@ -24,7 +24,7 @@ class Config:
     # 红外 ONNX 模型文件路径
     ONNX_INFRARED_MODEL_PATH = r"target_module\models\A_S_F_ir_FFCA.onnx"
 
-    # 视频跟踪默认算法，可选 bytetrack / ocsort / botsort
+    # 视频跟踪默认算法，可选 bytetrack / ocsort / botsort / official_ocsort / official_botsort
     TRACKER_TYPE = "botsort"
     # 新轨迹激活所需的最低检测置信度
     TRACKER_ACTIVATION_THRESH = 0.3

@@ -1,6 +1,6 @@
 # 抽帧原理、处理流程与参数说明
 
-本文说明当前仓库中批量抽帧脚本 `extract_tracking_frames.py` 的实际工作方式，重点回答以下问题：
+本文说明当前仓库中批量抽帧脚本 `tools/dataset/extract_tracking_frames.py` 的实际工作方式，重点回答以下问题：
 
 - 抽帧入口在哪里，处理什么数据
 - 视频是如何被扫描、分组和逐帧处理的
@@ -13,7 +13,7 @@
 
 ## 1. 功能定位与入口脚本
 
-当前仓库里和“抽帧”直接相关的主入口是 `extract_tracking_frames.py`。
+当前仓库里和“抽帧”直接相关的主入口是 `tools/dataset/extract_tracking_frames.py`。
 
 它处理的是离线批量视频抽帧，目标是从 `_V` / `_T` 视频中筛出更适合训练或标注的关键帧，并同步导出：
 
@@ -24,10 +24,10 @@
 
 这条链路和 `video_main.py` 不同：
 
-- `extract_tracking_frames.py` 面向离线批处理和数据集构建
+- `tools/dataset/extract_tracking_frames.py` 面向离线批处理和数据集构建
 - `video_main.py` 面向实时/准实时视频检测与跟踪输出
 
-因此，讨论“当前代码的抽帧原理”时，应以 `extract_tracking_frames.py` 为准。
+因此，讨论“当前代码的抽帧原理”时，应以 `tools/dataset/extract_tracking_frames.py` 为准。
 
 ## 2. 输入扫描与视频分组规则
 
@@ -117,7 +117,7 @@
 检测框出来后，会交给 `MultiObjectTracker`：
 
 - 跟踪器类型由 `--tracker` 指定
-- 当前可选 `bytetrack`、`ocsort`、`botsort`
+- 当前可选 `bytetrack`、`ocsort`、`botsort`、`official_ocsort`、`official_botsort`
 - 默认值来自 `Config.EXTERNAL_FRAMES_TRACKER`
 
 跟踪器初始化时会使用原始视频 FPS：
