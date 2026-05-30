@@ -5,10 +5,11 @@
   1. RTSP 流（默认）
   2. 本地 MP4 文件（通过 VIDEO_FILE 配置或 --input 参数）
 
-支持三种追踪算法（通过 Config.TRACKER_TYPE 或 --tracker 参数）：
+支持多种追踪算法（通过 Config.TRACKER_TYPE 或 --tracker 参数）：
   - bytetrack: 两阶段 IoU 匹配
   - ocsort:    OC-SORT 虚拟轨迹 + 方向一致性 + 距离回捞
   - botsort:   OC-SORT + 全局相机运动补偿 GMC（推荐）
+  - dist_tracker: Dist-Tracker FLIT L2-IoU 融合匹配
   - official_ocsort / official_botsort: vendored 官方源码适配层
 
 用法：
@@ -55,7 +56,7 @@ FFMPEG = False
 def parse_args():
     parser = argparse.ArgumentParser(description="视频目标检测 + 多目标追踪")
     parser.add_argument("--input", default="", help="本地视频文件路径（留空使用 RTSP 流）")
-    parser.add_argument("--tracker", default="", choices=["", "bytetrack", "ocsort", "botsort", "official_ocsort", "official_botsort"],
+    parser.add_argument("--tracker", default="", choices=["", "bytetrack", "ocsort", "botsort", "dist_tracker", "official_ocsort", "official_botsort"],
                         help="追踪算法（留空使用 Config 默认值）")
     parser.add_argument("--output", default="", help="输出视频路径（留空使用默认值）")
     parser.add_argument("--no-display", action="store_true", help="不显示窗口（无 GUI 环境）")

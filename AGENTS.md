@@ -22,6 +22,7 @@
 5. 不要假设 HTTP 成功响应等于检测结果；当前 `image_main.py` / `image_main copy.py` 中的 `APIResponse.success()` 未返回标准成功体。若修改图片 API 返回契约，需同步更新 `README.md`。
 6. `video_main.py` 和端到端测试依赖外部服务或本地数据时，先确认 RTSP、RabbitMQ、模型文件和输入样本可用，再运行完整流程。
 7. 修改视频默认输入源、RTSP 输出地址或默认输出文件时，统一改 `target_module/image_detect_module/config.py` 中的 `Config.VIDEO_RTSP_INPUT`、`Config.VIDEO_RTSP_OUTPUT`、`Config.VIDEO_OUTPUT_PATH`；不要在 `video_main.py` 重新写死。
+8. 每次完成代码修改后都要更新文档README.md。
 
 ## Reference
 

@@ -22,7 +22,7 @@
 - 图片检测 HTTP API，支持文件上传和本地路径
 - 图片检测默认启用离散图片跟踪，检测框可能包含 `track_id`
 - RTSP / 本地 MP4 视频逐帧检测
-- ByteTrack / OC-SORT / BoT-SORT 多算法跟踪
+- ByteTrack / OC-SORT / BoT-SORT / Dist-Tracker FLIT 多算法跟踪
 - 检测框、类别、置信度、跟踪 ID、轨迹线可视化
 - RTSP 推流与本地 MP4 保存
 - RabbitMQ 检测结果上报
@@ -44,6 +44,7 @@
 
 3. 跟踪引擎层
 - `target_module/image_detect_module/utils/tracker.py`：多算法跟踪器统一封装
+- `target_module/image_detect_module/utils/dist_tracker.py`：Dist-Tracker FLIT 轻量适配层
 - `target_module/image_detect_module/utils/kalman_bbox.py`：Kalman 跟踪基础实现
 - `target_module/image_detect_module/utils/gmc.py`：全局运动补偿，供 BoT-SORT 使用
 
@@ -138,6 +139,7 @@ python video_main.py --input "D:\path\to\video.mp4"
 
 # 指定追踪算法
 python video_main.py --input "video.mp4" --tracker ocsort
+python video_main.py --input "video.mp4" --tracker dist_tracker
 
 # 自定义输出路径 + 无窗口模式
 python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
@@ -148,7 +150,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--input` | 本地视频文件路径；为空时使用 RTSP 输入 | 空 |
-| `--tracker` | `bytetrack` / `ocsort` / `botsort` / `official_ocsort` / `official_botsort` | 配置默认值 |
+| `--tracker` | `bytetrack` / `ocsort` / `botsort` / `dist_tracker` / `official_ocsort` / `official_botsort` | 配置默认值 |
 | `--output` | 输出视频路径 | `Config.VIDEO_OUTPUT_PATH`（默认 `results/output.mp4`） |
 | `--no-display` | 不显示预览窗口 | 关闭 |
 
@@ -168,6 +170,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 
 - 可见光模型：`target_module/models/A_S_F_rgb_FFCA.onnx`
 - 红外模型：`target_module/models/A_S_F_ir_FFCA.onnx`
+- 模型路径由 `Config` 使用跨平台 `os.path.join(...)` 生成，可在 Windows 和 Linux/WSL 下直接解析
 
 ### 5.2 当前默认阈值
 
@@ -178,8 +181,12 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 ### 5.3 当前默认跟踪配置
 
 - 默认跟踪器：`botsort`
-- 可选跟踪器：`bytetrack`、`ocsort`、`botsort`、`official_ocsort`、`official_botsort`
+- 可选跟踪器：`bytetrack`、`ocsort`、`botsort`、`dist_tracker`、`official_ocsort`、`official_botsort`
+- `dist_tracker` 是 Dist-Tracker 后端跟踪思想的轻量适配层，使用 FLIT 的 L2-IoU 融合匹配代价、检测置信度融合和现有 GMC；不引入 Dist-Tracker 的 YOLO/Ultralytics 检测链路。
 - `official_ocsort` / `official_botsort` 是 vendored 官方源码适配层；默认 `botsort` 仍是项目轻量 baseline，`official_botsort` 第一版不启用 ReID。
+- `DIST_TRACKER_GAMMA = 0.25`
+- `DIST_TRACKER_MATCH_THRESH = 0.8`
+- `DIST_TRACKER_FUSE_SCORE = True`
 - `IMAGE_TRACKER_MIN_HITS = 1`
 - `IMAGE_TRACKER_FRAME_RATE = 1.0`
 - `VIDEO_RTSP_INPUT = rtsp://localhost:8554/video`
@@ -391,6 +398,7 @@ cd output_rtsp_video\mediamtx
 ```powershell
 conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4"
 conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4" --tracker botsort --fps-override 5
+conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4" --tracker dist_tracker --max-frames 100
 ```
 
 ### 10.4 `tools/evaluation/export_mot_results.py`
@@ -400,6 +408,7 @@ conda run -n ship_detect python tools/validation/video_test_tracking.py --input 
 示例：
 ```powershell
 conda run -n ship_detect python tools/evaluation/export_mot_results.py --input "D:\path\to\video.mp4" --tracker official_botsort --seq-name "seq01" --output-root "results\motchallenge_trackers"
+conda run -n ship_detect python tools/evaluation/export_mot_results.py --input "D:\path\to\video.mp4" --tracker dist_tracker --seq-name "seq01" --output-root "results\motchallenge_trackers"
 ```
 
 ### 10.5 `tools/evaluation/motchallenge_eval.py`
@@ -413,7 +422,7 @@ conda run -n ship_detect python tools/evaluation/motchallenge_eval.py --gt-root 
 
 ### 10.6 `tools/dataset/extract_tracking_frames.py`
 
-批量抽帧脚本，递归扫描 `_V`/`_T` 视频，复用 ONNX 检测与 `botsort` 跟踪，按位移、目标自身姿态角、面积变化和图像相似度导出训练帧、空标签文件与清单 CSV。
+批量抽帧脚本，递归扫描 `_V`/`_T` 视频，复用 ONNX 检测与可配置跟踪器（默认 `botsort`），按位移、目标自身姿态角、面积变化和图像相似度导出训练帧、空标签文件与清单 CSV。
 
 示例：
 ```powershell
@@ -425,7 +434,63 @@ conda run -n ship_detect python tools/dataset/extract_tracking_frames.py --input
 
 验证 `detect_targets(..., enable_tracking=True)` 的跨帧跟踪行为、延迟和回归项。
 
-### 10.8 `tools/experiments/run_compare_ir_models.py`
+### 10.8 `tools/validation/tracker_effect_test.py`
+
+对同一组 RGB / IR 视频执行一次检测，并将同一帧检测结果同时喂给多个跟踪器，输出带 `track_id` 的标注视频和逐帧框数据，用于人工对比跟踪效果。
+
+默认输入：
+
+- IR：`/mnt/d/Desktop/UAV_USV标注数据集/multi_target_source_videos/USV/IR/DJI_20250916100639_0001_T.MP4`
+- RGB：`/mnt/d/Desktop/UAV_USV标注数据集/multi_target_source_videos/USV/RGB/DJI_20250916100639_0001_V.MP4`
+
+默认输出：
+
+- `results/tracker_effect_test/DJI_20250916100639_0001/IR/<tracker>/`
+- `results/tracker_effect_test/DJI_20250916100639_0001/RGB/<tracker>/`
+
+每个 tracker 目录包含：
+
+- `annotated.mp4`
+- `annotated_part_*.mp4`（使用 `--resume` 续跑时生成，表示从中断帧之后继续写出的标注视频段）
+- `tracks.csv`
+- `frames.jsonl`
+- `summary.json`
+- `error.txt`（仅失败时生成）
+
+示例：
+
+```powershell
+conda run -n ship_detect python tools/validation/tracker_effect_test.py --max-frames 5
+conda run -n ship_detect python tools/validation/tracker_effect_test.py
+conda run -n ship_detect python tools/validation/tracker_effect_test.py --resume
+conda run -n ship_detect python tools/validation/tracker_effect_test.py --trackers botsort dist_tracker official_botsort
+conda run -n ship_detect python tools/validation/tracker_effect_test.py --modalities IR --trackers dist_tracker --progress-interval 25
+```
+
+`--resume` 会读取每个 tracker 目录下已有 `frames.jsonl` 的行数，并只从下一帧开始追加 `frames.jsonl` / `tracks.csv`。由于 MP4 容器不能可靠原地追加，续跑时不会覆盖已有 `annotated.mp4`，而是写入新的 `annotated_part_<起始帧>.mp4`；脚本仍会从视频开头重放已处理帧来恢复各 tracker 的内部状态，但不会重复写出这些帧的数据。
+
+### 10.9 `tools/validation/video_detect_only.py`
+
+对本地视频逐帧执行当前 ONNX 检测模型，只绘制检测框与类别置信度，不初始化跟踪器、不输出 `track_id`。适合快速检查检测模型在外部视频上的召回和误检情况。
+
+示例：
+
+```powershell
+conda run -n ship_detect python tools/validation/video_detect_only.py --file-type visible --input "D:\path\video1.mp4" --input "D:\path\video2.mp4" --output-dir results/detection_only
+conda run -n ship_detect python tools/validation/video_detect_only.py --file-type visible --input "D:\path\video.mp4" --max-frames 5
+conda run -n ship_detect python tools/validation/video_detect_only.py --file-type visible --conf-threshold 0.1 --input "D:\path\video.mp4"
+```
+
+每个输入视频会输出：
+
+- `<视频名>_detected.mp4`
+- `<视频名>_summary.json`
+- `<视频名>_detections.csv`：每个检测框一行，字段为 `frame_index,timestamp_sec,detection_id,x,y,w,h,confidence,class,class_confidence`
+- `<视频名>_frames.jsonl`：每帧一行，包含 `frame_index,timestamp_sec,boxes`；无目标帧也写入 `boxes: []`
+- `<视频名>_analysis.md`：单视频检测覆盖率、类别、置信度和框面积统计
+- `detection_analysis.md`：批量汇总报告
+
+### 10.10 `tools/experiments/run_compare_ir_models.py`
 
 用于比较两版红外模型：
 
@@ -591,6 +656,16 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 - `usable`
 
 ## 13. Changelog
+
+### 2026-05-30
+
+- `feat`: 新增 `dist_tracker` 跟踪器，按 Dist-Tracker/FLIT 思路实现 L2-IoU 融合匹配、检测置信度融合和 GMC，保持项目检测框输入输出契约
+- `feat`: `video_main.py`、`video_test_tracking.py`、`export_mot_results.py` 和 `extract_tracking_frames.py` 支持 `--tracker dist_tracker`
+- `feat`: 新增 `tools/validation/tracker_effect_test.py`，同一帧检测结果可同时喂给多个跟踪器并输出标注视频、`tracks.csv`、`frames.jsonl` 和 `summary.json`
+- `feat`: 新增 `tools/validation/video_detect_only.py`，用于本地视频纯检测可视化与检测统计导出，不初始化跟踪器
+- `refactor`: ONNX 模型默认路径改为基于 `Config.BASE_DIR` 和 `os.path.join(...)` 构造，避免 Windows 路径分隔符在 Linux/WSL 下失效
+- `test`: 新增 `dist_tracker` 合成检测框单元测试、tracker effect 导出 helper 测试和默认模型路径测试
+- `docs`: README、抽帧说明和 AGENTS 规则同步更新，明确 Dist-Tracker 配置、工具用法和修改代码后更新 README 的要求
 
 ### 2026-04-23
 

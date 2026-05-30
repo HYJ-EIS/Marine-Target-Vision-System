@@ -144,7 +144,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tracker",
         default=Config.EXTERNAL_FRAMES_TRACKER,
-        choices=["bytetrack", "ocsort", "botsort", "official_ocsort", "official_botsort"],
+        choices=["bytetrack", "ocsort", "botsort", "dist_tracker", "official_ocsort", "official_botsort"],
     )
     parser.add_argument("--motion-threshold", type=float, default=Config.EXTERNAL_FRAMES_MOTION_THRESHOLD)
     parser.add_argument(

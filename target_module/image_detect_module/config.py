@@ -20,11 +20,11 @@ class Config:
     INFRARED_CONF_THRESH = 0.65
 
     # 可见光 ONNX 模型文件路径
-    ONNX_VISIBLE_MODEL_PATH = r"target_module\models\A_S_F_rgb_FFCA.onnx"
+    ONNX_VISIBLE_MODEL_PATH = os.path.join(BASE_DIR, "target_module", "models", "A_S_F_rgb_FFCA.onnx")
     # 红外 ONNX 模型文件路径
-    ONNX_INFRARED_MODEL_PATH = r"target_module\models\A_S_F_ir_FFCA.onnx"
+    ONNX_INFRARED_MODEL_PATH = os.path.join(BASE_DIR, "target_module", "models", "A_S_F_ir_FFCA.onnx")
 
-    # 视频跟踪默认算法，可选 bytetrack / ocsort / botsort / official_ocsort / official_botsort
+    # 视频跟踪默认算法，可选 bytetrack / ocsort / botsort / dist_tracker / official_ocsort / official_botsort
     TRACKER_TYPE = "botsort"
     # 新轨迹激活所需的最低检测置信度
     TRACKER_ACTIVATION_THRESH = 0.3
@@ -36,6 +36,13 @@ class Config:
     TRACKER_MIN_HITS = 3
     # 基于中心点距离做关联时的距离阈值，单位像素
     TRACKER_DIST_THRESH = 150.0
+
+    # Dist-Tracker FLIT 代价中 L2 距离权重，IoU distance 权重为 1 - gamma
+    DIST_TRACKER_GAMMA = 0.25
+    # Dist-Tracker FLIT 匹配代价阈值，越小越严格
+    DIST_TRACKER_MATCH_THRESH = 0.8
+    # Dist-Tracker FLIT 是否融合检测置信度
+    DIST_TRACKER_FUSE_SCORE = True
 
     # 全局运动补偿算法类型，主要供 BoT-SORT 使用
     GMC_METHOD = "sparse_flow"

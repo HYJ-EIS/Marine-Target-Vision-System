@@ -29,7 +29,14 @@ from target_module.image_detect_module.utils.file_utils import get_file_type
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 
 
-TRACKER_CHOICES = ["bytetrack", "ocsort", "botsort", "official_ocsort", "official_botsort"]
+TRACKER_CHOICES = [
+    "bytetrack",
+    "ocsort",
+    "botsort",
+    "dist_tracker",
+    "official_ocsort",
+    "official_botsort",
+]
 
 
 def format_mot_result_line(frame_id: int, box: dict) -> str:

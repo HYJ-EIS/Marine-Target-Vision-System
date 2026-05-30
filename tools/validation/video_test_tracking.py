@@ -63,7 +63,7 @@ def parse_args() -> argparse.Namespace:
         "--tracker",
         type=str,
         default="",
-        choices=["", "bytetrack", "ocsort", "botsort", "official_ocsort", "official_botsort"],
+        choices=["", "bytetrack", "ocsort", "botsort", "dist_tracker", "official_ocsort", "official_botsort"],
         help="追踪算法（留空使用 Config 默认值）",
     )
     parser.add_argument("--show", action="store_true", help="实时窗口预览（需要 GUI）")

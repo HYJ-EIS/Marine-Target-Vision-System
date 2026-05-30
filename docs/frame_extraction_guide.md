@@ -117,7 +117,7 @@
 检测框出来后，会交给 `MultiObjectTracker`：
 
 - 跟踪器类型由 `--tracker` 指定
-- 当前可选 `bytetrack`、`ocsort`、`botsort`、`official_ocsort`、`official_botsort`
+- 当前可选 `bytetrack`、`ocsort`、`botsort`、`dist_tracker`、`official_ocsort`、`official_botsort`
 - 默认值来自 `Config.EXTERNAL_FRAMES_TRACKER`
 
 跟踪器初始化时会使用原始视频 FPS：
