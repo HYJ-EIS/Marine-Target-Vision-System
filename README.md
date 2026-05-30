@@ -170,6 +170,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 
 - 可见光模型：`target_module/models/A_S_F_rgb_FFCA.onnx`
 - 红外模型：`target_module/models/A_S_F_ir_FFCA.onnx`
+- 附加模型：`target_module/models/yolov5n.onnx`，用于轻量 YOLOv5n ONNX 兼容性或实验验证；当前默认检测链路仍使用上述 FFCA ONNX 模型
 - 模型路径由 `Config` 使用跨平台 `os.path.join(...)` 生成，可在 Windows 和 Linux/WSL 下直接解析
 
 ### 5.2 当前默认阈值
@@ -666,6 +667,8 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 - `refactor`: ONNX 模型默认路径改为基于 `Config.BASE_DIR` 和 `os.path.join(...)` 构造，避免 Windows 路径分隔符在 Linux/WSL 下失效
 - `test`: 新增 `dist_tracker` 合成检测框单元测试、tracker effect 导出 helper 测试和默认模型路径测试
 - `docs`: README、抽帧说明和 AGENTS 规则同步更新，明确 Dist-Tracker 配置、工具用法和修改代码后更新 README 的要求
+- `docs`: 新增 `docs/MSDC_ELT_IMPLEMENTATION_PLAN.md`，记录 MS-DC-ELT 生命周期跟踪方案的后续实现计划
+- `chore`: 新增 `target_module/models/yolov5n.onnx` 附加模型文件，默认运行配置未切换到该模型
 
 ### 2026-04-23
 
