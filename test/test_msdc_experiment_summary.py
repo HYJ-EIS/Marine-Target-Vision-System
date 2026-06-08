@@ -107,6 +107,34 @@ def test_ablation_results_keeps_variant_names(tmp_path):
     assert rows[1]["variant"] == "Ours-no-template"
 
 
+def test_ablation_results_reports_roi_redetect_switch_for_known_variants(tmp_path):
+    variants = [
+        "Ours-full",
+        "Ours-lite-no-motion",
+        "Ours-lite-no-low-det",
+        "Ours-no-template",
+        "Ours-no-reacquire",
+        "Ours-no-removed-guard",
+    ]
+    summary = tmp_path / "eval" / "motchallenge_summary.csv"
+    _write_csv(summary, [
+        {"tracker": variant, "HOTA": "60", "DetA": "61", "AssA": "62", "MOTA": "63", "IDF1": "64", "IDSW": "1", "FP": "2", "FN": "3", "IDTP": "4", "IDFP": "5", "IDFN": "6"}
+        for variant in variants
+    ])
+
+    rows = write_ablation_results(
+        metric_rows=load_metric_rows(summary),
+        output_csv=tmp_path / "ablation_results.csv",
+        run_name="ablation_full",
+        benchmark_root=tmp_path,
+    )
+
+    assert "MSDC_USE_ROI_REDETECT" in rows[0]
+    assert {row["variant"]: row["MSDC_USE_ROI_REDETECT"] for row in rows} == {
+        variant: "True" for variant in variants
+    }
+
+
 def test_analysis_text_reports_direction_without_inventing_values():
     rows = [
         {"method": "FFCA-YOLO + OC-SORT", "IDF1": "50", "IDSW": "10", "HOTA": "20", "AssA": "30", "FP": "5", "FN": "100"},
@@ -125,6 +153,19 @@ def test_path_manifest_lists_existing_outputs(tmp_path):
     mot_file.write_text("", encoding="utf-8")
     rows = write_path_manifest(tmp_path, tmp_path / "manifest.csv")
     assert any(row["kind"] == "mot_result" and row["path"].endswith("seq.txt") for row in rows)
+
+
+def test_path_manifest_lists_commands_and_failures_outputs(tmp_path):
+    commands = tmp_path / "metadata" / "commands.jsonl"
+    failures = tmp_path / "metadata" / "failures.csv"
+    commands.parent.mkdir(parents=True)
+    commands.write_text("{}", encoding="utf-8")
+    failures.write_text("stage,error\nexport,failed\n", encoding="utf-8")
+
+    rows = write_path_manifest(tmp_path, tmp_path / "manifest.csv")
+
+    assert any(row["kind"] == "commands_jsonl" and row["path"].endswith("commands.jsonl") for row in rows)
+    assert any(row["kind"] == "failure_csv" and row["path"].endswith("failures.csv") for row in rows)
 
 
 def test_cli_preflights_required_summaries_before_creating_outputs(tmp_path, monkeypatch, capsys):
