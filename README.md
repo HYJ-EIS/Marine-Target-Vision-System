@@ -464,7 +464,7 @@ conda run -n ship_detect python tools/evaluation/export_mot_results.py --input "
 
 ### 10.5 `tools/evaluation/motchallenge_eval.py`
 
-调用 vendored TrackEval 计算正式 MOTChallenge 风格指标：HOTA、MOTA、IDF1。脚本会自动把仓库根目录加入 `sys.path`，可从仓库根直接执行。输入必须包含真实跨帧身份标注，GT 目录结构为 `<gt-root>/<seq>/seqinfo.ini` 和 `<gt-root>/<seq>/gt/gt.txt`。
+调用 vendored TrackEval 计算正式 MOTChallenge 风格指标：HOTA、DetA、AssA、MOTA、IDF1。若当前 TrackEval 结果未暴露 DetA / AssA，summary 中对应值写为 `N/A`。脚本会自动把仓库根目录加入 `sys.path`，可从仓库根直接执行。输入必须包含真实跨帧身份标注，GT 目录结构为 `<gt-root>/<seq>/seqinfo.ini` 和 `<gt-root>/<seq>/gt/gt.txt`。
 
 示例：
 ```powershell
@@ -1078,6 +1078,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 
 ### 2026-06-04
 
+- `test`: TrackEval MOT summary 新增 DetA / AssA 输出列和回归测试，缺失时保留 `N/A`
 - `fix`: `tools/evaluation/msdc_dataset_benchmark.py --duration-seconds` 现在会把换算后的有效帧数同步传给 `render_mot_video.py`，避免 1 分钟切片评测误渲染完整视频
 - `fix`: MS-DC-ELT 收紧浪花误检入口，motion seed 在海面连通域爆炸时限流，ROI 重检过滤 tiny / existing-overlap box 并限制每 ROI 候选数，low-only 候选靠近 active track 时使用更宽 suppression
 - `fix`: MS-DC-ELT 增加受约束 active 保活，近期有 low/roi-low 真实证据且当前有 template/motion 辅助支持时，active 可短时延迟进入 lost，减少小 UAV 断续低阈值检测导致的 ID 碎片

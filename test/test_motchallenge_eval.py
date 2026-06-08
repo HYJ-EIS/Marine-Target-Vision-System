@@ -67,3 +67,9 @@ def test_motchallenge_eval_reports_formal_metrics_for_perfect_track():
     assert perfect["MOTA"] == 100.0
     assert perfect["IDF1"] == 100.0
     assert perfect["HOTA"] == 100.0
+    assert perfect["DetA"] == 100.0
+    assert perfect["AssA"] == 100.0
+
+    summary_text = (output_root / "motchallenge_summary.csv").read_text(encoding="utf-8-sig")
+    assert "DetA" in summary_text
+    assert "AssA" in summary_text

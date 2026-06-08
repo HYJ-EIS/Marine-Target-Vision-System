@@ -80,6 +80,13 @@ def _validate_inputs(gt_root: Path, trackers_root: Path,
                 raise FileNotFoundError(f"Missing tracker result file: {tracker_file}")
 
 
+def _mean_hota_field(combined: dict, field: str) -> float | str:
+    hota_values = combined.get("HOTA", {})
+    if field not in hota_values:
+        return "N/A"
+    return round(float(np.mean(hota_values[field])) * 100.0, 5)
+
+
 def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, dict[str, float]]:
     dataset_res = output_res["MotChallenge2DBox"]
     summary: dict[str, dict[str, float]] = {}
@@ -92,6 +99,8 @@ def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, 
             "HOTA": round(hota, 5),
             "MOTA": round(mota, 5),
             "IDF1": round(idf1, 5),
+            "DetA": _mean_hota_field(combined, "DetA"),
+            "AssA": _mean_hota_field(combined, "AssA"),
             "IDSW": int(combined["CLEAR"]["IDSW"]),
             "FP": int(combined["CLEAR"]["CLR_FP"]),
             "FN": int(combined["CLEAR"]["CLR_FN"]),
@@ -105,7 +114,20 @@ def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, 
 def _write_summary_csv(summary: dict[str, dict[str, float]], output_root: Path) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     csv_path = output_root / "motchallenge_summary.csv"
-    fields = ["tracker", "HOTA", "MOTA", "IDF1", "IDSW", "FP", "FN", "IDTP", "IDFP", "IDFN"]
+    fields = [
+        "tracker",
+        "HOTA",
+        "DetA",
+        "AssA",
+        "MOTA",
+        "IDF1",
+        "IDSW",
+        "FP",
+        "FN",
+        "IDTP",
+        "IDFP",
+        "IDFN",
+    ]
     with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
@@ -200,9 +222,10 @@ def main() -> None:
     print("\nFormal MOTChallenge metrics (percent, TrackEval):")
     for tracker, values in summary.items():
         print(
-            f"{tracker}: HOTA={values['HOTA']:.5f}, "
-            f"MOTA={values['MOTA']:.5f}, IDF1={values['IDF1']:.5f}, "
-            f"IDSW={values['IDSW']}, FP={values['FP']}, FN={values['FN']}"
+            f"{tracker}: HOTA={values['HOTA']}, DetA={values['DetA']}, "
+            f"AssA={values['AssA']}, MOTA={values['MOTA']}, "
+            f"IDF1={values['IDF1']}, IDSW={values['IDSW']}, "
+            f"FP={values['FP']}, FN={values['FN']}"
         )
 
 
