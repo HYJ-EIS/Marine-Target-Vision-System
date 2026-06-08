@@ -208,7 +208,7 @@ def quote_command(cmd: list[str]) -> str:
 
 def run_command(label: str, cmd: list[str]) -> None:
     print(f"[{label}] {quote_command(cmd)}", flush=True)
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=_ROOT)
 
 
 def get_commit_hash() -> str:
@@ -225,8 +225,19 @@ def get_commit_hash() -> str:
     return result.stdout.strip() or "N/A"
 
 
+def resolve_output_root(output_root: Path) -> Path:
+    path = Path(output_root)
+    if not path.is_absolute():
+        path = _ROOT / path
+    return path.resolve()
+
+
+def _absolute_path(path: Path) -> str:
+    return str(Path(path).resolve())
+
+
 def latest_run_path(output_root: Path) -> Path:
-    return output_root / LATEST_RUN_FILENAME
+    return resolve_output_root(output_root) / LATEST_RUN_FILENAME
 
 
 def write_latest_run(path: Path, payload: dict[str, str]) -> None:
@@ -273,15 +284,15 @@ def build_latest_payload(
     ablation_root = ablation_output_root / "ablation_full"
     speed_root = speed_output_root / f"speed_{frames}"
     return {
-        "run_root": str(run_root),
-        "main_results_csv": str(summary_output_root / "main_results.csv"),
-        "ablation_results_csv": str(summary_output_root / "ablation_results.csv"),
-        "speed_results_csv": str(summary_output_root / "speed_results.csv"),
-        "report_path": str(run_root / "MSDC_EXPERIMENT_REPORT.md"),
-        "docs_result_path": str(_ROOT / "docs" / "MSDC_EXPERIMENT_RESULT.md"),
-        "main_root": str(main_root),
-        "ablation_root": str(ablation_root),
-        "speed_root": str(speed_root),
+        "run_root": _absolute_path(run_root),
+        "main_results_csv": _absolute_path(summary_output_root / "main_results.csv"),
+        "ablation_results_csv": _absolute_path(summary_output_root / "ablation_results.csv"),
+        "speed_results_csv": _absolute_path(summary_output_root / "speed_results.csv"),
+        "report_path": _absolute_path(run_root / "MSDC_EXPERIMENT_REPORT.md"),
+        "docs_result_path": _absolute_path(_ROOT / "docs" / "MSDC_EXPERIMENT_RESULT.md"),
+        "main_root": _absolute_path(main_root),
+        "ablation_root": _absolute_path(ablation_root),
+        "speed_root": _absolute_path(speed_root),
     }
 
 
@@ -292,8 +303,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--speed-frames", type=int, default=1000)
     parser.add_argument("--progress-interval", type=int, default=500)
     parser.add_argument("--run-id", default="", help="Top-level run id; default is timestamp")
-    parser.add_argument("--smoke", action="store_true", help="Run a 100-frame smoke benchmark only")
-    parser.add_argument("--run-formal", action="store_true", help="Execute full formal main/ablation/speed runs")
+    run_mode = parser.add_mutually_exclusive_group()
+    run_mode.add_argument("--smoke", action="store_true", help="Run a 100-frame smoke benchmark only")
+    run_mode.add_argument("--run-formal", action="store_true", help="Execute full formal main/ablation/speed runs")
     parser.add_argument("--print-latest", action="store_true", help="Print paths from latest_run.json and exit")
     parser.add_argument("--check-latest", action="store_true", help="Verify paths recorded in latest_run.json and exit")
     args = parser.parse_args(argv)
@@ -311,13 +323,17 @@ def _print_plan(commands: list[tuple[str, list[str]]]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    output_root = Path(args.output_root)
+    output_root = resolve_output_root(Path(args.output_root))
 
     if args.print_latest:
         print_latest(output_root)
         return
     if args.check_latest:
-        check_latest(output_root)
+        try:
+            check_latest(output_root)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
         return
 
     run_id = args.run_id or time.strftime("%Y%m%d_%H%M%S")
