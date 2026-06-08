@@ -924,6 +924,25 @@ conda run -n ship_detect python tools/evaluation/msdc_experiment_summary.py --ma
 
 该脚本只汇总已有正式 run 产物，不重新运行检测或跟踪；执行前会先检查 main/ablation 的 `eval/motchallenge_summary.csv` 是否存在且非空，失败时不创建部分输出。脚本会生成 `main_results.csv`、`ablation_results.csv`、稳定字段的 `speed_results.csv`、`analysis_*.md`、最终 Markdown 报告和 `path_manifest.csv`。缺失指标或速度字段统一写为 `N/A`，空/异常速度文件按 malformed 记录；manifest 会在报告和 docs 结果写完后生成，并包含 summary、analysis、report/docs、`commands.jsonl` 和 `failures.csv` 等路径。
 
+论文 phase-1 实验编排入口：
+
+```powershell
+# 默认只打印 main / ablation / speed / summary 计划命令，不启动正式长跑
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py
+
+# 100 帧 smoke，会写入 results/msdc_paper_phase1/<run-id>/smoke，不更新 latest formal metadata
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --smoke --run-id "<run-id>"
+
+# 正式完整实验必须显式加 --run-formal
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id "<run-id>"
+
+# 查看或校验最近一次正式实验输出路径
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --print-latest
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --check-latest
+```
+
+该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果路径。未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
+
 结果表模板：
 
 - `docs/MSDC_EXPERIMENT_RESULT_TEMPLATE.md`
