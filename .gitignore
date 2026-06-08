@@ -4,6 +4,7 @@ yolo_detect/
 __pycache__/
 **/__pycache__/
 results/
+outputs/
 runs/
 uploads/
 output_rtsp_video/**/__pycache__/

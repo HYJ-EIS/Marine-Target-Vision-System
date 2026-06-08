@@ -18,10 +18,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
+
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 # TrackEval still uses removed NumPy aliases in some code paths.
 if not hasattr(np, "float"):

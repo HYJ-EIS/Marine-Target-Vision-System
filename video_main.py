@@ -48,6 +48,18 @@ from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from target_module.image_detect_module.utils.file_utils import get_file_type
 
 
+TRACKER_CHOICES = [
+    "",
+    "bytetrack",
+    "ocsort",
+    "botsort",
+    "dist_tracker",
+    "official_ocsort",
+    "official_botsort",
+    "msdc_elt",
+]
+
+
 # 帧获取方式：仅在 RTSP 模式下有效
 USEOPENCV = False
 FFMPEG = False
@@ -56,11 +68,84 @@ FFMPEG = False
 def parse_args():
     parser = argparse.ArgumentParser(description="视频目标检测 + 多目标追踪")
     parser.add_argument("--input", default="", help="本地视频文件路径（留空使用 RTSP 流）")
-    parser.add_argument("--tracker", default="", choices=["", "bytetrack", "ocsort", "botsort", "dist_tracker", "official_ocsort", "official_botsort"],
+    parser.add_argument("--tracker", default="", choices=TRACKER_CHOICES,
                         help="追踪算法（留空使用 Config 默认值）")
     parser.add_argument("--output", default="", help="输出视频路径（留空使用默认值）")
     parser.add_argument("--no-display", action="store_true", help="不显示窗口（无 GUI 环境）")
     return parser.parse_args()
+
+
+def _resolve_tracker_type(tracker_arg: str) -> str:
+    return tracker_arg if tracker_arg else Config.TRACKER_TYPE
+
+
+def _is_msdc_tracker(tracker_type: str | None) -> bool:
+    return tracker_type == "msdc_elt"
+
+
+def _get_msdc_low_conf_thresh(file_type: str) -> float:
+    if file_type == "infrared":
+        return float(Config.MSDC_LOW_CONF_INFRARED)
+    return float(Config.MSDC_LOW_CONF_VISIBLE)
+
+
+def _safe_run_name(input_path: str) -> str:
+    source_name = os.path.splitext(os.path.basename(input_path))[0] if input_path else "rtsp"
+    safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in source_name)
+    return safe_name[:80] or "run"
+
+
+def _resolve_msdc_paths(input_path: str, output_arg: str) -> tuple[str, str, str]:
+    run_id = f"{_safe_run_name(input_path)}_{time.strftime('%Y%m%d_%H%M%S')}"
+    run_dir = os.path.join(Config.BASE_DIR, "outputs", "msdc_elt", run_id)
+    output_path = output_arg or os.path.join(run_dir, "annotated.mp4")
+    debug_dir = run_dir
+    return run_dir, output_path, debug_dir
+
+
+def _run_msdc_low_threshold_detection(detector, frame, file_type: str) -> list[dict]:
+    if not bool(getattr(Config, "MSDC_USE_LOW_DET", True)):
+        return []
+    processor = getattr(detector, "processor", None)
+    if processor is None or not hasattr(processor, "process_frame"):
+        raise RuntimeError("detector.processor.process_frame(frame, file_type, conf_override=...) 不可用")
+
+    low_conf = _get_msdc_low_conf_thresh(file_type)
+    low_stats = processor.process_frame(frame, file_type, conf_override=low_conf)
+    if low_stats is None:
+        raise RuntimeError(f"低阈值检测失败: file_type={file_type}, conf_override={low_conf}")
+    return low_stats.get("boxes", [])
+
+
+def _update_tracking_for_frame(
+    tracker_type: str,
+    tracker,
+    lifecycle_tracker,
+    detector,
+    frame,
+    frame_idx: int,
+    file_type: str,
+    result: dict,
+) -> list[dict]:
+    boxes = result.get("data", {}).get("boxes", [])
+    if _is_msdc_tracker(tracker_type):
+        if lifecycle_tracker is None:
+            raise RuntimeError("MS-DC-ELT tracker 未初始化")
+        low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
+        tracked_boxes = lifecycle_tracker.update(
+            frame=frame,
+            frame_idx=frame_idx,
+            file_type=file_type,
+            high_boxes=boxes,
+            low_boxes=low_boxes,
+        )
+    else:
+        if tracker is None:
+            raise RuntimeError("baseline tracker 未初始化")
+        tracked_boxes = tracker.update(boxes, frame.shape, frame=frame)
+
+    result.setdefault("data", {})["boxes"] = tracked_boxes
+    return tracked_boxes
 
 
 # ── RTSP 辅助函数 ─────────────────────────────────────────────────────────
@@ -85,6 +170,9 @@ def save_latest_frame_with_ffmpeg(rtsp_url, output_path):
 def main():
     args = parse_args()
     is_local_file = bool(args.input)
+    selected_tracker_type = _resolve_tracker_type(args.tracker)
+    use_msdc_elt = _is_msdc_tracker(selected_tracker_type)
+    file_type = "visible"
 
     # ── 初始化检测器 ──────────────────────────────────────────────────
     print("[INFO] 初始化检测器...")
@@ -121,17 +209,36 @@ def main():
         print(f"[INFO] RTSP 流: {Config.VIDEO_RTSP_INPUT}")
         print(f"[INFO] {frame_w}x{frame_h} @ {fps:.1f} fps")
 
+    # ── 初始化输出 ────────────────────────────────────────────────────
+    msdc_debug_dir = None
+    if use_msdc_elt:
+        msdc_run_dir, output_path, msdc_debug_dir = _resolve_msdc_paths(args.input, args.output)
+        os.makedirs(msdc_run_dir, exist_ok=True)
+        print(f"[INFO] MS-DC-ELT 输出目录: {os.path.abspath(msdc_run_dir)}")
+        print(f"[INFO] MS-DC-ELT debug目录: {os.path.abspath(msdc_debug_dir)}")
+    else:
+        output_path = args.output or Config.VIDEO_OUTPUT_PATH
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
     # ── 初始化追踪器 ──────────────────────────────────────────────────
-    tracker_type = args.tracker if args.tracker else None
-    tracker = MultiObjectTracker(frame_rate=fps, tracker_type=tracker_type)
+    if use_msdc_elt:
+        from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
+        tracker = None
+        lifecycle_tracker = MSDCLifecycleTracker(
+            config=Config,
+            file_type=file_type,
+            debug_dir=msdc_debug_dir,
+            processor=getattr(detector, "processor", None),
+        )
+        print("[INFO] 使用 MS-DC-ELT-lite tracker")
+    else:
+        tracker_type = args.tracker if args.tracker else None
+        tracker = MultiObjectTracker(frame_rate=fps, tracker_type=tracker_type)
+        lifecycle_tracker = None
 
     # 轨迹历史（用于可视化轨迹线）
     track_history: dict[int, list[tuple[int, int]]] = {}
     TRAIL_LEN = 30
-
-    # ── 初始化输出 ────────────────────────────────────────────────────
-    output_path = args.output or Config.VIDEO_OUTPUT_PATH
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     if is_local_file:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -197,8 +304,27 @@ def main():
 
         boxes = result.get("data", {}).get("boxes", [])
 
-        # 追踪（传入 frame 供 GMC 使用）
-        tracked_boxes = tracker.update(boxes, frame.shape, frame=frame)
+        # 追踪（baseline 传入 frame 供 GMC 使用；MS-DC-ELT 额外执行低阈值检测）
+        try:
+            tracked_boxes = _update_tracking_for_frame(
+                tracker_type=selected_tracker_type,
+                tracker=tracker,
+                lifecycle_tracker=lifecycle_tracker,
+                detector=detector,
+                frame=frame,
+                frame_idx=frame_count - 1,
+                file_type=file_type,
+                result=result,
+            )
+        except RuntimeError as e:
+            if use_msdc_elt:
+                print(f"[ERROR] MS-DC-ELT 处理失败: {e}")
+                if writer:
+                    writer.write(frame)
+                elif output_manager:
+                    output_manager.write_frame(frame)
+                continue
+            raise
 
         # 更新轨迹历史
         for b in tracked_boxes:

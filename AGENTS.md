@@ -24,6 +24,17 @@
 7. 修改视频默认输入源、RTSP 输出地址或默认输出文件时，统一改 `target_module/image_detect_module/config.py` 中的 `Config.VIDEO_RTSP_INPUT`、`Config.VIDEO_RTSP_OUTPUT`、`Config.VIDEO_OUTPUT_PATH`；不要在 `video_main.py` 重新写死。
 8. 每次完成代码修改后都要更新文档README.md。
 
+## Formal Evaluation Reporting
+
+- 每次“正式测试 / 正式评测 / full run / benchmark”完成后，必须同时交付以下结果；缺任一项不能宣称正式测试完成：
+  1. 带标注的可视化视频，至少包含目标框、类别和 track ID；视频必须写入本次 run 的独立 `visualizations/` 目录，不覆盖历史结果。
+  2. MOT 指标汇总，至少包含 `MOTA`、`IDF1`、`IDSW`、`FN`、`FP`；若已有 `HOTA`、`IDTP`、`IDFP`、`IDFN` 也一并汇报。
+  3. 速度统计，至少包含总处理帧数、总耗时、平均单帧耗时和平均 FPS。
+  4. 分阶段耗时，至少拆分为视频读取/解码、检测、低阈值检测或 ROI 重检、motion/template/lifecycle tracker、可视化渲染、结果写盘/导出；不适用的阶段写 `0` 或 `N/A`，不要省略。
+  5. 输出路径清单，包括 MOT txt、TrackEval summary、诊断 JSONL/CSV、可视化 MP4 和速度/耗时统计文件。
+- 如果当前评测脚本没有生成速度或分阶段耗时，先补充计时输出或额外日志，再运行正式测试；不要只凭终端主观估算。
+- 正式测试结果必须写入新的时间戳 run 目录；临时 smoke、失败中断、partial 输出要标清楚或清理，避免和正式结果混在一起。
+
 ## Reference
 
 - 需要接口细节、目录说明或变更记录时，查 `README.md`

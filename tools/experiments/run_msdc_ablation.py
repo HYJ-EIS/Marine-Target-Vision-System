@@ -1,0 +1,163 @@
+"""
+Build or run MS-DC-ELT ablation export commands.
+
+The script does not hard-code dataset paths. By default it prints commands only;
+use --run to execute a smoke/export run with the selected variants.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+ABLATION_VARIANTS = {
+    "Ours-lite-no-motion": {
+        "MSDC_USE_LOW_DET": "1",
+        "MSDC_USE_MOTION": "0",
+        "MSDC_USE_TEMPLATE": "1",
+        "MSDC_USE_REACQUIRE": "1",
+        "MSDC_REUSE_GUARD_ENABLE": "1",
+    },
+    "Ours-lite-no-low-det": {
+        "MSDC_USE_LOW_DET": "0",
+        "MSDC_USE_MOTION": "1",
+        "MSDC_USE_TEMPLATE": "1",
+        "MSDC_USE_REACQUIRE": "1",
+        "MSDC_REUSE_GUARD_ENABLE": "1",
+    },
+    "Ours-no-template": {
+        "MSDC_USE_LOW_DET": "1",
+        "MSDC_USE_MOTION": "1",
+        "MSDC_USE_TEMPLATE": "0",
+        "MSDC_USE_REACQUIRE": "1",
+        "MSDC_REUSE_GUARD_ENABLE": "1",
+    },
+    "Ours-no-reacquire": {
+        "MSDC_USE_LOW_DET": "1",
+        "MSDC_USE_MOTION": "1",
+        "MSDC_USE_TEMPLATE": "1",
+        "MSDC_USE_REACQUIRE": "0",
+        "MSDC_REUSE_GUARD_ENABLE": "1",
+    },
+    "Ours-no-removed-guard": {
+        "MSDC_USE_LOW_DET": "1",
+        "MSDC_USE_MOTION": "1",
+        "MSDC_USE_TEMPLATE": "1",
+        "MSDC_USE_REACQUIRE": "1",
+        "MSDC_REUSE_GUARD_ENABLE": "0",
+    },
+    "Ours-full": {
+        "MSDC_USE_LOW_DET": "1",
+        "MSDC_USE_MOTION": "1",
+        "MSDC_USE_TEMPLATE": "1",
+        "MSDC_USE_REACQUIRE": "1",
+        "MSDC_REUSE_GUARD_ENABLE": "1",
+    },
+}
+
+
+def _quote_command(argv: list[str]) -> str:
+    return " ".join(shlex.quote(item) for item in argv)
+
+
+def _variant_env(variant: str) -> dict[str, str]:
+    return dict(ABLATION_VARIANTS[variant])
+
+
+def build_export_command(
+    input_path: str,
+    output_root: Path,
+    tracker: str,
+    seq_name: str,
+    max_frames: int = 0,
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(_ROOT / "tools" / "evaluation" / "export_mot_results.py"),
+        "--input",
+        input_path,
+        "--output-root",
+        str(output_root),
+        "--tracker",
+        tracker,
+        "--seq-name",
+        seq_name,
+    ]
+    if max_frames > 0:
+        cmd.extend(["--max-frames", str(max_frames)])
+    return cmd
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Print or run MS-DC-ELT ablation MOT export commands")
+    parser.add_argument("--input", required=True, help="Input video path")
+    parser.add_argument("--output-root", default="results/msdc_ablation", help="Root directory for this ablation run")
+    parser.add_argument("--seq-name", default="", help="MOT sequence name; default is input video stem")
+    parser.add_argument(
+        "--trackers",
+        nargs="+",
+        default=["botsort", "ocsort", "msdc_elt"],
+        choices=["botsort", "ocsort", "msdc_elt"],
+        help="Trackers to include",
+    )
+    parser.add_argument(
+        "--variants",
+        nargs="+",
+        default=list(ABLATION_VARIANTS),
+        choices=list(ABLATION_VARIANTS),
+        help="MS-DC-ELT ablation variants to include when tracker msdc_elt is selected",
+    )
+    parser.add_argument("--max-frames", type=int, default=0, help="Smoke/debug only; 0 means full video")
+    parser.add_argument("--run", action="store_true", help="Actually execute commands; default only prints")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    input_path = Path(args.input)
+    seq_name = args.seq_name or input_path.stem
+    run_id = f"{seq_name}_{time.strftime('%Y%m%d_%H%M%S')}"
+    output_root = Path(args.output_root) / run_id
+
+    planned: list[tuple[str, dict[str, str], list[str]]] = []
+    for tracker in args.trackers:
+        if tracker == "msdc_elt":
+            for variant in args.variants:
+                variant_root = output_root / variant
+                cmd = build_export_command(str(input_path), variant_root, tracker, seq_name, args.max_frames)
+                planned.append((variant, _variant_env(variant), cmd))
+        else:
+            tracker_root = output_root / tracker
+            cmd = build_export_command(str(input_path), tracker_root, tracker, seq_name, args.max_frames)
+            planned.append((tracker, {}, cmd))
+
+    for label, env_delta, cmd in planned:
+        env_prefix = " ".join(f"{key}={value}" for key, value in sorted(env_delta.items()))
+        printable = _quote_command(cmd)
+        if env_prefix:
+            printable = f"{env_prefix} {printable}"
+        print(f"[{label}] {printable}")
+
+        if args.run:
+            env = os.environ.copy()
+            env.update(env_delta)
+            subprocess.run(cmd, cwd=str(_ROOT), env=env, check=True)
+
+    if not args.run:
+        print("[INFO] print-only mode; add --run to execute these commands.")
+    if args.max_frames > 0:
+        print("[WARN] --max-frames is for smoke/debug runs, not formal evaluation.")
+    print(f"[INFO] planned output root: {output_root}")
+
+
+if __name__ == "__main__":
+    main()
