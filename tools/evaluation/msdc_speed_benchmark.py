@@ -49,6 +49,8 @@ METHOD_LABELS = {
 }
 
 _ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 def percentile(values: list[float] | tuple[float, ...], q: float) -> float:
@@ -213,6 +215,7 @@ def _run_tracker_benchmark(
         _is_msdc_tracker,
         _run_msdc_high_threshold_detection,
         _run_msdc_low_threshold_detection,
+        _split_msdc_high_from_low_boxes,
         _update_tracking_for_frame,
     )
 
@@ -224,10 +227,10 @@ def _run_tracker_benchmark(
     detector.processor = processor
 
     cap = cv2.VideoCapture(str(input_video))
-    if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video: {input_video}")
-
     try:
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {input_video}")
+
         fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
@@ -266,15 +269,25 @@ def _run_tracker_benchmark(
             tracker_s = 0.0
 
             if _is_msdc_tracker(tracker_type):
-                stage_start = time.perf_counter()
-                with processor.use_stage("high_det"):
-                    boxes = _run_msdc_high_threshold_detection(detector, frame, file_type)
-                high_det_s = time.perf_counter() - stage_start
+                if bool(getattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", False)):
+                    stage_start = time.perf_counter()
+                    with processor.use_stage("low_det"):
+                        low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
+                    low_det_s = time.perf_counter() - stage_start
 
-                stage_start = time.perf_counter()
-                with processor.use_stage("low_det"):
-                    low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
-                low_det_s = time.perf_counter() - stage_start
+                    stage_start = time.perf_counter()
+                    boxes = _split_msdc_high_from_low_boxes(low_boxes, file_type)
+                    high_det_s = time.perf_counter() - stage_start
+                else:
+                    stage_start = time.perf_counter()
+                    with processor.use_stage("high_det"):
+                        boxes = _run_msdc_high_threshold_detection(detector, frame, file_type)
+                    high_det_s = time.perf_counter() - stage_start
+
+                    stage_start = time.perf_counter()
+                    with processor.use_stage("low_det"):
+                        low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
+                    low_det_s = time.perf_counter() - stage_start
 
                 stage_start = time.perf_counter()
                 with processor.use_stage("tracker_update"):
