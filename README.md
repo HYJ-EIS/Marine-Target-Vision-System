@@ -914,7 +914,7 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 conda run -n ship_detect python tools/evaluation/msdc_experiment_summary.py --main-root "results/msdc_paper_phase1/<run-id>/main" --ablation-root "results/msdc_paper_phase1/<run-id>/ablation" --speed-csv "results/msdc_paper_phase1/<run-id>/speed/speed_results.csv" --output-root "results/msdc_paper_phase1/<run-id>/summary" --report-output "results/msdc_paper_phase1/<run-id>/MSDC_EXPERIMENT_REPORT.md" --docs-output "docs/MSDC_EXPERIMENT_RESULT.md"
 ```
 
-该脚本只汇总已有正式 run 产物，不重新运行检测或跟踪；会读取 main/ablation 的 `eval/motchallenge_summary.csv`，生成 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、`path_manifest.csv`、`analysis_*.md` 和最终 Markdown 报告。缺失指标或速度文件统一写为 `N/A` 并在报告中列出，不推断实验数值。
+该脚本只汇总已有正式 run 产物，不重新运行检测或跟踪；执行前会先检查 main/ablation 的 `eval/motchallenge_summary.csv` 是否存在且非空，失败时不创建部分输出。脚本会生成 `main_results.csv`、`ablation_results.csv`、稳定字段的 `speed_results.csv`、`analysis_*.md`、最终 Markdown 报告和 `path_manifest.csv`。缺失指标或速度字段统一写为 `N/A`，空/异常速度文件按 malformed 记录；manifest 会在报告和 docs 结果写完后生成，并包含 summary、analysis、report/docs、`commands.jsonl` 和 `failures.csv` 等路径。
 
 结果表模板：
 

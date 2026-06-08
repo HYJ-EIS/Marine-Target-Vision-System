@@ -5,10 +5,37 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 
 METRIC_FIELDS = ["HOTA", "DetA", "AssA", "MOTA", "IDF1", "IDSW", "FP", "FN", "IDTP", "IDFP", "IDFN"]
+SPEED_FIELDS = [
+    "run_id",
+    "commit_hash",
+    "video_path",
+    "seq_name",
+    "tracker",
+    "method",
+    "resolution",
+    "requested_frames",
+    "processed_frames",
+    "total_time_s",
+    "mean_fps",
+    "mean_latency_ms",
+    "p50_latency_ms",
+    "p95_latency_ms",
+    "peak_memory_mb",
+    "detector_calls_total",
+    "detector_calls_high_det",
+    "detector_calls_low_det",
+    "detector_calls_tracker_update",
+    "mean_read_ms",
+    "mean_high_det_ms",
+    "mean_low_det_ms",
+    "mean_tracker_ms",
+]
+SPEED_OUTPUT_FIELDS = [*SPEED_FIELDS, "status", "failure"]
 
 METHOD_LABELS = {
     "ocsort": "FFCA-YOLO + OC-SORT",
@@ -24,18 +51,37 @@ ABLATION_FIELDS = [
     "MSDC_USE_MOTION",
     "MSDC_USE_TEMPLATE",
     "MSDC_USE_REACQUIRE",
+    "MSDC_USE_ROI_REDETECT",
     "MSDC_REUSE_GUARD_ENABLE",
 ]
 
-PATH_PATTERNS = {
-    "mot_result": "**/trackers/*/data/*.txt",
-    "trackeval_summary": "**/eval/motchallenge_summary.csv",
-    "diagnostic_csv": "**/diagnostics/**/*.csv",
-    "diagnostic_jsonl": "**/trackers/*/diagnostics/**/*.jsonl",
-    "visualization_mp4": "**/visualizations/**/*.mp4",
-    "speed_csv": "**/speed_results.csv",
-    "metadata_json": "**/run_metadata.json",
+ABLATION_SWITCH_DEFAULTS = {field: "True" for field in ABLATION_FIELDS}
+ABLATION_SWITCH_OVERRIDES = {
+    "Ours-lite-no-low-det": {"MSDC_USE_LOW_DET": "False"},
+    "Ours-lite-no-motion": {"MSDC_USE_MOTION": "False"},
+    "Ours-no-template": {"MSDC_USE_TEMPLATE": "False"},
+    "Ours-no-reacquire": {"MSDC_USE_REACQUIRE": "False"},
+    "Ours-no-roi-redetect": {"MSDC_USE_ROI_REDETECT": "False"},
+    "Ours-no-roi": {"MSDC_USE_ROI_REDETECT": "False"},
+    "Ours-no-removed-guard": {"MSDC_REUSE_GUARD_ENABLE": "False"},
 }
+
+PATH_PATTERNS = [
+    ("mot_result", "**/trackers/*/data/*.txt"),
+    ("trackeval_summary", "**/eval/motchallenge_summary.csv"),
+    ("summary_csv", "**/main_results.csv"),
+    ("summary_csv", "**/ablation_results.csv"),
+    ("diagnostic_csv", "**/diagnostics/**/*.csv"),
+    ("diagnostic_jsonl", "**/trackers/*/diagnostics/**/*.jsonl"),
+    ("visualization_mp4", "**/visualizations/**/*.mp4"),
+    ("speed_csv", "**/speed_results.csv"),
+    ("metadata_json", "**/run_metadata.json"),
+    ("commands_jsonl", "**/commands.jsonl"),
+    ("failure_csv", "**/failures.csv"),
+    ("analysis_markdown", "**/analysis_*.md"),
+    ("report_markdown", "**/MSDC_EXPERIMENT_REPORT.md"),
+    ("docs_markdown", "**/MSDC_EXPERIMENT_RESULT.md"),
+]
 
 
 def _read_csv(path: str | Path) -> list[dict]:
@@ -58,6 +104,19 @@ def load_metric_rows(summary_csv: str | Path) -> list[dict]:
     if not rows:
         raise ValueError(f"No metric rows found: {summary_csv}")
     return rows
+
+
+def _preflight_metric_rows(main_summary_csv: Path, ablation_summary_csv: Path) -> tuple[list[dict], list[dict]]:
+    loaded = []
+    for label, path in [("main", main_summary_csv), ("ablation", ablation_summary_csv)]:
+        if not path.is_file():
+            raise ValueError(f"Missing required summary CSV for {label}: {path}")
+        try:
+            rows = load_metric_rows(path)
+        except ValueError as exc:
+            raise ValueError(f"Empty required summary CSV for {label}: {path}") from exc
+        loaded.append(rows)
+    return loaded[0], loaded[1]
 
 
 def _metric_value(row: dict, field: str) -> str:
@@ -100,13 +159,9 @@ def write_main_results(
 
 
 def _ablation_switches(variant: str) -> dict[str, str]:
-    return {
-        "MSDC_USE_LOW_DET": "False" if variant == "Ours-lite-no-low-det" else "True",
-        "MSDC_USE_MOTION": "False" if variant == "Ours-lite-no-motion" else "True",
-        "MSDC_USE_TEMPLATE": "False" if variant == "Ours-no-template" else "True",
-        "MSDC_USE_REACQUIRE": "False" if variant == "Ours-no-reacquire" else "True",
-        "MSDC_REUSE_GUARD_ENABLE": "False" if variant == "Ours-no-removed-guard" else "True",
-    }
+    switches = dict(ABLATION_SWITCH_DEFAULTS)
+    switches.update(ABLATION_SWITCH_OVERRIDES.get(variant, {}))
+    return switches
 
 
 def write_ablation_results(
@@ -190,7 +245,7 @@ def _collect_manifest_rows(roots: list[Path]) -> list[dict]:
     for root in roots:
         if not root.exists():
             continue
-        for kind, pattern in PATH_PATTERNS.items():
+        for kind, pattern in PATH_PATTERNS:
             for path in sorted(root.glob(pattern)):
                 key = (kind, str(path))
                 if key in seen:
@@ -206,6 +261,14 @@ def write_path_manifest(root: str | Path, output_csv: str | Path) -> list[dict]:
     return rows
 
 
+def _append_manifest_path(rows: list[dict], kind: str, path: Path, require_exists: bool = True) -> None:
+    path_text = str(path)
+    if (not require_exists or path.is_file()) and not any(
+        row["kind"] == kind and row["path"] == path_text for row in rows
+    ):
+        rows.append({"kind": kind, "path": path_text})
+
+
 def _read_optional_csv(path: Path) -> list[dict]:
     if path.is_file():
         return _read_csv(path)
@@ -213,21 +276,35 @@ def _read_optional_csv(path: Path) -> list[dict]:
 
 
 def _write_missing_speed_csv(path: Path, source: str) -> list[dict]:
-    rows = [{
-        "source": source,
+    row = {field: "N/A" for field in SPEED_FIELDS}
+    row.update({
         "status": "missing",
-        "total_frames": "N/A",
-        "total_elapsed_sec": "N/A",
-        "avg_frame_ms": "N/A",
-        "avg_fps": "N/A",
         "failure": f"Speed CSV not found: {source}",
-    }]
-    _write_csv(
-        path,
-        rows,
-        ["source", "status", "total_frames", "total_elapsed_sec", "avg_frame_ms", "avg_fps", "failure"],
-    )
+    })
+    rows = [row]
+    _write_csv(path, rows, SPEED_OUTPUT_FIELDS)
     return rows
+
+
+def _write_malformed_speed_csv(path: Path, source: str, detail: str) -> list[dict]:
+    row = {field: "N/A" for field in SPEED_FIELDS}
+    row.update({
+        "status": "malformed",
+        "failure": f"Malformed speed CSV: {source}; {detail}",
+    })
+    rows = [row]
+    _write_csv(path, rows, SPEED_OUTPUT_FIELDS)
+    return rows
+
+
+def _normalize_speed_rows(rows: list[dict]) -> list[dict]:
+    normalized = []
+    for row in rows:
+        output_row = {field: _metric_value(row, field) for field in SPEED_FIELDS}
+        output_row["status"] = _metric_value(row, "status") if row.get("status") else "ok"
+        output_row["failure"] = _metric_value(row, "failure") if row.get("failure") else ""
+        normalized.append(output_row)
+    return normalized
 
 
 def _materialize_speed_csv(speed_csv: str | Path | None, output_csv: Path) -> list[dict]:
@@ -236,12 +313,15 @@ def _materialize_speed_csv(speed_csv: str | Path | None, output_csv: Path) -> li
 
     source = Path(speed_csv)
     if source.is_file():
-        output_csv.parent.mkdir(parents=True, exist_ok=True)
-        output_csv.write_bytes(source.read_bytes())
-        rows = _read_optional_csv(output_csv)
-        if rows:
-            return rows
-        return _write_missing_speed_csv(output_csv, str(source))
+        try:
+            rows = _read_csv(source)
+        except csv.Error as exc:
+            return _write_malformed_speed_csv(output_csv, str(source), str(exc))
+        if not rows:
+            return _write_malformed_speed_csv(output_csv, str(source), "no data rows")
+        rows = _normalize_speed_rows(rows)
+        _write_csv(output_csv, rows, SPEED_OUTPUT_FIELDS)
+        return rows
     return _write_missing_speed_csv(output_csv, str(source))
 
 
@@ -390,16 +470,26 @@ def main() -> None:
     main_root = Path(args.main_root)
     ablation_root = Path(args.ablation_root)
     output_root = Path(args.output_root)
+
+    try:
+        main_metric_rows, ablation_metric_rows = _preflight_metric_rows(
+            main_root / "eval" / "motchallenge_summary.csv",
+            ablation_root / "eval" / "motchallenge_summary.csv",
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
     output_root.mkdir(parents=True, exist_ok=True)
 
     main_rows = write_main_results(
-        metric_rows=load_metric_rows(main_root / "eval" / "motchallenge_summary.csv"),
+        metric_rows=main_metric_rows,
         output_csv=output_root / "main_results.csv",
         run_name=_run_name(main_root, "main"),
         benchmark_root=main_root,
     )
     ablation_rows = write_ablation_results(
-        metric_rows=load_metric_rows(ablation_root / "eval" / "motchallenge_summary.csv"),
+        metric_rows=ablation_metric_rows,
         output_csv=output_root / "ablation_results.csv",
         run_name=_run_name(ablation_root, "ablation"),
         benchmark_root=ablation_root,
@@ -407,17 +497,11 @@ def main() -> None:
     speed_source = args.speed_csv or None
     speed_rows = _materialize_speed_csv(speed_source, output_root / "speed_results.csv")
 
-    manifest_roots = [main_root, ablation_root, output_root]
-    if speed_source:
-        manifest_roots.append(Path(speed_source).parent)
-    manifest_rows = _collect_manifest_rows(manifest_roots)
-    _write_csv(output_root / "path_manifest.csv", manifest_rows, ["kind", "path"])
-
     main_baselines = [METHOD_LABELS["ocsort"], METHOD_LABELS["botsort"]]
     analysis_main = build_analysis_text(main_rows, METHOD_LABELS["Ours-full"], main_baselines)
     analysis_ablation = build_analysis_text(ablation_rows, "Ours-full", [row["variant"] for row in ablation_rows if row["variant"] != "Ours-full"])
     analysis_speed = "Speed rows are copied from the provided speed CSV when available; missing speed input is reported as N/A."
-    if speed_rows and speed_rows[0].get("status") == "missing":
+    if speed_rows and speed_rows[0].get("status") in {"missing", "malformed"}:
         analysis_speed = speed_rows[0].get("failure", analysis_speed)
 
     _write_text(output_root / "analysis_main.md", analysis_main + "\n")
@@ -425,18 +509,31 @@ def main() -> None:
     _write_text(output_root / "analysis_speed.md", analysis_speed + "\n")
 
     metadata_rows = _load_metadata(main_root) + _load_metadata(ablation_root)
+    report_output = Path(args.report_output)
+    docs_output = Path(args.docs_output)
+    manifest_roots = [main_root, ablation_root, output_root, report_output.parent, docs_output.parent]
+    if speed_source:
+        manifest_roots.append(Path(speed_source).parent)
+    report_manifest_rows = _collect_manifest_rows(manifest_roots)
+    _append_manifest_path(report_manifest_rows, "report_markdown", report_output, require_exists=False)
+    _append_manifest_path(report_manifest_rows, "docs_markdown", docs_output, require_exists=False)
     report = build_report(
         main_rows=main_rows,
         ablation_rows=ablation_rows,
         speed_rows=speed_rows,
-        manifest_rows=manifest_rows,
+        manifest_rows=report_manifest_rows,
         metadata_rows=metadata_rows,
         main_root=main_root,
         ablation_root=ablation_root,
         output_root=output_root,
     )
-    _write_text(args.report_output, report)
-    _write_text(args.docs_output, report)
+    _write_text(report_output, report)
+    _write_text(docs_output, report)
+
+    manifest_rows = _collect_manifest_rows(manifest_roots)
+    _append_manifest_path(manifest_rows, "report_markdown", report_output)
+    _append_manifest_path(manifest_rows, "docs_markdown", docs_output)
+    _write_csv(output_root / "path_manifest.csv", manifest_rows, ["kind", "path"])
 
 
 if __name__ == "__main__":
