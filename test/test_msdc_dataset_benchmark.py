@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -15,7 +17,9 @@ from tools.evaluation.msdc_dataset_benchmark import (
     compute_per_gt_diagnostics,
     compute_per_gt_stage_coverage,
     compute_tracker_box_stats,
+    main,
     resolve_single_sequence_dataset,
+    run_logged_command,
     windows_path_to_wsl_path,
     write_command_record,
     write_failure_record,
@@ -82,6 +86,67 @@ def test_metadata_and_failure_records_are_written(tmp_path):
         "command": "python script.py",
         "returncode": "2",
         "message": "failed",
+    }]
+
+
+def test_print_only_benchmark_does_not_create_run_metadata(monkeypatch, tmp_path, capsys):
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    (dataset_root / "gt.txt").write_text("1,1,10,10,20,20,1,1,1\n", encoding="utf-8")
+    (dataset_root / "原视频地址.txt").write_text(str(video_path), encoding="utf-8")
+    output_root = tmp_path / "runs"
+
+    monkeypatch.setattr(sys, "argv", [
+        "msdc_dataset_benchmark.py",
+        "--dataset-root",
+        str(dataset_root),
+        "--output-root",
+        str(output_root),
+        "--run-id",
+        "print_only",
+        "--trackers",
+        "ocsort",
+    ])
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "[INFO] print-only mode" in captured.out
+    assert not (output_root / "print_only").exists()
+
+
+def test_run_logged_command_records_launch_exception(monkeypatch, tmp_path):
+    def raise_os_error(*args, **kwargs):
+        raise OSError("cannot launch")
+
+    monkeypatch.setattr("tools.evaluation.msdc_dataset_benchmark.subprocess.run", raise_os_error)
+    commands_path = tmp_path / "metadata" / "commands.jsonl"
+    failures_path = tmp_path / "metadata" / "failures.csv"
+
+    with pytest.raises(OSError, match="cannot launch"):
+        run_logged_command(
+            "render",
+            "ocsort",
+            ["missing-command"],
+            {},
+            commands_path,
+            failures_path,
+        )
+
+    command_record = json.loads(commands_path.read_text(encoding="utf-8").strip())
+    assert command_record["label"] == "RENDER:ocsort"
+    assert command_record["status"] == "failed"
+    assert command_record["returncode"] is None
+
+    rows = list(csv.DictReader(failures_path.open(encoding="utf-8-sig")))
+    assert rows == [{
+        "stage": "render",
+        "label": "ocsort",
+        "command": "missing-command",
+        "returncode": "",
+        "message": "cannot launch",
     }]
 
 

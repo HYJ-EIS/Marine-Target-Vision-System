@@ -599,6 +599,64 @@ def write_failure_record(
         })
 
 
+def _command_record_label(stage: str, label: str) -> str:
+    if stage == "eval" and label == "EVAL":
+        return "EVAL"
+    return f"{stage.upper()}:{label}"
+
+
+def run_logged_command(
+    stage: str,
+    label: str,
+    cmd: list[str],
+    env_delta: dict[str, str],
+    commands_path: str | Path,
+    failures_path: str | Path,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    record_label = _command_record_label(stage, label)
+    started = iso_now()
+    try:
+        completed = subprocess.run(cmd, cwd=str(_ROOT), env=env, check=True)
+        write_command_record(
+            commands_path,
+            record_label,
+            cmd,
+            env_delta,
+            "success",
+            started,
+            iso_now(),
+            completed.returncode,
+        )
+        return completed
+    except subprocess.CalledProcessError as exc:
+        write_command_record(
+            commands_path,
+            record_label,
+            cmd,
+            env_delta,
+            "failed",
+            started,
+            iso_now(),
+            exc.returncode,
+        )
+        write_failure_record(failures_path, stage, label, _quote_command(cmd), exc.returncode, str(exc))
+        raise
+    except Exception as exc:
+        write_command_record(
+            commands_path,
+            record_label,
+            cmd,
+            env_delta,
+            "failed",
+            started,
+            iso_now(),
+            None,
+        )
+        write_failure_record(failures_path, stage, label, _quote_command(cmd), None, str(exc))
+        raise
+
+
 def _build_export_command(
     input_video: Path,
     output_root: Path,
@@ -688,20 +746,21 @@ def main() -> None:
     metadata_dir = root / "metadata"
     commands_path = metadata_dir / "commands.jsonl"
     failures_path = metadata_dir / "failures.csv"
-    metadata = build_run_metadata(
-        run_id=run_id,
-        mode=args.mode,
-        commit_hash=args.commit_hash,
-        dataset_roots=[Path(path) for path in args.dataset_root],
-        output_root=root,
-        trackers=list(args.trackers),
-        variants=list(args.variants),
-        max_frames=int(args.max_frames),
-        duration_seconds=float(args.duration_seconds),
-        render=bool(args.render),
-        formal=not bool(args.max_frames) and not bool(args.duration_seconds),
-    )
-    write_json(metadata_dir / "run_metadata.json", metadata)
+    if args.run:
+        metadata = build_run_metadata(
+            run_id=run_id,
+            mode=args.mode,
+            commit_hash=args.commit_hash,
+            dataset_roots=[Path(path) for path in args.dataset_root],
+            output_root=root,
+            trackers=list(args.trackers),
+            variants=list(args.variants),
+            max_frames=int(args.max_frames),
+            duration_seconds=float(args.duration_seconds),
+            render=bool(args.render),
+            formal=not bool(args.max_frames) and not bool(args.duration_seconds),
+        )
+        write_json(metadata_dir / "run_metadata.json", metadata)
     sequence_names: list[str] = []
 
     for dataset_root in args.dataset_root:
@@ -756,39 +815,7 @@ def main() -> None:
             if args.run:
                 env = os.environ.copy()
                 env.update(env_delta)
-                started = iso_now()
-                try:
-                    completed = subprocess.run(cmd, cwd=str(_ROOT), env=env, check=True)
-                    write_command_record(
-                        commands_path,
-                        f"EXPORT:{tracker_name}",
-                        cmd,
-                        env_delta,
-                        "success",
-                        started,
-                        iso_now(),
-                        completed.returncode,
-                    )
-                except subprocess.CalledProcessError as exc:
-                    write_command_record(
-                        commands_path,
-                        f"EXPORT:{tracker_name}",
-                        cmd,
-                        env_delta,
-                        "failed",
-                        started,
-                        iso_now(),
-                        exc.returncode,
-                    )
-                    write_failure_record(
-                        failures_path,
-                        "export",
-                        tracker_name,
-                        _quote_command(cmd),
-                        exc.returncode,
-                        str(exc),
-                    )
-                    raise
+                run_logged_command("export", tracker_name, cmd, env_delta, commands_path, failures_path, env=env)
             tracker_file = trackers_root / tracker_name / "data" / f"{spec.seq_name}.txt"
             if args.run:
                 out_dir = diagnostics_root / spec.seq_name
@@ -810,39 +837,7 @@ def main() -> None:
                 )
                 print(f"[RENDER:{tracker_name}] {_quote_command(render_cmd)}")
                 if args.run:
-                    started = iso_now()
-                    try:
-                        completed = subprocess.run(render_cmd, cwd=str(_ROOT), check=True)
-                        write_command_record(
-                            commands_path,
-                            f"RENDER:{tracker_name}",
-                            render_cmd,
-                            {},
-                            "success",
-                            started,
-                            iso_now(),
-                            completed.returncode,
-                        )
-                    except subprocess.CalledProcessError as exc:
-                        write_command_record(
-                            commands_path,
-                            f"RENDER:{tracker_name}",
-                            render_cmd,
-                            {},
-                            "failed",
-                            started,
-                            iso_now(),
-                            exc.returncode,
-                        )
-                        write_failure_record(
-                            failures_path,
-                            "render",
-                            tracker_name,
-                            _quote_command(render_cmd),
-                            exc.returncode,
-                            str(exc),
-                        )
-                        raise
+                    run_logged_command("render", tracker_name, render_cmd, {}, commands_path, failures_path)
 
     eval_cmd = [
         sys.executable,
@@ -859,39 +854,7 @@ def main() -> None:
     ]
     print(f"[EVAL] {_quote_command(eval_cmd)}")
     if args.run:
-        started = iso_now()
-        try:
-            completed = subprocess.run(eval_cmd, cwd=str(_ROOT), check=True)
-            write_command_record(
-                commands_path,
-                "EVAL",
-                eval_cmd,
-                {},
-                "success",
-                started,
-                iso_now(),
-                completed.returncode,
-            )
-        except subprocess.CalledProcessError as exc:
-            write_command_record(
-                commands_path,
-                "EVAL",
-                eval_cmd,
-                {},
-                "failed",
-                started,
-                iso_now(),
-                exc.returncode,
-            )
-            write_failure_record(
-                failures_path,
-                "eval",
-                "EVAL",
-                _quote_command(eval_cmd),
-                exc.returncode,
-                str(exc),
-            )
-            raise
+        run_logged_command("eval", "EVAL", eval_cmd, {}, commands_path, failures_path)
 
     if not args.run:
         print("[INFO] print-only mode; add --run to execute exports/evaluation/diagnostics.")
