@@ -36,6 +36,8 @@ if not hasattr(np, "int"):
 
 import third_party.trackeval as trackeval
 
+MetricValue = float | int | str
+
 
 def _discover_sequences(gt_root: Path) -> list[str]:
     seqs = []
@@ -87,9 +89,15 @@ def _mean_hota_field(combined: dict, field: str) -> float | str:
     return round(float(np.mean(hota_values[field])) * 100.0, 5)
 
 
-def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, dict[str, float]]:
+def _format_percent_metric(value: MetricValue) -> str:
+    if isinstance(value, (float, int)):
+        return f"{float(value):.5f}"
+    return str(value)
+
+
+def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, dict[str, MetricValue]]:
     dataset_res = output_res["MotChallenge2DBox"]
-    summary: dict[str, dict[str, float]] = {}
+    summary: dict[str, dict[str, MetricValue]] = {}
     for tracker in trackers:
         combined = dataset_res[tracker]["COMBINED_SEQ"]["pedestrian"]
         hota = float(np.mean(combined["HOTA"]["HOTA"])) * 100.0
@@ -111,7 +119,7 @@ def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, 
     return summary
 
 
-def _write_summary_csv(summary: dict[str, dict[str, float]], output_root: Path) -> Path:
+def _write_summary_csv(summary: dict[str, dict[str, MetricValue]], output_root: Path) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     csv_path = output_root / "motchallenge_summary.csv"
     fields = [
@@ -143,7 +151,7 @@ def run_motchallenge_eval(
     trackers: Iterable[str] | None = None,
     sequences: Iterable[str] | None = None,
     print_results: bool = True,
-) -> dict[str, dict[str, float]]:
+) -> dict[str, dict[str, MetricValue]]:
     """Run official TrackEval HOTA/CLEAR/Identity metrics and return key scores."""
     gt_root = Path(gt_root)
     trackers_root = Path(trackers_root)
@@ -222,9 +230,11 @@ def main() -> None:
     print("\nFormal MOTChallenge metrics (percent, TrackEval):")
     for tracker, values in summary.items():
         print(
-            f"{tracker}: HOTA={values['HOTA']}, DetA={values['DetA']}, "
-            f"AssA={values['AssA']}, MOTA={values['MOTA']}, "
-            f"IDF1={values['IDF1']}, IDSW={values['IDSW']}, "
+            f"{tracker}: HOTA={_format_percent_metric(values['HOTA'])}, "
+            f"DetA={_format_percent_metric(values['DetA'])}, "
+            f"AssA={_format_percent_metric(values['AssA'])}, "
+            f"MOTA={_format_percent_metric(values['MOTA'])}, "
+            f"IDF1={_format_percent_metric(values['IDF1'])}, IDSW={values['IDSW']}, "
             f"FP={values['FP']}, FN={values['FN']}"
         )
 

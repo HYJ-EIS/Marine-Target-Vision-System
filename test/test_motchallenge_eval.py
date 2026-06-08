@@ -1,5 +1,6 @@
-import sys
+import csv
 import shutil
+import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,13 @@ def test_motchallenge_eval_reports_formal_metrics_for_perfect_track():
     assert perfect["DetA"] == 100.0
     assert perfect["AssA"] == 100.0
 
-    summary_text = (output_root / "motchallenge_summary.csv").read_text(encoding="utf-8-sig")
-    assert "DetA" in summary_text
-    assert "AssA" in summary_text
+    with (output_root / "motchallenge_summary.csv").open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        assert "DetA" in (reader.fieldnames or [])
+        assert "AssA" in (reader.fieldnames or [])
+        rows = list(reader)
+
+    assert len(rows) == 1
+    assert rows[0]["tracker"] == "perfect"
+    assert float(rows[0]["DetA"]) == 100.0
+    assert float(rows[0]["AssA"]) == 100.0
