@@ -888,7 +888,7 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dataset-root "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集" "/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集" --trackers msdc_elt --variants Ours-full --duration-seconds 60 --progress-interval 500 --run
 ```
 
-默认只打印命令，不执行重检测。确认视频路径可访问后，加 `--run` 才会实际导出 MOT、生成 TrackEval summary 和 per-GT 诊断；再加 `--render` 会额外生成带目标框、类别和 ID 的标注视频。`--duration-seconds N` 会按视频 FPS 换算前 N 秒帧数，并同步裁剪 tracker 输出和评测 GT，适合前 1 分钟这类切片诊断；正式全帧评测不要设置该参数。该脚本支持两种已确认的数据集结构：
+默认只打印命令，不执行重检测。确认视频路径可访问后，加 `--run` 才会实际导出 MOT、生成 TrackEval summary 和 per-GT 诊断；再加 `--render` 会额外生成带目标框、类别和 ID 的标注视频。`--run-id` 可指定本次输出目录名，`--mode` / `--commit-hash` 会写入 run metadata；导出、渲染或评测子命令失败时会记录到 `metadata/failures.csv`。`--duration-seconds N` 会按视频 FPS 换算前 N 秒帧数，并同步裁剪 tracker 输出和评测 GT，适合前 1 分钟这类切片诊断；正式全帧评测不要设置该参数。该脚本支持两种已确认的数据集结构：
 
 - `USV_MOT标注数据集/gt/gt.txt`
 - `UAV_USV_MOT标注数据集/gt.txt`
@@ -901,6 +901,9 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 - `diagnostics/<seq>/<tracker>_per_gt_diagnostics.csv`
 - `diagnostics/<seq>/<tracker>_per_gt_stage_coverage.csv`
 - `diagnostics/<seq>/<tracker>_box_stats.csv`
+- `metadata/run_metadata.json`
+- `metadata/commands.jsonl`
+- `metadata/failures.csv`（仅失败时或被 helper 写入时出现）
 - 可选 `visualizations/<seq>/<tracker>.mp4`
 
 `*_per_gt_stage_coverage.csv` 会按 GT ID 统计 `high_det`、`low_det`、`low_only`、`roi_low_det` 和最终 `output` 的覆盖帧数，用来判断持续漏检是检测器阶段没有候选，还是 lifecycle 阶段未保住同一 ID。
@@ -1080,6 +1083,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 
 - `test`: TrackEval MOT summary 新增 DetA / AssA 输出列和回归测试，缺失时保留 `N/A`，并保持 CLI 百分比指标五位小数格式
 - `fix`: `tools/evaluation/msdc_dataset_benchmark.py --duration-seconds` 现在会把换算后的有效帧数同步传给 `render_mot_video.py`，避免 1 分钟切片评测误渲染完整视频
+- `feat`: dataset benchmark 新增 `--run-id` / `--mode` / `--commit-hash` metadata 记录，并在 export、render、eval 子命令失败时写入 `metadata/failures.csv`
 - `fix`: MS-DC-ELT 收紧浪花误检入口，motion seed 在海面连通域爆炸时限流，ROI 重检过滤 tiny / existing-overlap box 并限制每 ROI 候选数，low-only 候选靠近 active track 时使用更宽 suppression
 - `fix`: MS-DC-ELT 增加受约束 active 保活，近期有 low/roi-low 真实证据且当前有 template/motion 辅助支持时，active 可短时延迟进入 lost，减少小 UAV 断续低阈值检测导致的 ID 碎片
 - `test`: 扩展 MS-DC-ELT 回归测试，覆盖 motion clutter 限流、ROI tiny 过滤、ROI 候选上限、low-only 近 active 抑制，以及 auxiliary support 延迟 active->lost

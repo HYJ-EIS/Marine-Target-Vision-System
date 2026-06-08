@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime as _dt
 import json
 import os
 import re
@@ -509,6 +510,95 @@ def _env_prefix(env_delta: dict[str, str]) -> str:
     return " ".join(f"{key}={value}" for key, value in sorted(env_delta.items()))
 
 
+def iso_now() -> str:
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def build_run_metadata(
+    run_id: str,
+    mode: str,
+    commit_hash: str,
+    dataset_roots: list[str | Path],
+    output_root: str | Path,
+    trackers: list[str],
+    variants: list[str],
+    max_frames: int,
+    duration_seconds: float,
+    render: bool,
+    formal: bool,
+) -> dict:
+    return {
+        "run_id": run_id,
+        "mode": mode,
+        "commit_hash": commit_hash,
+        "dataset_roots": [str(Path(path)) for path in dataset_roots],
+        "output_root": str(Path(output_root)),
+        "trackers": list(trackers),
+        "variants": list(variants),
+        "max_frames": int(max_frames),
+        "duration_seconds": float(duration_seconds),
+        "render": bool(render),
+        "formal": bool(formal),
+        "started_at": iso_now(),
+    }
+
+
+def write_json(path: str | Path, payload: dict) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_command_record(
+    path: str | Path,
+    label: str,
+    command: list[str],
+    env_delta: dict[str, str],
+    status: str,
+    start_time: str,
+    end_time: str,
+    returncode: int | None,
+) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "label": label,
+        "command": list(command),
+        "env_delta": dict(env_delta),
+        "status": status,
+        "start_time": start_time,
+        "end_time": end_time,
+        "returncode": returncode,
+    }
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def write_failure_record(
+    path: str | Path,
+    stage: str,
+    label: str,
+    command: str,
+    returncode: int | None,
+    message: str,
+) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exists = path.is_file()
+    with path.open("a", newline="", encoding="utf-8-sig") as fh:
+        fields = ["stage", "label", "command", "returncode", "message"]
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        if not exists:
+            writer.writeheader()
+        writer.writerow({
+            "stage": stage,
+            "label": label,
+            "command": command,
+            "returncode": "" if returncode is None else int(returncode),
+            "message": message,
+        })
+
+
 def _build_export_command(
     input_video: Path,
     output_root: Path,
@@ -581,17 +671,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--render", action="store_true", help="Render annotated videos after successful exports")
     parser.add_argument("--run", action="store_true", help="Execute exports/eval/diagnostics; default prints commands")
+    parser.add_argument("--run-id", default="", help="Timestamp/run folder name; default uses current time")
+    parser.add_argument("--mode", default="benchmark", choices=["benchmark", "main", "ablation", "smoke"])
+    parser.add_argument("--commit-hash", default="", help="Commit hash recorded in run metadata")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    run_id = time.strftime("%Y%m%d_%H%M%S")
+    run_id = args.run_id or time.strftime("%Y%m%d_%H%M%S")
     root = Path(args.output_root) / run_id
     gt_root = root / "mot_gt"
     trackers_root = root / "trackers"
     eval_root = root / "eval"
     diagnostics_root = root / "diagnostics"
+    metadata_dir = root / "metadata"
+    commands_path = metadata_dir / "commands.jsonl"
+    failures_path = metadata_dir / "failures.csv"
+    metadata = build_run_metadata(
+        run_id=run_id,
+        mode=args.mode,
+        commit_hash=args.commit_hash,
+        dataset_roots=[Path(path) for path in args.dataset_root],
+        output_root=root,
+        trackers=list(args.trackers),
+        variants=list(args.variants),
+        max_frames=int(args.max_frames),
+        duration_seconds=float(args.duration_seconds),
+        render=bool(args.render),
+        formal=not bool(args.max_frames) and not bool(args.duration_seconds),
+    )
+    write_json(metadata_dir / "run_metadata.json", metadata)
     sequence_names: list[str] = []
 
     for dataset_root in args.dataset_root:
@@ -646,7 +756,39 @@ def main() -> None:
             if args.run:
                 env = os.environ.copy()
                 env.update(env_delta)
-                subprocess.run(cmd, cwd=str(_ROOT), env=env, check=True)
+                started = iso_now()
+                try:
+                    completed = subprocess.run(cmd, cwd=str(_ROOT), env=env, check=True)
+                    write_command_record(
+                        commands_path,
+                        f"EXPORT:{tracker_name}",
+                        cmd,
+                        env_delta,
+                        "success",
+                        started,
+                        iso_now(),
+                        completed.returncode,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    write_command_record(
+                        commands_path,
+                        f"EXPORT:{tracker_name}",
+                        cmd,
+                        env_delta,
+                        "failed",
+                        started,
+                        iso_now(),
+                        exc.returncode,
+                    )
+                    write_failure_record(
+                        failures_path,
+                        "export",
+                        tracker_name,
+                        _quote_command(cmd),
+                        exc.returncode,
+                        str(exc),
+                    )
+                    raise
             tracker_file = trackers_root / tracker_name / "data" / f"{spec.seq_name}.txt"
             if args.run:
                 out_dir = diagnostics_root / spec.seq_name
@@ -668,7 +810,39 @@ def main() -> None:
                 )
                 print(f"[RENDER:{tracker_name}] {_quote_command(render_cmd)}")
                 if args.run:
-                    subprocess.run(render_cmd, cwd=str(_ROOT), check=True)
+                    started = iso_now()
+                    try:
+                        completed = subprocess.run(render_cmd, cwd=str(_ROOT), check=True)
+                        write_command_record(
+                            commands_path,
+                            f"RENDER:{tracker_name}",
+                            render_cmd,
+                            {},
+                            "success",
+                            started,
+                            iso_now(),
+                            completed.returncode,
+                        )
+                    except subprocess.CalledProcessError as exc:
+                        write_command_record(
+                            commands_path,
+                            f"RENDER:{tracker_name}",
+                            render_cmd,
+                            {},
+                            "failed",
+                            started,
+                            iso_now(),
+                            exc.returncode,
+                        )
+                        write_failure_record(
+                            failures_path,
+                            "render",
+                            tracker_name,
+                            _quote_command(render_cmd),
+                            exc.returncode,
+                            str(exc),
+                        )
+                        raise
 
     eval_cmd = [
         sys.executable,
@@ -685,7 +859,39 @@ def main() -> None:
     ]
     print(f"[EVAL] {_quote_command(eval_cmd)}")
     if args.run:
-        subprocess.run(eval_cmd, cwd=str(_ROOT), check=True)
+        started = iso_now()
+        try:
+            completed = subprocess.run(eval_cmd, cwd=str(_ROOT), check=True)
+            write_command_record(
+                commands_path,
+                "EVAL",
+                eval_cmd,
+                {},
+                "success",
+                started,
+                iso_now(),
+                completed.returncode,
+            )
+        except subprocess.CalledProcessError as exc:
+            write_command_record(
+                commands_path,
+                "EVAL",
+                eval_cmd,
+                {},
+                "failed",
+                started,
+                iso_now(),
+                exc.returncode,
+            )
+            write_failure_record(
+                failures_path,
+                "eval",
+                "EVAL",
+                _quote_command(eval_cmd),
+                exc.returncode,
+                str(exc),
+            )
+            raise
 
     if not args.run:
         print("[INFO] print-only mode; add --run to execute exports/evaluation/diagnostics.")

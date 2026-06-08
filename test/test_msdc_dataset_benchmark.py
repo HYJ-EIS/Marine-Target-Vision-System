@@ -1,4 +1,5 @@
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -10,11 +11,14 @@ from tools.evaluation import export_mot_results
 from tools.evaluation.msdc_dataset_benchmark import (
     VideoInfo,
     _build_render_command,
+    build_run_metadata,
     compute_per_gt_diagnostics,
     compute_per_gt_stage_coverage,
     compute_tracker_box_stats,
     resolve_single_sequence_dataset,
     windows_path_to_wsl_path,
+    write_command_record,
+    write_failure_record,
     write_motchallenge_gt_sequence,
 )
 
@@ -24,6 +28,61 @@ def test_windows_path_to_wsl_path_handles_drive_and_wsl_unc():
     assert windows_path_to_wsl_path(
         r"\\wsl.localhost\Ubuntu-D\home\hyj\Anti_Drone_Project\USV_MOT标注数据集"
     ) == Path("/home/hyj/Anti_Drone_Project/USV_MOT标注数据集")
+
+
+def test_metadata_and_failure_records_are_written(tmp_path):
+    metadata = build_run_metadata(
+        run_id="paper_20260608_120000",
+        mode="main",
+        commit_hash="abcdef0",
+        dataset_roots=[tmp_path / "dataset_a", tmp_path / "dataset_b"],
+        output_root=tmp_path / "out",
+        trackers=["ocsort", "botsort", "msdc_elt"],
+        variants=["Ours-full"],
+        max_frames=0,
+        duration_seconds=0.0,
+        render=True,
+        formal=True,
+    )
+
+    assert metadata["run_id"] == "paper_20260608_120000"
+    assert metadata["formal"] is True
+    assert metadata["max_frames"] == 0
+    assert metadata["duration_seconds"] == 0.0
+    assert metadata["commit_hash"] == "abcdef0"
+
+    commands_path = tmp_path / "commands.jsonl"
+    write_command_record(
+        commands_path,
+        label="EXPORT:ocsort",
+        command=["python", "script.py"],
+        env_delta={"A": "1"},
+        status="planned",
+        start_time="2026-06-08T12:00:00+08:00",
+        end_time="2026-06-08T12:00:01+08:00",
+        returncode=0,
+    )
+    command_record = json.loads(commands_path.read_text(encoding="utf-8").strip())
+    assert command_record["label"] == "EXPORT:ocsort"
+    assert command_record["env_delta"] == {"A": "1"}
+
+    failures_path = tmp_path / "failures.csv"
+    write_failure_record(
+        failures_path,
+        stage="export",
+        label="ocsort",
+        command="python script.py",
+        returncode=2,
+        message="failed",
+    )
+    rows = list(csv.DictReader(failures_path.open(encoding="utf-8-sig")))
+    assert rows == [{
+        "stage": "export",
+        "label": "ocsort",
+        "command": "python script.py",
+        "returncode": "2",
+        "message": "failed",
+    }]
 
 
 def test_resolve_single_sequence_dataset_supports_nested_and_flat_gt(tmp_path):
