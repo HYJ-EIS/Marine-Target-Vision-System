@@ -599,6 +599,16 @@ def write_failure_record(
         })
 
 
+def initialize_failures_file(path: str | Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        return
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["stage", "label", "command", "returncode", "message"])
+        writer.writeheader()
+
+
 def _command_record_label(stage: str, label: str) -> str:
     if stage == "eval" and label == "EVAL":
         return "EVAL"
@@ -761,6 +771,7 @@ def main() -> None:
             formal=not bool(args.max_frames) and not bool(args.duration_seconds),
         )
         write_json(metadata_dir / "run_metadata.json", metadata)
+        initialize_failures_file(failures_path)
     sequence_names: list[str] = []
 
     for dataset_root in args.dataset_root:

@@ -888,7 +888,7 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dataset-root "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集" "/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集" --trackers msdc_elt --variants Ours-full --duration-seconds 60 --progress-interval 500 --run
 ```
 
-默认只打印命令，不创建 run 目录或 metadata 文件，也不执行重检测。确认视频路径可访问后，加 `--run` 才会实际导出 MOT、生成 TrackEval summary、per-GT 诊断和 run metadata；再加 `--render` 会额外生成带目标框、类别和 ID 的标注视频。`--run-id` 可指定本次输出目录名，`--mode` / `--commit-hash` 会写入 run metadata；导出、渲染或评测子命令失败时会记录到 `metadata/failures.csv`。`--duration-seconds N` 会按视频 FPS 换算前 N 秒帧数，并同步裁剪 tracker 输出和评测 GT，适合前 1 分钟这类切片诊断；正式全帧评测不要设置该参数。该脚本支持两种已确认的数据集结构：
+默认只打印命令，不创建 run 目录或 metadata 文件，也不执行重检测。确认视频路径可访问后，加 `--run` 才会实际导出 MOT、生成 TrackEval summary、per-GT 诊断和 run metadata；再加 `--render` 会额外生成带目标框、类别和 ID 的标注视频。`--run-id` 可指定本次输出目录名，`--mode` / `--commit-hash` 会写入 run metadata；正式 run 会初始化 `metadata/failures.csv`，导出、渲染或评测子命令失败时会追加失败记录。`--duration-seconds N` 会按视频 FPS 换算前 N 秒帧数，并同步裁剪 tracker 输出和评测 GT，适合前 1 分钟这类切片诊断；正式全帧评测不要设置该参数。该脚本支持两种已确认的数据集结构：
 
 - `USV_MOT标注数据集/gt/gt.txt`
 - `UAV_USV_MOT标注数据集/gt.txt`
@@ -903,7 +903,7 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 - `diagnostics/<seq>/<tracker>_box_stats.csv`
 - `metadata/run_metadata.json`
 - `metadata/commands.jsonl`
-- `metadata/failures.csv`（仅失败时或被 helper 写入时出现）
+- `metadata/failures.csv`（正式 run 初始化为空表，失败时追加记录）
 - 可选 `visualizations/<seq>/<tracker>.mp4`
 
 `*_per_gt_stage_coverage.csv` 会按 GT ID 统计 `high_det`、`low_det`、`low_only`、`roi_low_det` 和最终 `output` 的覆盖帧数，用来判断持续漏检是检测器阶段没有候选，还是 lifecycle 阶段未保住同一 ID。

@@ -17,6 +17,7 @@ from tools.evaluation.msdc_dataset_benchmark import (
     compute_per_gt_diagnostics,
     compute_per_gt_stage_coverage,
     compute_tracker_box_stats,
+    initialize_failures_file,
     main,
     resolve_single_sequence_dataset,
     run_logged_command,
@@ -87,6 +88,17 @@ def test_metadata_and_failure_records_are_written(tmp_path):
         "returncode": "2",
         "message": "failed",
     }]
+
+
+def test_initialize_failures_file_writes_empty_header(tmp_path):
+    failures_path = tmp_path / "metadata" / "failures.csv"
+
+    initialize_failures_file(failures_path)
+    initialize_failures_file(failures_path)
+
+    assert failures_path.read_text(encoding="utf-8-sig").splitlines() == [
+        "stage,label,command,returncode,message"
+    ]
 
 
 def test_print_only_benchmark_does_not_create_run_metadata(monkeypatch, tmp_path, capsys):
