@@ -908,6 +908,14 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 
 `*_per_gt_stage_coverage.csv` 会按 GT ID 统计 `high_det`、`low_det`、`low_only`、`roi_low_det` 和最终 `output` 的覆盖帧数，用来判断持续漏检是检测器阶段没有候选，还是 lifecycle 阶段未保住同一 ID。
 
+实验汇总与报告生成：
+
+```powershell
+conda run -n ship_detect python tools/evaluation/msdc_experiment_summary.py --main-root "results/msdc_paper_phase1/<run-id>/main" --ablation-root "results/msdc_paper_phase1/<run-id>/ablation" --speed-csv "results/msdc_paper_phase1/<run-id>/speed/speed_results.csv" --output-root "results/msdc_paper_phase1/<run-id>/summary" --report-output "results/msdc_paper_phase1/<run-id>/MSDC_EXPERIMENT_REPORT.md" --docs-output "docs/MSDC_EXPERIMENT_RESULT.md"
+```
+
+该脚本只汇总已有正式 run 产物，不重新运行检测或跟踪；会读取 main/ablation 的 `eval/motchallenge_summary.csv`，生成 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、`path_manifest.csv`、`analysis_*.md` 和最终 Markdown 报告。缺失指标或速度文件统一写为 `N/A` 并在报告中列出，不推断实验数值。
+
 结果表模板：
 
 - `docs/MSDC_EXPERIMENT_RESULT_TEMPLATE.md`
