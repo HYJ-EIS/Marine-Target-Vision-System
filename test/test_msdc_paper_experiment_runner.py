@@ -33,6 +33,31 @@ def test_main_command_uses_full_video_and_render():
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == ["ocsort", "botsort", "msdc_elt"]
 
 
+def test_formal_commands_accept_duration_limit():
+    main_cmd = build_main_command(
+        dataset_roots=["/data/a"],
+        output_root=Path("results/main"),
+        run_id="main_full",
+        commit_hash="abcdef0",
+        progress_interval=500,
+        run=True,
+        duration_seconds=120.0,
+    )
+    ablation_cmd = build_ablation_command(
+        dataset_roots=["/data/a"],
+        output_root=Path("results/ablation"),
+        run_id="ablation_full",
+        commit_hash="abcdef0",
+        progress_interval=500,
+        run=True,
+        variants=["v2_template_off"],
+        duration_seconds=120.0,
+    )
+
+    assert main_cmd[main_cmd.index("--duration-seconds") + 1] == "120.0"
+    assert ablation_cmd[ablation_cmd.index("--duration-seconds") + 1] == "120.0"
+
+
 def test_ablation_command_includes_required_variants():
     cmd = build_ablation_command(
         dataset_roots=["/data/a"],
