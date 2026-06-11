@@ -244,3 +244,13 @@ def test_cli_manifest_includes_generated_report_artifacts(tmp_path, monkeypatch)
     assert str(output_root / "analysis_main.md") in paths
     assert str(report_output) in paths
     assert str(docs_output) in paths
+
+
+def test_v2_ablation_switches_are_reported():
+    from tools.evaluation.msdc_experiment_summary import _ablation_switches
+
+    switches = _ablation_switches("v2_candidate_real2_age8")
+    assert switches["MSDC_USE_TEMPLATE"] == "False"
+    assert switches["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "True"
+    assert switches["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
+    assert switches["MSDC_CANDIDATE_MAX_AGE"] == "8"

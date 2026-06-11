@@ -881,9 +881,31 @@ MS-DC-ELT 诊断文件：
 - `MSDC_USE_LOW_DET`
 - `MSDC_USE_MOTION`
 - `MSDC_USE_TEMPLATE`
+- `MSDC_TEMPLATE_ENABLE`
 - `MSDC_USE_REACQUIRE`
 - `MSDC_USE_ROI_REDETECT`
 - `MSDC_REUSE_GUARD_ENABLE`
+- `MSDC_EXPORT_SHARE_LOW_HIGH_DET`
+- `MSDC_OUTPUT_MAX_REAL_DET_AGE`
+- `MSDC_OUTPUT_MIN_BOX_SIZE`
+- `MSDC_LOW_CONFIRM_MIN_HITS`
+- `MSDC_LOW_CONFIRM_WINDOW`
+- `MSDC_CONFIRM_MIN_REAL_DET_HITS`
+- `MSDC_CANDIDATE_MAX_AGE`
+- `MSDC_ROI_REDETECT_ACTIVE_INTERVAL`
+- `MSDC_ROI_REDETECT_MAX_TRACKS`
+- `MSDC_REACQUIRE_INTERVAL`
+- `MSDC_REACQUIRE_CENTER_DIST`
+
+### MS-DC-ELT v2 experiment variants
+
+- `v2_template_off`: TemplateLock off, dual high/low detection retained for template-only isolation.
+- `v2_shared_det`: TemplateLock off, shared low-threshold inference split into high/low boxes.
+- `v2_low_clean`: v2 default low-det behavior; low-det supports active tracks without refreshing active boxes.
+- `v2_output_age5_size8` / `v2_output_age8_size8` / `v2_output_age12_size8`: output recall gate sweep.
+- `v2_candidate_low3_window6` / `v2_candidate_low4_window8` / `v2_candidate_real2_age8`: candidate confirmation sweep.
+- `v2_roi_budget_active8_max2` / `v2_roi_budget_active10_max2`: ROI frequency and track budget sweep.
+- `v2_reacquire_interval1` / `v2_reacquire_interval2` / `v2_reacquire_interval5_center240`: reacquire frequency and gate sweep.
 
 消融脚本默认只打印命令；加 `--run` 才执行：
 

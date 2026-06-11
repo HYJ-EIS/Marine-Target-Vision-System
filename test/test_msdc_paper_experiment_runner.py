@@ -217,3 +217,28 @@ def test_run_command_executes_child_from_repo_root(tmp_path, monkeypatch):
     runner.run_command("label", ["python", "script.py"])
 
     assert calls == [{"cmd": ["python", "script.py"], "check": True, "cwd": tmp_path}]
+
+
+def test_v2_ablation_variants_are_available():
+    from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS
+
+    expected = {
+        "v2_template_off",
+        "v2_shared_det",
+        "v2_low_clean",
+        "v2_output_age5_size8",
+        "v2_output_age8_size8",
+        "v2_output_age12_size8",
+        "v2_candidate_low3_window6",
+        "v2_candidate_low4_window8",
+        "v2_candidate_real2_age8",
+        "v2_roi_budget_active8_max2",
+        "v2_roi_budget_active10_max2",
+        "v2_reacquire_interval1",
+        "v2_reacquire_interval2",
+        "v2_reacquire_interval5_center240",
+    }
+    assert expected <= set(ABLATION_VARIANTS)
+    assert ABLATION_VARIANTS["v2_template_off"]["MSDC_USE_TEMPLATE"] == "0"
+    assert ABLATION_VARIANTS["v2_shared_det"]["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "1"
+    assert ABLATION_VARIANTS["v2_roi_budget_active8_max2"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "2"
