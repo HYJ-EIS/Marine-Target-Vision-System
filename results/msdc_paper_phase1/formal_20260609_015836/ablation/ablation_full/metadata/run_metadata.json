@@ -1,0 +1,26 @@
+{
+  "run_id": "ablation_full",
+  "mode": "ablation",
+  "commit_hash": "157ed52aa3d4d83df2a9c0c67a8d99b1cc8e51d1",
+  "dataset_roots": [
+    "/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集",
+    "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集"
+  ],
+  "output_root": "/home/hyj/Anti_Drone_Project/Marine-Target-Vision-System/results/msdc_paper_phase1/formal_20260609_015836/ablation/ablation_full",
+  "trackers": [
+    "msdc_elt"
+  ],
+  "variants": [
+    "Ours-full",
+    "Ours-lite-no-motion",
+    "Ours-lite-no-low-det",
+    "Ours-no-template",
+    "Ours-no-reacquire",
+    "Ours-no-removed-guard"
+  ],
+  "max_frames": 0,
+  "duration_seconds": 0.0,
+  "render": true,
+  "formal": true,
+  "started_at": "2026-06-09T12:37:06+08:00"
+}
