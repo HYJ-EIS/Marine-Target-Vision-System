@@ -88,7 +88,9 @@ def build_ablation_command(
     commit_hash: str,
     progress_interval: int,
     run: bool,
+    variants: list[str] | None = None,
 ) -> list[str]:
+    selected_variants = ABLATION_VARIANTS if variants is None else variants
     cmd = [
         sys.executable,
         _dataset_benchmark_script(),
@@ -105,7 +107,7 @@ def build_ablation_command(
         "--trackers",
         "msdc_elt",
         "--variants",
-        *ABLATION_VARIANTS,
+        *selected_variants,
         "--progress-interval",
         str(progress_interval),
         "--render",
@@ -303,6 +305,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--speed-frames", type=int, default=1000)
     parser.add_argument("--progress-interval", type=int, default=500)
     parser.add_argument("--run-id", default="", help="Top-level run id; default is timestamp")
+    parser.add_argument("--ablation-variants", nargs="+", default=ABLATION_VARIANTS)
     run_mode = parser.add_mutually_exclusive_group()
     run_mode.add_argument("--smoke", action="store_true", help="Run a 100-frame smoke benchmark only")
     run_mode.add_argument("--run-formal", action="store_true", help="Execute full formal main/ablation/speed runs")
@@ -374,6 +377,7 @@ def main(argv: list[str] | None = None) -> None:
         commit_hash=commit_hash,
         progress_interval=int(args.progress_interval),
         run=bool(args.run_formal),
+        variants=list(args.ablation_variants),
     )
     speed_cmd = build_speed_command(
         dataset_root=str(args.dataset_root[0]),

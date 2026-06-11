@@ -50,6 +50,23 @@ def test_ablation_command_includes_required_variants():
     assert "Ours-no-removed-guard" in cmd
 
 
+def test_ablation_command_accepts_selected_variants():
+    args = runner.parse_args(["--ablation-variants", "v2_template_off", "v2_shared_det"])
+    cmd = build_ablation_command(
+        dataset_roots=["/data/a"],
+        output_root=Path("results/ablation"),
+        run_id="ablation_full",
+        commit_hash="abcdef0",
+        progress_interval=500,
+        run=False,
+        variants=list(args.ablation_variants),
+    )
+    joined = " ".join(cmd)
+    assert "v2_template_off" in joined
+    assert "v2_shared_det" in joined
+    assert "Ours-full" not in joined
+
+
 def test_speed_command_records_fixed_frame_count():
     cmd = build_speed_command(
         dataset_root="/data/a",
