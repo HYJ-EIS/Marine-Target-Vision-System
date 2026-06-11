@@ -31,15 +31,18 @@ def test_msdc_v2_roi_budget_defaults_are_low_frequency(monkeypatch):
         "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI",
     ]
 
-    with monkeypatch.context() as env:
-        for name in roi_env_names:
-            env.delenv(name, raising=False)
+    try:
+        with monkeypatch.context() as env:
+            for name in roi_env_names:
+                env.delenv(name, raising=False)
 
-        reloaded = importlib.reload(config_module)
-        assert reloaded.Config.MSDC_ROI_REDETECT_MAX_TRACKS == 2
-        assert reloaded.Config.MSDC_ROI_REDETECT_ACTIVE_INTERVAL == 8
-        assert reloaded.Config.MSDC_ROI_REDETECT_LOST_INTERVAL == 3
-        assert reloaded.Config.MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI == 1
+            reloaded = importlib.reload(config_module)
+            assert reloaded.Config.MSDC_ROI_REDETECT_MAX_TRACKS == 2
+            assert reloaded.Config.MSDC_ROI_REDETECT_ACTIVE_INTERVAL == 8
+            assert reloaded.Config.MSDC_ROI_REDETECT_LOST_INTERVAL == 3
+            assert reloaded.Config.MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI == 1
+    finally:
+        importlib.reload(config_module)
 
 
 def test_msdc_v2_tuning_knobs_are_environment_backed(monkeypatch):
@@ -56,33 +59,36 @@ def test_msdc_v2_tuning_knobs_are_environment_backed(monkeypatch):
         "MSDC_REACQUIRE_CENTER_DIST",
     ]
 
-    with monkeypatch.context() as clean_env:
-        for name in env_names:
-            clean_env.delenv(name, raising=False)
+    try:
+        with monkeypatch.context() as clean_env:
+            for name in env_names:
+                clean_env.delenv(name, raising=False)
 
-        with monkeypatch.context() as override_env:
-            override_env.setenv("MSDC_CONFIRM_MIN_HITS", "3")
-            override_env.setenv("MSDC_CONFIRM_SCORE", "2.0")
-            override_env.setenv("MSDC_CANDIDATE_MAX_AGE", "8")
-            override_env.setenv("MSDC_REACQUIRE_INTERVAL", "1")
-            override_env.setenv("MSDC_REACQUIRE_SCORE", "1.2")
-            override_env.setenv("MSDC_REACQUIRE_IOU_THRESH", "0.12")
-            override_env.setenv("MSDC_REACQUIRE_CENTER_DIST", "240")
+            with monkeypatch.context() as override_env:
+                override_env.setenv("MSDC_CONFIRM_MIN_HITS", "3")
+                override_env.setenv("MSDC_CONFIRM_SCORE", "2.0")
+                override_env.setenv("MSDC_CANDIDATE_MAX_AGE", "8")
+                override_env.setenv("MSDC_REACQUIRE_INTERVAL", "1")
+                override_env.setenv("MSDC_REACQUIRE_SCORE", "1.2")
+                override_env.setenv("MSDC_REACQUIRE_IOU_THRESH", "0.12")
+                override_env.setenv("MSDC_REACQUIRE_CENTER_DIST", "240")
+
+                reloaded = importlib.reload(config_module)
+                assert reloaded.Config.MSDC_CONFIRM_MIN_HITS == 3
+                assert reloaded.Config.MSDC_CONFIRM_SCORE == 2.0
+                assert reloaded.Config.MSDC_CANDIDATE_MAX_AGE == 8
+                assert reloaded.Config.MSDC_REACQUIRE_INTERVAL == 1
+                assert reloaded.Config.MSDC_REACQUIRE_SCORE == 1.2
+                assert reloaded.Config.MSDC_REACQUIRE_IOU_THRESH == 0.12
+                assert reloaded.Config.MSDC_REACQUIRE_CENTER_DIST == 240.0
 
             reloaded = importlib.reload(config_module)
-            assert reloaded.Config.MSDC_CONFIRM_MIN_HITS == 3
-            assert reloaded.Config.MSDC_CONFIRM_SCORE == 2.0
-            assert reloaded.Config.MSDC_CANDIDATE_MAX_AGE == 8
-            assert reloaded.Config.MSDC_REACQUIRE_INTERVAL == 1
-            assert reloaded.Config.MSDC_REACQUIRE_SCORE == 1.2
-            assert reloaded.Config.MSDC_REACQUIRE_IOU_THRESH == 0.12
-            assert reloaded.Config.MSDC_REACQUIRE_CENTER_DIST == 240.0
-
-        reloaded = importlib.reload(config_module)
-        assert reloaded.Config.MSDC_CONFIRM_MIN_HITS == 4
-        assert reloaded.Config.MSDC_CONFIRM_SCORE == 2.5
-        assert reloaded.Config.MSDC_CANDIDATE_MAX_AGE == 5
-        assert reloaded.Config.MSDC_REACQUIRE_INTERVAL == 5
-        assert reloaded.Config.MSDC_REACQUIRE_SCORE == 1.5
-        assert reloaded.Config.MSDC_REACQUIRE_IOU_THRESH == 0.05
-        assert reloaded.Config.MSDC_REACQUIRE_CENTER_DIST == 160.0
+            assert reloaded.Config.MSDC_CONFIRM_MIN_HITS == 4
+            assert reloaded.Config.MSDC_CONFIRM_SCORE == 2.5
+            assert reloaded.Config.MSDC_CANDIDATE_MAX_AGE == 5
+            assert reloaded.Config.MSDC_REACQUIRE_INTERVAL == 5
+            assert reloaded.Config.MSDC_REACQUIRE_SCORE == 1.5
+            assert reloaded.Config.MSDC_REACQUIRE_IOU_THRESH == 0.05
+            assert reloaded.Config.MSDC_REACQUIRE_CENTER_DIST == 160.0
+    finally:
+        importlib.reload(config_module)
