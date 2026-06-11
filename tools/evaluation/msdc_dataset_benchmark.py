@@ -703,6 +703,7 @@ def _build_render_command(
     output_file: Path,
     max_frames: int,
     progress_interval: int,
+    class_source: str = "detector",
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -714,7 +715,7 @@ def _build_render_command(
         "--output",
         str(output_file),
         "--class-source",
-        "detector",
+        class_source,
     ]
     if max_frames > 0:
         cmd.extend(["--max-frames", str(max_frames)])
@@ -738,6 +739,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration-seconds", type=float, default=0.0, help="Run the first N seconds; 0 disables")
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--render", action="store_true", help="Render annotated videos after successful exports")
+    parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
     parser.add_argument("--run", action="store_true", help="Execute exports/eval/diagnostics; default prints commands")
     parser.add_argument("--run-id", default="", help="Timestamp/run folder name; default uses current time")
     parser.add_argument("--mode", default="benchmark", choices=["benchmark", "main", "ablation", "smoke"])
@@ -845,6 +847,7 @@ def main() -> None:
                     output_file=root / "visualizations" / spec.seq_name / f"{tracker_name}.mp4",
                     max_frames=export_max_frames,
                     progress_interval=args.progress_interval,
+                    class_source=str(args.render_class_source),
                 )
                 print(f"[RENDER:{tracker_name}] {_quote_command(render_cmd)}")
                 if args.run:

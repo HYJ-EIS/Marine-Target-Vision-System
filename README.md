@@ -980,14 +980,14 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id "<run-id>"
 
 # formal v2 指定 ablation 变体组；--duration-seconds 120 表示每个视频只评测前 2 分钟
-conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v2_<timestamp> --duration-seconds 120 --ablation-variants v2_template_off v2_shared_det v2_low_clean v2_output_age5_size8 v2_output_age8_size8 v2_candidate_low3_window6 v2_candidate_real2_age8 v2_roi_budget_active8_max2 v2_reacquire_interval1
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v2_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_template_off v2_shared_det v2_low_clean v2_output_age5_size8 v2_output_age8_size8 v2_candidate_low3_window6 v2_candidate_real2_age8 v2_roi_budget_active8_max2 v2_reacquire_interval1
 
 # 查看或校验最近一次正式实验输出路径
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --print-latest
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --check-latest
 ```
 
-该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`；相对 `--output-root` 会按仓库根目录解析，避免从不同 cwd 启动时写到不同位置。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果的绝对路径。`--ablation-variants` 可指定本次 ablation 只运行选定变体；`--duration-seconds` 可将 main/ablation 的每个视频限制到前 N 秒，默认 0 表示完整视频；未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
+该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`；相对 `--output-root` 会按仓库根目录解析，避免从不同 cwd 启动时写到不同位置。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果的绝对路径。`--ablation-variants` 可指定本次 ablation 只运行选定变体；`--duration-seconds` 可将 main/ablation 的每个视频限制到前 N 秒，默认 0 表示完整视频；`--render-class-source none` 会跳过渲染阶段的二次检测并把可视化类别写为 `target`，适合 CPU fallback 环境；未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
 
 结果表模板：
 

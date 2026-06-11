@@ -256,6 +256,20 @@ def test_build_render_command_uses_effective_export_max_frames(tmp_path):
     assert cmd[cmd.index("--max-frames") + 1] == "1798"
     assert "--progress-interval" in cmd
     assert cmd[cmd.index("--progress-interval") + 1] == "300"
+    assert cmd[cmd.index("--class-source") + 1] == "detector"
+
+
+def test_build_render_command_accepts_class_source_none(tmp_path):
+    cmd = _build_render_command(
+        input_video=tmp_path / "video.mp4",
+        tracker_file=tmp_path / "trackers" / "Ours-full" / "data" / "seq.txt",
+        output_file=tmp_path / "visualizations" / "seq" / "Ours-full.mp4",
+        max_frames=1798,
+        progress_interval=300,
+        class_source="none",
+    )
+
+    assert cmd[cmd.index("--class-source") + 1] == "none"
 
 
 def test_compute_per_gt_diagnostics_reports_fragmented_identity(tmp_path):

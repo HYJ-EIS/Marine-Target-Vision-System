@@ -42,6 +42,7 @@ def test_formal_commands_accept_duration_limit():
         progress_interval=500,
         run=True,
         duration_seconds=120.0,
+        render_class_source="none",
     )
     ablation_cmd = build_ablation_command(
         dataset_roots=["/data/a"],
@@ -52,10 +53,13 @@ def test_formal_commands_accept_duration_limit():
         run=True,
         variants=["v2_template_off"],
         duration_seconds=120.0,
+        render_class_source="none",
     )
 
     assert main_cmd[main_cmd.index("--duration-seconds") + 1] == "120.0"
     assert ablation_cmd[ablation_cmd.index("--duration-seconds") + 1] == "120.0"
+    assert main_cmd[main_cmd.index("--render-class-source") + 1] == "none"
+    assert ablation_cmd[ablation_cmd.index("--render-class-source") + 1] == "none"
 
 
 def test_ablation_command_includes_required_variants():

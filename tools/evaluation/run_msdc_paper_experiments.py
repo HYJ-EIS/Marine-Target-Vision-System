@@ -55,6 +55,7 @@ def build_main_command(
     progress_interval: int,
     run: bool,
     duration_seconds: float = 0.0,
+    render_class_source: str = "detector",
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -76,6 +77,8 @@ def build_main_command(
         "--progress-interval",
         str(progress_interval),
         "--render",
+        "--render-class-source",
+        render_class_source,
     ]
     if duration_seconds > 0.0:
         cmd.extend(["--duration-seconds", str(float(duration_seconds))])
@@ -93,6 +96,7 @@ def build_ablation_command(
     run: bool,
     variants: list[str] | None = None,
     duration_seconds: float = 0.0,
+    render_class_source: str = "detector",
 ) -> list[str]:
     selected_variants = ABLATION_VARIANTS if variants is None else variants
     cmd = [
@@ -115,6 +119,8 @@ def build_ablation_command(
         "--progress-interval",
         str(progress_interval),
         "--render",
+        "--render-class-source",
+        render_class_source,
     ]
     if duration_seconds > 0.0:
         cmd.extend(["--duration-seconds", str(float(duration_seconds))])
@@ -311,6 +317,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--speed-frames", type=int, default=1000)
     parser.add_argument("--progress-interval", type=int, default=500)
     parser.add_argument("--duration-seconds", type=float, default=0.0, help="Limit main/ablation videos to first N seconds; 0 means full videos")
+    parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
     parser.add_argument("--run-id", default="", help="Top-level run id; default is timestamp")
     parser.add_argument("--ablation-variants", nargs="+", default=ABLATION_VARIANTS)
     run_mode = parser.add_mutually_exclusive_group()
@@ -379,6 +386,7 @@ def main(argv: list[str] | None = None) -> None:
         progress_interval=int(args.progress_interval),
         run=bool(args.run_formal),
         duration_seconds=float(args.duration_seconds),
+        render_class_source=str(args.render_class_source),
     )
     ablation_cmd = build_ablation_command(
         dataset_roots=list(args.dataset_root),
@@ -389,6 +397,7 @@ def main(argv: list[str] | None = None) -> None:
         run=bool(args.run_formal),
         variants=list(args.ablation_variants),
         duration_seconds=float(args.duration_seconds),
+        render_class_source=str(args.render_class_source),
     )
     speed_cmd = build_speed_command(
         dataset_root=str(args.dataset_root[0]),
