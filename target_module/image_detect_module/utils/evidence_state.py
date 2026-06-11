@@ -940,11 +940,11 @@ class EvidenceStateUpdater:
         }]
 
     def _lost_search_conflict(self, lost_tracks: list[EvidenceTrack], group: _ObservationGroup) -> dict | None:
-        center_thresh = float(self._cfg("MSDC_REACQUIRE_CENTER_DIST", self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0) * 2.0))
         iou_thresh = float(self._cfg("MSDC_REACQUIRE_IOU_THRESH", 0.05))
         group_box = group.box.reshape(1, 4)
         best = None
         for track in lost_tracks:
+            center_thresh = self._reacquire_center_threshold(track)
             pred_box = self._predict_box(track).reshape(1, 4)
             iou_score = float(_iou_batch(pred_box, group_box)[0, 0])
             center_dist = float(_center_distance_batch(pred_box, group_box)[0, 0])
@@ -954,6 +954,7 @@ class EvidenceStateUpdater:
                 "gid": int(track.gid),
                 "iou": float(round(iou_score, 4)),
                 "center_distance": float(round(center_dist, 4)),
+                "center_threshold": float(round(center_thresh, 4)),
                 "sources": list(group.source_history),
             }
             if best is None or iou_score > float(best["iou"]):

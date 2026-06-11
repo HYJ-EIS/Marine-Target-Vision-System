@@ -114,6 +114,11 @@ class ReacquireScaleGateConfig(Config):
     MSDC_REACQUIRE_MAX_CENTER_DIST = 240.0
 
 
+class ReacquireScaleGateSkippedFrameConfig(ReacquireScaleGateConfig):
+    MSDC_REACQUIRE_INTERVAL = 5
+    MSDC_LOW_SPAWN_MIN_CONF = 0.30
+
+
 def _low_history(start_frame, boxes, score=0.35):
     history = []
     for offset, box in enumerate(boxes):
@@ -840,6 +845,38 @@ def test_template_only_observation_cannot_reacquire_lost_track():
     assert tracks[0].state == TrackState.LOST
     assert events == []
     assert updater.last_reacquire_debug["num_matches"] == 0
+
+
+def test_scale_expanded_lost_gate_suppresses_low_spawn_on_skipped_reacquire_frame():
+    updater = EvidenceStateUpdater(ReacquireScaleGateSkippedFrameConfig)
+    lost = EvidenceTrack(
+        gid=1,
+        public_id=1,
+        state=TrackState.LOST,
+        box=[100, 100, 180, 180],
+        velocity=[0.0, 0.0],
+        evidence_score=1.0,
+        hits=8,
+        misses=3,
+        age=20,
+        last_seen=10,
+        last_real_det_frame=10,
+        real_det_hits=8,
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [lost],
+        [_obs(11, source="low_det", score=0.8, box=[230, 100, 310, 180])],
+        frame_idx=11,
+    )
+
+    assert len(tracks) == 1
+    assert tracks[0].state == TrackState.LOST
+    assert events == []
+    assert updater.last_reacquire_debug["attempted"] is False
+    assert updater.last_reacquire_debug["num_suppressed_spawn_groups"] == 1
 
 
 def test_removed_guard_prevents_old_gid_reuse_and_creates_new_id():

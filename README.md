@@ -818,7 +818,7 @@ MS-DC-ELT Task 8 完成 identity lifecycle 闭环：active 目标连续 missing 
 - lost 不参与普通 candidate/active 关联
 - 仅当 `frame_idx % MSDC_REACQUIRE_INTERVAL == 0` 时尝试重捕
 - 重捕只接受 high/low/roi-low/reacquire 真实检测源，template 不能单独重捕 lost track；中心距离门控按目标尺度扩展并受最大距离限制
-- gating 同时考虑预测框附近的 IoU、中心距离、low-det score、motion score、motion consistency 和 template score
+- gating 同时考虑预测框附近的 IoU、中心距离、low-det score、motion score、motion consistency 和 template score；template score 仅在已合并真实检测源时作为辅助证据，template-only 重捕仍被阻止
 - 重捕得分达到 `MSDC_REACQUIRE_SCORE` 才触发 `LOST_REACQUIRED`
 - 靠近 lost 搜索门但未到重捕间隔的低分 observation 会被暂时抑制出生，避免同一目标分裂出新 ID
 
