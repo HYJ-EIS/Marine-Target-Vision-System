@@ -960,6 +960,16 @@ class EvidenceStateUpdater:
                 best = conflict
         return best
 
+    def _reacquire_center_threshold(self, track: EvidenceTrack) -> float:
+        base = float(self._cfg("MSDC_REACQUIRE_CENTER_DIST", self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0) * 2.0))
+        scale_factor = float(self._cfg("MSDC_REACQUIRE_CENTER_SCALE_FACTOR", 4.0))
+        max_dist = float(self._cfg("MSDC_REACQUIRE_MAX_CENTER_DIST", max(base, 240.0)))
+        box = _box_array(track.box)
+        width = max(1.0, float(box[2] - box[0]))
+        height = max(1.0, float(box[3] - box[1]))
+        scaled = max(base, max(width, height) * scale_factor)
+        return min(max_dist, scaled)
+
     def _score_reacquire_candidate(
         self,
         track: EvidenceTrack,
@@ -981,7 +991,7 @@ class EvidenceStateUpdater:
         iou_score = float(_iou_batch(pred_box, group_box)[0, 0])
         center_dist = float(_center_distance_batch(pred_box, group_box)[0, 0])
         iou_thresh = float(self._cfg("MSDC_REACQUIRE_IOU_THRESH", 0.05))
-        center_thresh = float(self._cfg("MSDC_REACQUIRE_CENTER_DIST", self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0) * 2.0))
+        center_thresh = self._reacquire_center_threshold(track)
         if same_gid_roi:
             center_thresh = max(center_thresh, float(self._cfg("MSDC_ROI_REACQUIRE_CENTER_DIST", 600.0)))
             iou_thresh = 0.0

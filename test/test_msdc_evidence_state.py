@@ -104,6 +104,16 @@ class SupportedMissingConfig(Config):
     MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2
 
 
+class ReacquireScaleGateConfig(Config):
+    MSDC_USE_REACQUIRE = True
+    MSDC_REACQUIRE_INTERVAL = 1
+    MSDC_REACQUIRE_SCORE = 0.5
+    MSDC_REACQUIRE_IOU_THRESH = 0.1
+    MSDC_REACQUIRE_CENTER_DIST = 40.0
+    MSDC_REACQUIRE_CENTER_SCALE_FACTOR = 6.0
+    MSDC_REACQUIRE_MAX_CENTER_DIST = 240.0
+
+
 def _low_history(start_frame, boxes, score=0.35):
     history = []
     for offset, box in enumerate(boxes):
@@ -770,6 +780,66 @@ def test_lost_track_reacquires_from_same_gid_roi_low_detection_with_wide_gate():
     assert tracks[0].last_real_det_frame == 10
     assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
     assert updater.last_reacquire_debug["num_matches"] == 1
+
+
+def test_reacquire_center_gate_expands_for_large_tracks():
+    updater = EvidenceStateUpdater(ReacquireScaleGateConfig)
+    lost = EvidenceTrack(
+        gid=1,
+        public_id=1,
+        state=TrackState.LOST,
+        box=[100, 100, 180, 180],
+        velocity=[0.0, 0.0],
+        evidence_score=1.0,
+        hits=8,
+        misses=3,
+        age=20,
+        last_seen=10,
+        last_real_det_frame=10,
+        real_det_hits=8,
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [lost],
+        [_obs(11, source="low_det", score=0.8, box=[230, 100, 310, 180])],
+        frame_idx=11,
+    )
+
+    assert tracks[0].state == TrackState.ACTIVE
+    assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
+    assert updater.last_reacquire_debug["matches"][0]["center_threshold"] == 240.0
+
+
+def test_template_only_observation_cannot_reacquire_lost_track():
+    updater = EvidenceStateUpdater(ReacquireScaleGateConfig)
+    lost = EvidenceTrack(
+        gid=1,
+        public_id=1,
+        state=TrackState.LOST,
+        box=[100, 100, 120, 120],
+        velocity=[0.0, 0.0],
+        evidence_score=1.0,
+        hits=8,
+        misses=3,
+        age=20,
+        last_seen=10,
+        last_real_det_frame=10,
+        real_det_hits=8,
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [lost],
+        [_obs(11, source="template", score=1.0, box=[100, 100, 120, 120])],
+        frame_idx=11,
+    )
+
+    assert tracks[0].state == TrackState.LOST
+    assert events == []
+    assert updater.last_reacquire_debug["num_matches"] == 0
 
 
 def test_removed_guard_prevents_old_gid_reuse_and_creates_new_id():

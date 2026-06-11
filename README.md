@@ -209,7 +209,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT 候选确认检测门控：`MSDC_CONFIRM_REQUIRE_DET = True`，`MSDC_CONFIRM_MIN_REAL_DET_HITS = 4`，`MSDC_CONFIRM_REQUIRE_HIGH_DET = True`，`MSDC_CONFIRM_ALLOW_MOTION_ONLY = False`；motion/template 只能作为辅助证据，不能单独起轨或确认 active
 - MS-DC-ELT 低阈值受约束确认：`MSDC_LOW_CANDIDATE_ENABLE = True`，`MSDC_LOW_SPAWN_MIN_CONF = 0.30`，`MSDC_LOW_CONFIRM_MIN_HITS = 5`，`MSDC_LOW_CONFIRM_WINDOW = 8`，`MSDC_LOW_CONFIRM_MIN_AVG_SCORE = 0.22`，`MSDC_LOW_CONFIRM_MAX_MISSES = 1`，`MSDC_LOW_CONFIRM_MAX_AREA_CHANGE = 1.8`，`MSDC_LOW_CONFIRM_MAX_CENTER_STEP_FACTOR = 3.0`；low-only 新目标先进入 hidden `low_candidate`，通过 M-of-N 和稳定性门控后才确认 active
 - MS-DC-ELT low-candidate ID 继承：`MSDC_LOW_INHERIT_ENABLE = True`，`MSDC_LOW_INHERIT_SCORE = 0.40`，`MSDC_LOW_INHERIT_IOU_THRESH = 0.02`，`MSDC_LOW_INHERIT_CENTER_DIST = 220.0`，`MSDC_LOW_INHERIT_MAX_LOST_AGE = 120`，`MSDC_LOW_INHERIT_USE_HISTORY_VELOCITY = True`，`MSDC_LOW_INHERIT_MAX_PREDICT_AGE = 120`，`MSDC_LOW_INHERIT_MOTION_MIN = 0.15`，`MSDC_LOW_INHERIT_CLASS_MATCH = True`，`MSDC_LOW_INHERIT_CLASS_MISMATCH_CENTER_DIST = 80.0`，`MSDC_LOW_INHERIT_CLASS_MISMATCH_PENALTY = 0.0`；稳定 low-candidate 确认前会优先接到 nearby lost track 并继承其 `public_id`，lost 预测优先使用低阈值历史的稳健中位速度，类别不一致时不再硬拒绝但要求更近，失败后才允许生成新公开 ID
-- MS-DC-ELT 丢失与重捕阈值：`MSDC_ACTIVE_MISSING_PATIENCE = 2`，`MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = 6`，`MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = 8`，`MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2`，`MSDC_LOST_MAX_AGE = 80`，`MSDC_REACQUIRE_INTERVAL = 5`，`MSDC_REACQUIRE_SCORE = 1.5`；近期有 low/roi-low 真实证据且当前仍有 template/motion 辅助支持时，active 可短时间延迟转 lost
+- MS-DC-ELT 丢失与重捕阈值：`MSDC_ACTIVE_MISSING_PATIENCE = 2`，`MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = 6`，`MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = 8`，`MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2`，`MSDC_LOST_MAX_AGE = 80`，`MSDC_REACQUIRE_INTERVAL = 5`，`MSDC_REACQUIRE_SCORE = 1.5`，`MSDC_REACQUIRE_CENTER_SCALE_FACTOR = 4.0`，`MSDC_REACQUIRE_MAX_CENTER_DIST = 240.0`；近期有 low/roi-low 真实证据且当前仍有 template/motion 辅助支持时，active 可短时间延迟转 lost
 - MS-DC-ELT ROI 重检：`MSDC_USE_ROI_REDETECT = True`，`MSDC_ROI_REDETECT_LOW_CONF = 0.12`，`MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 8`，`MSDC_ROI_REDETECT_LOST_INTERVAL = 3`，`MSDC_ROI_REDETECT_MAX_TRACKS = 2`，`MSDC_ROI_REDETECT_SEARCH_SCALE = 4.0`，`MSDC_ROI_REDETECT_UPSCALE = 2.0`，`MSDC_ROI_REDETECT_EXISTING_IOU = 0.5`，`MSDC_ROI_REDETECT_MIN_BOX_SIZE = 8`，`MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 1`；ROI 重检作为低频重捕工具，只针对已有 active/lost track，过滤 tiny / existing-overlap box，且不单独生成新 candidate
 - MS-DC-ELT removed guard：`MSDC_REUSE_GUARD_ENABLE = True`，`MSDC_REMOVED_GUARD_FRAMES = 120`，`MSDC_removed_GUARD_FRAMES = 120`，`MSDC_REMOVED_GUARD_IOU_THRESH = 0.3`，`MSDC_REMOVED_GUARD_CENTER_DIST = 80.0`
 - MS-DC-ELT evidence 关联阈值：`MSDC_ASSOC_IOU_THRESH = 0.2`，`MSDC_ASSOC_CENTER_DIST = 80.0`，`MSDC_OBS_MERGE_IOU_THRESH = 0.5`
@@ -817,7 +817,7 @@ MS-DC-ELT Task 8 完成 identity lifecycle 闭环：active 目标连续 missing 
 
 - lost 不参与普通 candidate/active 关联
 - 仅当 `frame_idx % MSDC_REACQUIRE_INTERVAL == 0` 时尝试重捕
-- 重捕 observation 使用 low-det、motion、可选 template 和 reacquire source
+- 重捕只接受 high/low/roi-low/reacquire 真实检测源，template 不能单独重捕 lost track；中心距离门控按目标尺度扩展并受最大距离限制
 - gating 同时考虑预测框附近的 IoU、中心距离、low-det score、motion score、motion consistency 和 template score
 - 重捕得分达到 `MSDC_REACQUIRE_SCORE` 才触发 `LOST_REACQUIRED`
 - 靠近 lost 搜索门但未到重捕间隔的低分 observation 会被暂时抑制出生，避免同一目标分裂出新 ID
