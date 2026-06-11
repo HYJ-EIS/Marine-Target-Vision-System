@@ -85,9 +85,11 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
             "detector_calls_high_det": 0,
             "detector_calls_low_det": 0,
             "detector_calls_tracker_update": 0,
+            "detector_calls_roi_redetect": 0,
             "mean_read_ms": "0.000000",
             "mean_high_det_ms": "0.000000",
             "mean_low_det_ms": "0.000000",
+            "mean_roi_redetect_ms": "0.000000",
             "mean_tracker_ms": "0.000000",
         }
 
@@ -111,6 +113,8 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
         rows = list(csv.DictReader(fh))
     assert [row["tracker"] for row in rows] == ["ocsort", "msdc_elt"]
     assert {row["processed_frames"] for row in rows} == {"0"}
+    assert "detector_calls_roi_redetect" in rows[0]
+    assert "mean_roi_redetect_ms" in rows[0]
 
 
 def test_run_speed_benchmark_restores_debug_events_after_exception(tmp_path, monkeypatch):
@@ -239,3 +243,5 @@ def test_msdc_shared_low_high_detection_uses_one_detector_call(tmp_path, monkeyp
     assert row["detector_calls_total"] == 1
     assert row["detector_calls_high_det"] == 0
     assert row["detector_calls_low_det"] == 1
+    assert row["detector_calls_roi_redetect"] == 0
+    assert row["mean_roi_redetect_ms"] == "0.000000"

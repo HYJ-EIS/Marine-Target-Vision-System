@@ -166,3 +166,70 @@ def test_roi_redetect_caps_boxes_per_roi_by_score_and_track_center():
     assert len(boxes) == 2
     assert [box["confidence"] for box in boxes] == [0.7, 0.6]
     assert debug["num_capped_by_roi"] == 1
+
+
+def test_roi_redetect_uses_processor_stage_context_when_available():
+    from target_module.image_detect_module.utils.msdc_types import EvidenceTrack, TrackState
+    from target_module.image_detect_module.utils.roi_redetect import ROIRedetector
+
+    class StageProcessor:
+        def __init__(self):
+            self.stage = "unspecified"
+            self.calls = []
+
+        def use_stage(self, stage):
+            processor = self
+
+            class _Context:
+                def __enter__(self):
+                    self.previous = processor.stage
+                    processor.stage = stage
+                    return processor
+
+                def __exit__(self, exc_type, exc, tb):
+                    processor.stage = self.previous
+                    return False
+
+            return _Context()
+
+        def process_frame(self, frame, file_type, conf_override=None):
+            self.calls.append((self.stage, frame.shape, file_type, conf_override))
+            return {"boxes": [{"x": 2, "y": 2, "w": 10, "h": 10, "confidence": 0.8, "class": "UAV"}]}
+
+    class ROIStageConfig(Config):
+        MSDC_USE_ROI_REDETECT = True
+        MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 1
+        MSDC_ROI_REDETECT_MAX_TRACKS = 1
+        MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 1
+        MSDC_ROI_REDETECT_MIN_CROP_SIZE = 8
+        MSDC_ROI_REDETECT_EXISTING_IOU = 1.1
+
+    processor = StageProcessor()
+    redetector = ROIRedetector(ROIStageConfig, processor=processor)
+    track = EvidenceTrack(
+        gid=1,
+        public_id=1,
+        state=TrackState.ACTIVE,
+        box=[10, 10, 30, 30],
+        evidence_score=3.0,
+        hits=4,
+        misses=0,
+        age=4,
+        last_seen=0,
+        last_real_det_frame=0,
+        real_det_hits=4,
+        class_id=2,
+        class_name="UAV",
+    )
+
+    redetector.update(
+        frame=np.zeros((64, 64, 3), dtype=np.uint8),
+        tracks=[track],
+        frame_idx=1,
+        file_type="visible",
+        existing_boxes=[],
+    )
+
+    assert processor.calls
+    assert {call[0] for call in processor.calls} == {"roi_redetect"}
+    assert processor.stage == "unspecified"

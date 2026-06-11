@@ -924,7 +924,7 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 conda run -n ship_detect python tools/evaluation/msdc_speed_benchmark.py --dataset-root "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集" --trackers ocsort botsort msdc_elt --frames 1000 --output-root "results/msdc_paper_phase1/<run-id>/speed" --run-id "<speed-run-id>" --progress-interval 100
 ```
 
-该脚本使用同一视频和同一请求帧数依次测试 `ocsort`、`botsort`、`msdc_elt`，不渲染视频、不发送 MQ、不运行 TrackEval，并在测速期间关闭 MS-DC-ELT debug JSONL。输出目录为 `<output-root>/<run-id>/`，包含逐帧阶段耗时 `speed_timings.jsonl` 和汇总表 `speed_results.csv`；汇总字段包括处理帧数、总耗时、平均 FPS、平均/P50/P95 延迟、检测器调用次数，以及读取、高阈值检测、低阈值检测、tracker update 的平均耗时。`peak_memory_mb` 为写入每个 tracker 汇总行时当前进程已观测到的 peak RSS，不是隔离的单 tracker 内存增量。
+该脚本使用同一视频和同一请求帧数依次测试 `ocsort`、`botsort`、`msdc_elt`，不渲染视频、不发送 MQ、不运行 TrackEval，并在测速期间关闭 MS-DC-ELT debug JSONL。输出目录为 `<output-root>/<run-id>/`，包含逐帧阶段耗时 `speed_timings.jsonl` 和汇总表 `speed_results.csv`；汇总字段包括处理帧数、总耗时、平均 FPS、平均/P50/P95 延迟、检测器调用次数，以及读取、高阈值检测、低阈值检测、tracker update 的平均耗时。MS-DC-ELT speed CSV separates full-frame detector calls from ROI redetect calls via `detector_calls_roi_redetect` and `mean_roi_redetect_ms`; `detector_calls_tracker_update` excludes ROI detector calls and represents detector calls still hidden inside lifecycle update. `peak_memory_mb` 为写入每个 tracker 汇总行时当前进程已观测到的 peak RSS，不是隔离的单 tracker 内存增量。
 
 实验汇总与报告生成：
 

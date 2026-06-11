@@ -37,9 +37,11 @@ SPEED_FIELDS = [
     "detector_calls_high_det",
     "detector_calls_low_det",
     "detector_calls_tracker_update",
+    "detector_calls_roi_redetect",
     "mean_read_ms",
     "mean_high_det_ms",
     "mean_low_det_ms",
+    "mean_roi_redetect_ms",
     "mean_tracker_ms",
 ]
 METHOD_LABELS = {
@@ -341,6 +343,10 @@ def _run_tracker_benchmark(
 
         summary = summarize_latencies(latencies, processed_frames=processed_frames)
         call_counts = dict(processor.call_counts)
+        roi_calls = int(processor.call_counts.get("roi_redetect", 0))
+        roi_seconds = float(processor.stage_seconds.get("roi_redetect", 0.0))
+        tracker_update_calls = int(processor.call_counts.get("tracker_update", 0))
+        tracker_update_detector_calls = max(0, tracker_update_calls - roi_calls)
         return {
             "run_id": run_id,
             "commit_hash": commit_hash,
@@ -360,10 +366,12 @@ def _run_tracker_benchmark(
             "detector_calls_total": int(sum(call_counts.values())),
             "detector_calls_high_det": int(call_counts.get("high_det", 0)),
             "detector_calls_low_det": int(call_counts.get("low_det", 0)),
-            "detector_calls_tracker_update": int(call_counts.get("tracker_update", 0)),
+            "detector_calls_tracker_update": tracker_update_detector_calls,
+            "detector_calls_roi_redetect": roi_calls,
             "mean_read_ms": _format_float(_mean_ms(read_times)),
             "mean_high_det_ms": _format_float(_mean_ms(high_det_times)),
             "mean_low_det_ms": _format_float(_mean_ms(low_det_times)),
+            "mean_roi_redetect_ms": _format_float((roi_seconds / roi_calls * 1000.0) if roi_calls else 0.0),
             "mean_tracker_ms": _format_float(_mean_ms(tracker_times)),
         }
     finally:

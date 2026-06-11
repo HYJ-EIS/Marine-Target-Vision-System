@@ -70,11 +70,13 @@ class ROIRedetector:
                     (max(1, int(round((x1 - x0) * scale))), max(1, int(round((y1 - y0) * scale)))),
                     interpolation=cv2.INTER_LINEAR,
                 )
-            stats = self.processor.process_frame(
-                inference_frame,
-                file_type,
-                conf_override=float(getattr(self.config, "MSDC_ROI_REDETECT_LOW_CONF", 0.12)),
-            )
+            low_conf = float(getattr(self.config, "MSDC_ROI_REDETECT_LOW_CONF", 0.12))
+            process_context = getattr(self.processor, "use_stage", None)
+            if callable(process_context):
+                with process_context("roi_redetect"):
+                    stats = self.processor.process_frame(inference_frame, file_type, conf_override=low_conf)
+            else:
+                stats = self.processor.process_frame(inference_frame, file_type, conf_override=low_conf)
             local_boxes = list((stats or {}).get("boxes", []))
             roi_boxes: list[dict] = []
             for local_box in local_boxes:
