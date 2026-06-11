@@ -43,6 +43,8 @@ SPEED_FIELDS = [
     "mean_low_det_ms",
     "mean_roi_redetect_ms",
     "mean_tracker_ms",
+    "mean_render_ms",
+    "mean_write_ms",
 ]
 METHOD_LABELS = {
     "ocsort": "FFCA-YOLO + OC-SORT",
@@ -335,6 +337,8 @@ def _run_tracker_benchmark(
                     "high_det_s": high_det_s,
                     "low_det_s": low_det_s,
                     "tracker_s": tracker_s,
+                    "render_s": 0.0,
+                    "write_s": 0.0,
                     "total_s": total_s,
                 },
             )
@@ -371,6 +375,8 @@ def _run_tracker_benchmark(
             "mean_low_det_ms": _format_float(_mean_ms(low_det_times)),
             "mean_roi_redetect_ms": _format_float((roi_seconds / roi_calls * 1000.0) if roi_calls else 0.0),
             "mean_tracker_ms": _format_float(_mean_ms(tracker_times)),
+            "mean_render_ms": _format_float(0.0),
+            "mean_write_ms": _format_float(0.0),
         }
     finally:
         cap.release()

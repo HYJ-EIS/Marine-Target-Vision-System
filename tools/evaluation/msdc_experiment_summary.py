@@ -30,10 +30,14 @@ SPEED_FIELDS = [
     "detector_calls_high_det",
     "detector_calls_low_det",
     "detector_calls_tracker_update",
+    "detector_calls_roi_redetect",
     "mean_read_ms",
     "mean_high_det_ms",
     "mean_low_det_ms",
+    "mean_roi_redetect_ms",
     "mean_tracker_ms",
+    "mean_render_ms",
+    "mean_write_ms",
 ]
 SPEED_OUTPUT_FIELDS = [*SPEED_FIELDS, "status", "failure"]
 

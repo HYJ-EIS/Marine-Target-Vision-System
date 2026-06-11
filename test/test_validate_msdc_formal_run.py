@@ -30,11 +30,21 @@ def _make_valid_run(root):
         json.dumps({"frame_idx": 0, "boxes": []}) + "\n",
         encoding="utf-8",
     )
+    (tracker_diag_dir / "candidate_pool_stats.jsonl").write_text(
+        json.dumps({"frame_idx": 0, "candidate_count": 0}) + "\n",
+        encoding="utf-8",
+    )
 
     diag_dir = root / "main/main_full/diagnostics/seq"
     diag_dir.mkdir(parents=True)
     (diag_dir / "msdc_elt_per_gt_diagnostics.csv").write_text(
         "gt_id,coverage_ratio\n1,1.0\n",
+        encoding="utf-8",
+    )
+    eval_dir = root / "main/main_full/eval"
+    eval_dir.mkdir(parents=True)
+    (eval_dir / "motchallenge_summary.csv").write_text(
+        "tracker,HOTA,MOTA,IDF1,IDSW,FP,FN,IDTP,IDFP,IDFN\nmsdc_elt,67,80,66,64,3000,21000,1,2,3\n",
         encoding="utf-8",
     )
 
@@ -79,6 +89,8 @@ def _make_valid_run(root):
                 "mean_low_det_ms": "80",
                 "mean_roi_redetect_ms": "10",
                 "mean_tracker_ms": "30",
+                "mean_render_ms": "0",
+                "mean_write_ms": "0",
             }
         ],
         [
@@ -97,7 +109,17 @@ def _make_valid_run(root):
             "mean_low_det_ms",
             "mean_roi_redetect_ms",
             "mean_tracker_ms",
+            "mean_render_ms",
+            "mean_write_ms",
         ],
+    )
+    _write_csv(
+        root / "summary/path_manifest.csv",
+        [
+            {"kind": "mot_result", "path": str(mot_dir / "seq.txt")},
+            {"kind": "trackeval_summary", "path": str(eval_dir / "motchallenge_summary.csv")},
+        ],
+        ["kind", "path"],
     )
 
 
@@ -119,3 +141,33 @@ def test_validate_run_rejects_missing_visualization(tmp_path):
 
     assert result["ok"] is False
     assert any("visualization" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_candidate_pool_stats(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "main/main_full/trackers/msdc_elt/diagnostics/seq/candidate_pool_stats.jsonl").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("candidate_pool_stats" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_trackeval_summary(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "main/main_full/eval/motchallenge_summary.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("trackeval_summary" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_path_manifest(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "summary/path_manifest.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("path_manifest" in item for item in result["missing"])

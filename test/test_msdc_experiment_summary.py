@@ -200,7 +200,15 @@ def test_cli_preflights_required_summaries_before_creating_outputs(tmp_path, mon
 
 def test_cli_normalizes_speed_csv_missing_columns_to_stable_schema(tmp_path, monkeypatch):
     speed_csv = tmp_path / "speed" / "speed_results.csv"
-    _write_csv(speed_csv, [{"run_id": "r1", "tracker": "ocsort", "mean_fps": "12.5"}])
+    _write_csv(speed_csv, [{
+        "run_id": "r1",
+        "tracker": "ocsort",
+        "mean_fps": "12.5",
+        "detector_calls_roi_redetect": "3",
+        "mean_roi_redetect_ms": "4.5",
+        "mean_render_ms": "0",
+        "mean_write_ms": "0",
+    }])
 
     output_root, _, _ = _run_summary_cli(monkeypatch, tmp_path, speed_csv)
 
@@ -214,6 +222,10 @@ def test_cli_normalizes_speed_csv_missing_columns_to_stable_schema(tmp_path, mon
     assert rows[0]["mean_fps"] == "12.5"
     assert rows[0]["commit_hash"] == "N/A"
     assert rows[0]["p95_latency_ms"] == "N/A"
+    assert rows[0]["detector_calls_roi_redetect"] == "3"
+    assert rows[0]["mean_roi_redetect_ms"] == "4.5"
+    assert rows[0]["mean_render_ms"] == "0"
+    assert rows[0]["mean_write_ms"] == "0"
     assert rows[0]["status"] == "ok"
     assert rows[0]["failure"] == ""
 

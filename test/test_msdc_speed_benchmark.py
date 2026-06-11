@@ -103,6 +103,8 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
             "mean_low_det_ms": "0.000000",
             "mean_roi_redetect_ms": "0.000000",
             "mean_tracker_ms": "0.000000",
+            "mean_render_ms": "0.000000",
+            "mean_write_ms": "0.000000",
         }
 
     video = tmp_path / "input.mp4"
@@ -127,6 +129,8 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
     assert {row["processed_frames"] for row in rows} == {"0"}
     assert "detector_calls_roi_redetect" in rows[0]
     assert "mean_roi_redetect_ms" in rows[0]
+    assert "mean_render_ms" in rows[0]
+    assert "mean_write_ms" in rows[0]
 
 
 def test_run_speed_benchmark_restores_debug_events_after_exception(tmp_path, monkeypatch):
@@ -257,6 +261,8 @@ def test_msdc_shared_low_high_detection_uses_one_detector_call(tmp_path, monkeyp
     assert row["detector_calls_low_det"] == 1
     assert row["detector_calls_roi_redetect"] == 0
     assert row["mean_roi_redetect_ms"] == "0.000000"
+    assert row["mean_render_ms"] == "0.000000"
+    assert row["mean_write_ms"] == "0.000000"
 
 
 def test_tracker_update_detector_calls_do_not_subtract_nested_roi_calls(tmp_path, monkeypatch):

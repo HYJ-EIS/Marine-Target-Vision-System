@@ -22,6 +22,8 @@ REQUIRED_SPEED = [
     "mean_low_det_ms",
     "mean_roi_redetect_ms",
     "mean_tracker_ms",
+    "mean_render_ms",
+    "mean_write_ms",
 ]
 
 
@@ -51,9 +53,12 @@ def validate_run(run_root: str | Path) -> dict[str, object]:
 
     glob_checks = [
         ("mot_result", "**/trackers/*/data/*.txt"),
+        ("trackeval_summary", "**/eval/motchallenge_summary.csv"),
         ("stage_observations", "**/trackers/*/diagnostics/**/stage_observations.jsonl"),
+        ("candidate_pool_stats", "**/trackers/*/diagnostics/**/candidate_pool_stats.jsonl"),
         ("diagnostic_csv", "**/diagnostics/**/*.csv"),
         ("visualization", "**/visualizations/**/*.mp4"),
+        ("path_manifest", "summary/path_manifest.csv"),
     ]
     for label, pattern in glob_checks:
         if not _has_nonempty_glob(root, pattern):
