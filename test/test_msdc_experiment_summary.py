@@ -250,7 +250,30 @@ def test_v2_ablation_switches_are_reported():
     from tools.evaluation.msdc_experiment_summary import _ablation_switches
 
     switches = _ablation_switches("v2_candidate_real2_age8")
+    assert switches["MSDC_USE_LOW_DET"] == "True"
+    assert switches["MSDC_USE_REACQUIRE"] == "True"
+    assert switches["MSDC_USE_ROI_REDETECT"] == "True"
+    assert switches["MSDC_REUSE_GUARD_ENABLE"] == "True"
     assert switches["MSDC_USE_TEMPLATE"] == "False"
     assert switches["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "True"
     assert switches["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
     assert switches["MSDC_CANDIDATE_MAX_AGE"] == "8"
+
+
+def test_v2_ablation_switches_report_all_changed_fields():
+    from tools.evaluation.msdc_experiment_summary import ABLATION_FIELDS, _ablation_switches
+
+    for field in [
+        "MSDC_ROI_REDETECT_LOST_INTERVAL",
+        "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI",
+        "MSDC_REACQUIRE_MAX_CENTER_DIST",
+    ]:
+        assert field in ABLATION_FIELDS
+
+    roi_switches = _ablation_switches("v2_roi_budget_active8_max2")
+    assert roi_switches["MSDC_ROI_REDETECT_LOST_INTERVAL"] == "3"
+    assert roi_switches["MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI"] == "1"
+
+    reacquire_switches = _ablation_switches("v2_reacquire_interval5_center240")
+    assert reacquire_switches["MSDC_REACQUIRE_CENTER_DIST"] == "240"
+    assert reacquire_switches["MSDC_REACQUIRE_MAX_CENTER_DIST"] == "320"

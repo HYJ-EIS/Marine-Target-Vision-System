@@ -220,7 +220,7 @@ def test_run_command_executes_child_from_repo_root(tmp_path, monkeypatch):
 
 
 def test_v2_ablation_variants_are_available():
-    from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS
+    from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, _variant_env
 
     expected = {
         "v2_template_off",
@@ -242,3 +242,25 @@ def test_v2_ablation_variants_are_available():
     assert ABLATION_VARIANTS["v2_template_off"]["MSDC_USE_TEMPLATE"] == "0"
     assert ABLATION_VARIANTS["v2_shared_det"]["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "1"
     assert ABLATION_VARIANTS["v2_roi_budget_active8_max2"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "2"
+
+    env = _variant_env("v2_candidate_real2_age8")
+    assert env["MSDC_USE_LOW_DET"] == "1"
+    assert env["MSDC_USE_REACQUIRE"] == "1"
+    assert env["MSDC_USE_ROI_REDETECT"] == "1"
+    assert env["MSDC_REUSE_GUARD_ENABLE"] == "1"
+    assert env["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
+    assert env["MSDC_CANDIDATE_MAX_AGE"] == "8"
+
+
+def test_v2_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):
+    from tools.experiments.run_msdc_ablation import _execution_env, _variant_env
+
+    monkeypatch.setenv("MSDC_USE_LOW_DET", "0")
+    monkeypatch.setenv("MSDC_CONFIRM_REQUIRE_HIGH_DET", "0")
+    monkeypatch.setenv("UNRELATED_FLAG", "keep")
+
+    env = _execution_env("v2_candidate_real2_age8", _variant_env("v2_candidate_real2_age8"))
+
+    assert env["MSDC_USE_LOW_DET"] == "1"
+    assert "MSDC_CONFIRM_REQUIRE_HIGH_DET" not in env
+    assert env["UNRELATED_FLAG"] == "keep"

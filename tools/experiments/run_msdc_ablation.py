@@ -19,6 +19,31 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[2]
 
 
+V2_BASELINE_ENV = {
+    "MSDC_USE_LOW_DET": "1",
+    "MSDC_USE_MOTION": "1",
+    "MSDC_USE_TEMPLATE": "0",
+    "MSDC_TEMPLATE_ENABLE": "0",
+    "MSDC_USE_REACQUIRE": "1",
+    "MSDC_USE_ROI_REDETECT": "1",
+    "MSDC_REUSE_GUARD_ENABLE": "1",
+    "MSDC_EXPORT_SHARE_LOW_HIGH_DET": "1",
+    "MSDC_OUTPUT_MAX_REAL_DET_AGE": "3",
+    "MSDC_OUTPUT_MIN_BOX_SIZE": "12",
+    "MSDC_LOW_CONFIRM_MIN_HITS": "5",
+    "MSDC_LOW_CONFIRM_WINDOW": "8",
+    "MSDC_CONFIRM_MIN_REAL_DET_HITS": "4",
+    "MSDC_CANDIDATE_MAX_AGE": "5",
+    "MSDC_ROI_REDETECT_ACTIVE_INTERVAL": "8",
+    "MSDC_ROI_REDETECT_LOST_INTERVAL": "3",
+    "MSDC_ROI_REDETECT_MAX_TRACKS": "2",
+    "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI": "1",
+    "MSDC_REACQUIRE_INTERVAL": "5",
+    "MSDC_REACQUIRE_CENTER_DIST": "160",
+    "MSDC_REACQUIRE_MAX_CENTER_DIST": "240",
+}
+
+
 ABLATION_VARIANTS = {
     "Ours-lite-no-motion": {
         "MSDC_USE_LOW_DET": "1",
@@ -180,7 +205,20 @@ def _quote_command(argv: list[str]) -> str:
 
 
 def _variant_env(variant: str) -> dict[str, str]:
+    if variant.startswith("v2_"):
+        env = dict(V2_BASELINE_ENV)
+        env.update(ABLATION_VARIANTS[variant])
+        return env
     return dict(ABLATION_VARIANTS[variant])
+
+
+def _execution_env(label: str, env_delta: dict[str, str]) -> dict[str, str]:
+    if label.startswith("v2_"):
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MSDC_")}
+    else:
+        env = os.environ.copy()
+    env.update(env_delta)
+    return env
 
 
 def build_export_command(
@@ -258,8 +296,7 @@ def main() -> None:
         print(f"[{label}] {printable}")
 
         if args.run:
-            env = os.environ.copy()
-            env.update(env_delta)
+            env = _execution_env(label, env_delta)
             subprocess.run(cmd, cwd=str(_ROOT), env=env, check=True)
 
     if not args.run:
