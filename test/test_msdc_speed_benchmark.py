@@ -47,6 +47,18 @@ def test_counting_processor_records_calls_by_stage():
     assert processor.call_counts == {"high_det": 1, "low_det": 1}
 
 
+def test_counting_processor_restores_outer_stage_after_nested_roi_stage():
+    processor = CountingProcessor(DummyProcessor())
+
+    with processor.use_stage("tracker_update"):
+        processor.process_frame(frame=object(), file_type="visible")
+        with processor.use_stage("roi_redetect"):
+            processor.process_frame(frame=object(), file_type="visible")
+        processor.process_frame(frame=object(), file_type="visible")
+
+    assert processor.call_counts == {"tracker_update": 2, "roi_redetect": 1}
+
+
 def test_direct_script_reaches_dataset_validation_without_import_error(tmp_path):
     script = _ROOT / "tools" / "evaluation" / "msdc_speed_benchmark.py"
     missing_dataset = tmp_path / "missing-dataset"
@@ -245,3 +257,79 @@ def test_msdc_shared_low_high_detection_uses_one_detector_call(tmp_path, monkeyp
     assert row["detector_calls_low_det"] == 1
     assert row["detector_calls_roi_redetect"] == 0
     assert row["mean_roi_redetect_ms"] == "0.000000"
+
+
+def test_tracker_update_detector_calls_do_not_subtract_nested_roi_calls(tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+    import target_module.image_detect_module.target_detection as td
+    import tools.evaluation.export_mot_results as export_helpers
+    import target_module.image_detect_module.utils.lifecycle_tracker as lifecycle_module
+    from target_module.image_detect_module.config import Config
+
+    captured_call_counts = {}
+
+    class FakeProcessor:
+        def process_frame(self, frame, file_type, conf_override=None):
+            return {
+                "boxes": [
+                    {"x": 1, "y": 2, "w": 3, "h": 4, "confidence": 0.99, "class": "USV"},
+                ],
+            }
+
+    class FakeCapture:
+        def __init__(self, path):
+            self._reads = 0
+
+        def isOpened(self):
+            return True
+
+        def get(self, prop):
+            values = {
+                cv2.CAP_PROP_FPS: 25.0,
+                cv2.CAP_PROP_FRAME_WIDTH: 4,
+                cv2.CAP_PROP_FRAME_HEIGHT: 3,
+            }
+            return values.get(prop, 0)
+
+        def read(self):
+            if self._reads > 0:
+                return False, None
+            self._reads += 1
+            return True, np.zeros((3, 4, 3), dtype=np.uint8)
+
+        def release(self):
+            pass
+
+    def fake_update_tracking_for_frame(**kwargs):
+        processor = kwargs["detector"].processor
+        processor.process_frame(kwargs["frame"], kwargs["file_type"])
+        with processor.use_stage("roi_redetect"):
+            processor.process_frame(kwargs["frame"], kwargs["file_type"])
+        processor.process_frame(kwargs["frame"], kwargs["file_type"])
+        captured_call_counts.update(processor.call_counts)
+        return []
+
+    monkeypatch.setattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", True, raising=False)
+    monkeypatch.setattr(td, "get_detector", lambda: SimpleNamespace(processor=FakeProcessor()))
+    monkeypatch.setattr(cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(lifecycle_module, "MSDCLifecycleTracker", lambda **kwargs: object())
+    monkeypatch.setattr(export_helpers, "_update_tracking_for_frame", fake_update_tracking_for_frame)
+
+    row = benchmark._run_tracker_benchmark(
+        input_video=tmp_path / "input.mp4",
+        seq_name="seq",
+        file_type="visible",
+        tracker_type="msdc_elt",
+        requested_frames=1,
+        run_id="run",
+        commit_hash="abc123",
+        timing_fh=io.StringIO(),
+        progress_interval=0,
+    )
+
+    assert captured_call_counts["tracker_update"] == 2
+    assert captured_call_counts["roi_redetect"] == 1
+    assert row["detector_calls_total"] == 4
+    assert row["detector_calls_tracker_update"] == 2
+    assert row["detector_calls_roi_redetect"] == 1

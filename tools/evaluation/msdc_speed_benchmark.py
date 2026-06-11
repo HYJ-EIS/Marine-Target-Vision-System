@@ -345,8 +345,6 @@ def _run_tracker_benchmark(
         call_counts = dict(processor.call_counts)
         roi_calls = int(processor.call_counts.get("roi_redetect", 0))
         roi_seconds = float(processor.stage_seconds.get("roi_redetect", 0.0))
-        tracker_update_calls = int(processor.call_counts.get("tracker_update", 0))
-        tracker_update_detector_calls = max(0, tracker_update_calls - roi_calls)
         return {
             "run_id": run_id,
             "commit_hash": commit_hash,
@@ -366,7 +364,7 @@ def _run_tracker_benchmark(
             "detector_calls_total": int(sum(call_counts.values())),
             "detector_calls_high_det": int(call_counts.get("high_det", 0)),
             "detector_calls_low_det": int(call_counts.get("low_det", 0)),
-            "detector_calls_tracker_update": tracker_update_detector_calls,
+            "detector_calls_tracker_update": int(call_counts.get("tracker_update", 0)),
             "detector_calls_roi_redetect": roi_calls,
             "mean_read_ms": _format_float(_mean_ms(read_times)),
             "mean_high_det_ms": _format_float(_mean_ms(high_det_times)),
