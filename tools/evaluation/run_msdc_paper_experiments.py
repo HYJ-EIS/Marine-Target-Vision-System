@@ -19,6 +19,7 @@ from typing import Any
 _ROOT = Path(__file__).resolve().parents[2]
 
 MAIN_TRACKERS = ["ocsort", "botsort", "msdc_elt"]
+MAIN_MSDC_VARIANT = "v2_low_clean"
 ABLATION_VARIANTS = [
     "Ours-full",
     "Ours-lite-no-motion",
@@ -73,7 +74,7 @@ def build_main_command(
         "--trackers",
         *MAIN_TRACKERS,
         "--variants",
-        "Ours-full",
+        MAIN_MSDC_VARIANT,
         "--progress-interval",
         str(progress_interval),
         "--render",

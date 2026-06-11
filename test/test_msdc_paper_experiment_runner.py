@@ -31,6 +31,7 @@ def test_main_command_uses_full_video_and_render():
     assert "--render" in cmd
     assert "--run" in cmd
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == ["ocsort", "botsort", "msdc_elt"]
+    assert cmd[cmd.index("--variants") + 1] == "v2_low_clean"
 
 
 def test_formal_commands_accept_duration_limit():
@@ -60,6 +61,7 @@ def test_formal_commands_accept_duration_limit():
     assert ablation_cmd[ablation_cmd.index("--duration-seconds") + 1] == "120.0"
     assert main_cmd[main_cmd.index("--render-class-source") + 1] == "none"
     assert ablation_cmd[ablation_cmd.index("--render-class-source") + 1] == "none"
+    assert main_cmd[main_cmd.index("--variants") + 1] == "v2_low_clean"
 
 
 def test_ablation_command_includes_required_variants():

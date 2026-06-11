@@ -89,6 +89,25 @@ def test_main_results_maps_trackers_to_method_labels(tmp_path):
     assert out.read_text(encoding="utf-8-sig").splitlines()[0].startswith("run_name,method,tracker")
 
 
+def test_main_results_include_v2_low_clean_as_msdc_v2(tmp_path):
+    summary = tmp_path / "eval" / "motchallenge_summary.csv"
+    _write_csv(summary, [
+        {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
+        {"tracker": "botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
+        {"tracker": "v2_low_clean", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
+    ])
+
+    rows = write_main_results(
+        metric_rows=load_metric_rows(summary),
+        output_csv=tmp_path / "main_results.csv",
+        run_name="main_full",
+        benchmark_root=tmp_path,
+    )
+
+    assert [row["tracker"] for row in rows] == ["ocsort", "botsort", "v2_low_clean"]
+    assert rows[2]["method"] == METHOD_LABELS["v2_low_clean"]
+
+
 def test_ablation_results_keeps_variant_names(tmp_path):
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [

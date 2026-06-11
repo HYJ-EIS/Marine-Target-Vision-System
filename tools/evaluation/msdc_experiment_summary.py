@@ -46,9 +46,11 @@ METHOD_LABELS = {
     "botsort": "FFCA-YOLO + BoT-SORT",
     "Ours-full": "FFCA-YOLO + MS-DC-ELT",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
+    "v2_low_clean": "FFCA-YOLO + MS-DC-ELT v2",
 }
 
-MAIN_TRACKERS = {"ocsort", "botsort", "Ours-full", "msdc_elt"}
+MAIN_MSDC_TRACKER = "v2_low_clean"
+MAIN_TRACKERS = {"ocsort", "botsort", "Ours-full", "msdc_elt", MAIN_MSDC_TRACKER}
 
 ABLATION_FIELDS = [
     "MSDC_USE_LOW_DET",
@@ -535,7 +537,7 @@ def _speed_failure_lines(speed_rows: list[dict]) -> list[str]:
 
 
 def _effectiveness_conclusion(main_rows: list[dict]) -> str:
-    focus_name = METHOD_LABELS["Ours-full"]
+    focus_name = METHOD_LABELS[MAIN_MSDC_TRACKER]
     focus = next((row for row in main_rows if row.get("method") == focus_name), None)
     if focus is None:
         return "MS-DC-ELT is absent from the main metric table, so no effectiveness conclusion is reported."
@@ -650,8 +652,8 @@ def main() -> None:
     speed_rows = _materialize_speed_csv(speed_source, output_root / "speed_results.csv")
 
     main_baselines = [METHOD_LABELS["ocsort"], METHOD_LABELS["botsort"]]
-    analysis_main = build_analysis_text(main_rows, METHOD_LABELS["Ours-full"], main_baselines)
-    analysis_ablation = build_analysis_text(ablation_rows, "Ours-full", [row["variant"] for row in ablation_rows if row["variant"] != "Ours-full"])
+    analysis_main = build_analysis_text(main_rows, METHOD_LABELS[MAIN_MSDC_TRACKER], main_baselines)
+    analysis_ablation = build_analysis_text(ablation_rows, MAIN_MSDC_TRACKER, [row["variant"] for row in ablation_rows if row["variant"] != MAIN_MSDC_TRACKER])
     analysis_speed = "Speed rows are copied from the provided speed CSV when available; missing speed input is reported as N/A."
     if speed_rows and speed_rows[0].get("status") in {"missing", "malformed"}:
         analysis_speed = speed_rows[0].get("failure", analysis_speed)
