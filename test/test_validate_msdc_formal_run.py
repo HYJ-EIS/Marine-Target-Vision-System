@@ -171,3 +171,57 @@ def test_validate_run_rejects_missing_path_manifest(tmp_path):
 
     assert result["ok"] is False
     assert any("path_manifest" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_placeholder_speed_values(tmp_path):
+    _make_valid_run(tmp_path)
+    _write_csv(
+        tmp_path / "summary/speed_results.csv",
+        [{
+            "tracker": "N/A",
+            "processed_frames": "N/A",
+            "total_time_s": "N/A",
+            "mean_latency_ms": "N/A",
+            "mean_fps": "N/A",
+            "detector_calls_total": "N/A",
+            "detector_calls_high_det": "N/A",
+            "detector_calls_low_det": "N/A",
+            "detector_calls_tracker_update": "N/A",
+            "detector_calls_roi_redetect": "N/A",
+            "mean_read_ms": "N/A",
+            "mean_high_det_ms": "N/A",
+            "mean_low_det_ms": "N/A",
+            "mean_roi_redetect_ms": "N/A",
+            "mean_tracker_ms": "N/A",
+            "mean_render_ms": "N/A",
+            "mean_write_ms": "N/A",
+            "status": "missing",
+            "failure": "Speed CSV not found",
+        }],
+        [
+            "tracker",
+            "processed_frames",
+            "total_time_s",
+            "mean_latency_ms",
+            "mean_fps",
+            "detector_calls_total",
+            "detector_calls_high_det",
+            "detector_calls_low_det",
+            "detector_calls_tracker_update",
+            "detector_calls_roi_redetect",
+            "mean_read_ms",
+            "mean_high_det_ms",
+            "mean_low_det_ms",
+            "mean_roi_redetect_ms",
+            "mean_tracker_ms",
+            "mean_render_ms",
+            "mean_write_ms",
+            "status",
+            "failure",
+        ],
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("speed" in item for item in result["missing"])

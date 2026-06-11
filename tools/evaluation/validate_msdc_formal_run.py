@@ -42,7 +42,10 @@ def _csv_has_fields(path: Path, fields: list[str]) -> bool:
     rows = _read_csv(path)
     if not rows:
         return False
-    return all(field in rows[0] and str(rows[0].get(field, "")).strip() for field in fields)
+    return all(
+        field in rows[0] and str(rows[0].get(field, "")).strip() not in {"", "N/A"}
+        for field in fields
+    )
 
 
 def validate_run(run_root: str | Path) -> dict[str, object]:
