@@ -199,8 +199,8 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT 运动种子 debug 默认关闭：`MSDC_MOTION_DEBUG = False`
 - MS-DC-ELT 运动种子 debug 默认输出根目录：`MSDC_MOTION_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
 - MS-DC-ELT 主链路默认关闭：`MSDC_ENABLE = False`
-- MS-DC-ELT 消融开关：`MSDC_USE_LOW_DET = True`，`MSDC_USE_MOTION = True`，`MSDC_USE_TEMPLATE = True`，`MSDC_USE_REACQUIRE = True`，`MSDC_USE_ROI_REDETECT = True`，`MSDC_REUSE_GUARD_ENABLE = True`
-- MS-DC-ELT MOT 导出可选加速：`MSDC_EXPORT_SHARE_LOW_HIGH_DET = False`；设置环境变量 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=1` 时，`msdc_elt` 导出路径只跑一次低阈值检测，再按默认阈值切分 high boxes，baseline tracker 不使用该分支；MOT 结果按帧流式写入，长视频导出时可用 `--progress-interval N` 定期打印进度并 flush 结果文件
+- MS-DC-ELT 消融开关：`MSDC_USE_LOW_DET = True`，`MSDC_USE_MOTION = True`，`MSDC_USE_TEMPLATE = False`，`MSDC_USE_REACQUIRE = True`，`MSDC_USE_ROI_REDETECT = True`，`MSDC_REUSE_GUARD_ENABLE = True`
+- MS-DC-ELT MOT 导出默认加速：`MSDC_EXPORT_SHARE_LOW_HIGH_DET = True`；`msdc_elt` 导出路径默认只跑一次低阈值检测，再按默认阈值切分 high boxes，baseline tracker 不使用该分支；如需复现实验旧路径，可设置环境变量 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=0` 恢复 high/low 双次全图检测；MOT 结果按帧流式写入，长视频导出时可用 `--progress-interval N` 定期打印进度并 flush 结果文件
 - MS-DC-ELT 默认只输出 active：`MSDC_OUTPUT_CANDIDATES = False`
 - MS-DC-ELT lifecycle debug JSONL 默认开启：`MSDC_DEBUG_EVENTS = True`，可用环境变量 `MSDC_DEBUG_EVENTS=0` 关闭；长视频评测时每帧 debug 只保留非 removed 轨迹快照，快照上限 `MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT = 128`，细节列表上限 `MSDC_DEBUG_DETAIL_LIMIT = 8`
 - MS-DC-ELT lifecycle debug 默认输出目录：`MSDC_LIFECYCLE_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
@@ -215,7 +215,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT evidence 关联阈值：`MSDC_ASSOC_IOU_THRESH = 0.2`，`MSDC_ASSOC_CENTER_DIST = 80.0`，`MSDC_OBS_MERGE_IOU_THRESH = 0.5`
 - MS-DC-ELT active 近邻候选抑制：`MSDC_SPAWN_SUPPRESS_ENABLE = True`，`MSDC_SPAWN_SUPPRESS_IOU = 0.1`，`MSDC_SPAWN_SUPPRESS_CENTER_DIST = 80.0`，`MSDC_LOW_SPAWN_SUPPRESS_CENTER_DIST = 120.0`；low-only 候选靠近 active track 时使用更宽 suppression，避免浪花/重复低阈值框确认成新公开 ID
 - MS-DC-ELT 输出去重与过滤：`MSDC_OUTPUT_NMS_ENABLE = True`，`MSDC_OUTPUT_NMS_IOU = 0.3`，`MSDC_OUTPUT_NMS_CENTER_DIST = 60.0`，`MSDC_OUTPUT_NMS_FRAGMENT_AREA_RATIO = 0.35`，`MSDC_OUTPUT_NMS_CONTAINMENT_RATIO = 0.50`，`MSDC_OUTPUT_MAX_REAL_DET_AGE = 3`，`MSDC_OUTPUT_MIN_BOX_SIZE = 12`
-- MS-DC-ELT active-only TemplateLock：`MSDC_TEMPLATE_ENABLE = True`，`MSDC_TEMPLATE_AUX_ONLY = True`，`MSDC_TEMPLATE_UPDATE_REQUIRE_REAL_DET = True`，`MSDC_MAX_ACTIVE_TEMPLATES = 8`，`MSDC_TEMPLATE_UPDATE_THRESH = 0.75`，`MSDC_TEMPLATE_SEARCH_SCALE = 2.5`，`MSDC_TEMPLATE_MIN_SIZE = 8`
+- MS-DC-ELT active-only TemplateLock formal 默认关闭：`MSDC_TEMPLATE_ENABLE = False`，`MSDC_TEMPLATE_AUX_ONLY = True`，`MSDC_TEMPLATE_UPDATE_REQUIRE_REAL_DET = True`，`MSDC_MAX_ACTIVE_TEMPLATES = 8`，`MSDC_TEMPLATE_UPDATE_THRESH = 0.75`，`MSDC_TEMPLATE_SEARCH_SCALE = 2.5`，`MSDC_TEMPLATE_MIN_SIZE = 8`；如需消融复现模板模块，可设置 `MSDC_USE_TEMPLATE=1` 与 `MSDC_TEMPLATE_ENABLE=1`
 
 ### 5.3 当前默认跟踪配置
 
@@ -693,17 +693,17 @@ tracked_boxes = tracker.update(
 输入：
 
 - `high_boxes`：默认阈值检测框，转为 `Observation(source="high_det")`
-- `low_boxes`：低阈值检测框；与 high box IoU 达到 `MSDC_LOW_HIGH_IOU_THRESH` 的框会过滤掉，只保留 `low_only` 并转为 `Observation(source="low_det")`；未匹配 high 的新目标默认只生成 hidden `low_candidate`，不会直接输出框或公开 ID
+- `low_boxes`：低阈值检测框；与 high box IoU 达到 `MSDC_LOW_HIGH_IOU_THRESH` 的框会过滤掉，只保留 `low_only` 并转为 `Observation(source="low_det")`；未匹配 high 的新目标默认只生成 hidden `low_candidate`，不会直接输出框或公开 ID；`low_det` 匹配到已有 active track 时只刷新真实检测年龄、证据分和 low history，不刷新 active 主框或速度，避免低阈值噪声污染主关联
 - `active/lost tracks`：当 `MSDC_USE_ROI_REDETECT = True` 且传入 `processor` 时，按轨迹预测框裁剪局部 ROI，用 `MSDC_ROI_REDETECT_LOW_CONF` 重检并转为 `Observation(source="roi_low_det")`；ROI 结果会过滤 tiny / existing-overlap box，并按每个 ROI 的候选上限保留高分近邻
 - `frame`：送入 `MotionSeedGenerator.update(...)`，motion boxes 转为 `Observation(source="motion")`；海面运动连通域爆炸时写出 `clutter_limited=True` 并降低 motion box 上限
-- active tracks：送入 `TemplateLock.match(...)`，局部模板匹配结果转为 `Observation(source="template")`
+- active tracks：仅当 `MSDC_USE_TEMPLATE=1` 且 `MSDC_TEMPLATE_ENABLE=1` 时送入 `TemplateLock.match(...)`，局部模板匹配结果转为 `Observation(source="template")`
 
 输出：
 
 - 默认只返回 active tracks，字段兼容现有 tracker：`track_id,x,y,w,h,confidence,class,class_confidence,lifecycle_state`；`track_id` 使用确认 active 后分配的稳定 `public_id`，内部 `gid` 只作为诊断字段保留
 - `MSDC_OUTPUT_CANDIDATES = True` 时可额外输出普通 `candidate` tracks 供 debug；hidden `low_candidate` 始终不输出，避免低阈值候选造成多框重叠
 - 输出前会按 `MSDC_OUTPUT_NMS_*` 对 active boxes 做轻量去重，包含碎片框抑制；超过 `MSDC_OUTPUT_MAX_REAL_DET_AGE` 未命中真实检测的 active 不再输出
-- `template` / `motion` observation 只作为辅助 evidence；默认不刷新主框、不更新 active template；只有近期有 low/roi-low 真实证据的 active track，才允许借 template/motion 辅助短时延迟进入 lost
+- `low_det` / `template` / `motion` observation 只作为辅助 evidence；`low_det` 可刷新真实检测年龄但不刷新 active 主框，`template` / `motion` 默认不刷新主框、不更新 active template；只有近期有 low/roi-low 真实证据的 active track，才允许借 template/motion 辅助短时延迟进入 lost
 
 Debug JSONL：
 
@@ -771,6 +771,8 @@ conda run -n ship_detect python video_main.py --input "D:\path\to\short.mp4" --t
 
 MS-DC-ELT Task 7 active-only 模板锁定模块。第一版使用 OpenCV `matchTemplate` 在 active track 预测框附近做局部搜索，不引入 Siamese / ReID 等大型依赖。
 
+formal v2 默认不启用 TemplateLock。该模块保留用于消融和后续重写，启用时需同时打开 `MSDC_USE_TEMPLATE` 和 `MSDC_TEMPLATE_ENABLE`。
+
 规则：
 
 - 只对 `TrackState.ACTIVE` 初始化和匹配模板
@@ -783,7 +785,15 @@ MS-DC-ELT Task 7 active-only 模板锁定模块。第一版使用 OpenCV `matchT
 关闭模板：
 
 ```python
+Config.MSDC_USE_TEMPLATE = False
 Config.MSDC_TEMPLATE_ENABLE = False
+```
+
+启用模板消融：
+
+```python
+Config.MSDC_USE_TEMPLATE = True
+Config.MSDC_TEMPLATE_ENABLE = True
 ```
 
 Debug JSONL 字段：
@@ -1113,6 +1123,13 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 - `usable`
 
 ## 13. Changelog
+
+### 2026-06-11
+
+- `fix`: MS-DC-ELT formal v2 默认关闭 TemplateLock，保留 `MSDC_USE_TEMPLATE` / `MSDC_TEMPLATE_ENABLE` 环境变量用于消融复现，避免弱纹理小目标被模板锁定噪声破坏连续关联
+- `perf`: MS-DC-ELT MOT 导出默认启用 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=True`，一次低阈值推理后按默认阈值切分 high/low boxes，减少 high/low 双次全图检测带来的速度损耗
+- `fix`: `low_det` 匹配 active track 时只刷新真实检测年龄、证据分和 low history，不再刷新 active 主框和速度，降低低阈值噪声对主关联的污染
+- `test`: 扩展配置、evidence state、TemplateLock 和速度 benchmark 回归测试，覆盖 formal v2 默认值、low-det active 主框隔离，以及模板模块显式 opt-in 行为
 
 ### 2026-06-04
 

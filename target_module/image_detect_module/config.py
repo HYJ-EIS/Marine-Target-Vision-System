@@ -112,10 +112,10 @@ class Config:
     # MS-DC-ELT Task 9: 消融实验开关；可通过同名环境变量覆盖
     MSDC_USE_LOW_DET = _env_bool("MSDC_USE_LOW_DET", True)
     MSDC_USE_MOTION = _env_bool("MSDC_USE_MOTION", True)
-    MSDC_USE_TEMPLATE = _env_bool("MSDC_USE_TEMPLATE", True)
+    MSDC_USE_TEMPLATE = _env_bool("MSDC_USE_TEMPLATE", False)
     MSDC_USE_REACQUIRE = _env_bool("MSDC_USE_REACQUIRE", True)
     # 评测导出可选加速：msdc_elt 路径用一次低阈值检测结果切分 high/low，baseline 不使用
-    MSDC_EXPORT_SHARE_LOW_HIGH_DET = _env_bool("MSDC_EXPORT_SHARE_LOW_HIGH_DET", False)
+    MSDC_EXPORT_SHARE_LOW_HIGH_DET = _env_bool("MSDC_EXPORT_SHARE_LOW_HIGH_DET", True)
     # 是否把 candidate 轨迹也输出给调用方；默认只输出 active，避免影响可视化语义
     MSDC_OUTPUT_CANDIDATES = False
     # 是否写 lifecycle debug JSONL；可通过环境变量关闭以进行纯导出测速
@@ -229,7 +229,7 @@ class Config:
     MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = _env_int("MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI", 2)
 
     # MS-DC-ELT Task 7: active-only TemplateLock 配置
-    MSDC_TEMPLATE_ENABLE = True
+    MSDC_TEMPLATE_ENABLE = _env_bool("MSDC_TEMPLATE_ENABLE", False)
     MSDC_TEMPLATE_AUX_ONLY = _env_bool("MSDC_TEMPLATE_AUX_ONLY", True)
     MSDC_TEMPLATE_UPDATE_REQUIRE_REAL_DET = _env_bool("MSDC_TEMPLATE_UPDATE_REQUIRE_REAL_DET", True)
     MSDC_MAX_ACTIVE_TEMPLATES = 8

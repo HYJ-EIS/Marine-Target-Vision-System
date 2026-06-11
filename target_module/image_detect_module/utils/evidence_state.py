@@ -1276,8 +1276,10 @@ class EvidenceStateUpdater:
         old_center = np.array([(old_box[0] + old_box[2]) / 2.0, (old_box[1] + old_box[3]) / 2.0])
         new_center = np.array([(new_box[0] + new_box[2]) / 2.0, (new_box[1] + new_box[3]) / 2.0])
 
-        track.velocity = [float(new_center[0] - old_center[0]), float(new_center[1] - old_center[1])]
-        track.box = new_box
+        refresh_primary_box = self._matched_group_refreshes_primary_box(track, group)
+        if refresh_primary_box:
+            track.velocity = [float(new_center[0] - old_center[0]), float(new_center[1] - old_center[1])]
+            track.box = new_box
         track.evidence_score = self._rounded_score(
             float(self._cfg("MSDC_EVIDENCE_ALPHA", 0.85)) * float(track.evidence_score) + positive_score
         )
@@ -1294,6 +1296,12 @@ class EvidenceStateUpdater:
         if group.class_name != "unknown":
             track.class_id = int(group.class_id)
             track.class_name = str(group.class_name)
+
+    def _matched_group_refreshes_primary_box(self, track: EvidenceTrack, group: _ObservationGroup) -> bool:
+        if _as_state(track.state) != TrackState.ACTIVE:
+            return True
+        sources = set(group.source_scores)
+        return bool(sources & {"high_det", "roi_low_det", "reacquire"})
 
     def _apply_auxiliary_observation(
         self,

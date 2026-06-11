@@ -15,6 +15,7 @@ from target_module.image_detect_module.utils.template_lock import TemplateLock
 
 
 class TemplateTestConfig(Config):
+    MSDC_USE_TEMPLATE = True
     MSDC_TEMPLATE_ENABLE = True
     MSDC_MAX_ACTIVE_TEMPLATES = 2
     MSDC_TEMPLATE_UPDATE_THRESH = 0.7
@@ -23,6 +24,7 @@ class TemplateTestConfig(Config):
 
 
 class DisabledTemplateConfig(TemplateTestConfig):
+    MSDC_USE_TEMPLATE = False
     MSDC_TEMPLATE_ENABLE = False
 
 

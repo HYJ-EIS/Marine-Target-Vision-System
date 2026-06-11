@@ -40,6 +40,7 @@ class LowCandidateLifecycleConfig(CandidateOutputConfig):
 
 
 class TemplateLifecycleConfig(LifecycleTestConfig):
+    MSDC_USE_TEMPLATE = True
     MSDC_TEMPLATE_ENABLE = True
     MSDC_TEMPLATE_UPDATE_THRESH = 0.7
     MSDC_TEMPLATE_SEARCH_SCALE = 3.0

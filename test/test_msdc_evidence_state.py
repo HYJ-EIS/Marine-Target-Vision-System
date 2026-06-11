@@ -495,6 +495,44 @@ def test_roi_low_detection_refreshes_active_as_real_detection():
     assert events == []
 
 
+def test_low_detection_supports_active_without_refreshing_primary_box():
+    updater = EvidenceStateUpdater(Config)
+    track = EvidenceTrack(
+        gid=1,
+        public_id=1,
+        state=TrackState.ACTIVE,
+        box=[10, 10, 30, 30],
+        velocity=[0.0, 0.0],
+        evidence_score=3.0,
+        hits=4,
+        misses=0,
+        age=4,
+        last_seen=4,
+        last_real_det_frame=4,
+        real_det_hits=4,
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [track],
+        [_obs(5, source="low_det", score=0.8, box=[45, 10, 65, 30])],
+        frame_idx=5,
+    )
+
+    assert tracks[0].state == TrackState.ACTIVE
+    assert tracks[0].box == [10, 10, 30, 30]
+    assert tracks[0].velocity == [0.0, 0.0]
+    assert tracks[0].last_seen == 5
+    assert tracks[0].last_real_det_frame == 5
+    assert tracks[0].real_det_hits == 5
+    assert tracks[0].misses == 0
+    assert tracks[0].last_real_det_box.tolist() == [45.0, 10.0, 65.0, 30.0]
+    assert tracks[0].low_det_history[-1]["box"] == [45.0, 10.0, 65.0, 30.0]
+    assert "low_det" in tracks[0].source_history
+    assert events == []
+
+
 def test_roi_low_unmatched_observation_does_not_spawn_new_candidate():
     updater = EvidenceStateUpdater(Config)
 
