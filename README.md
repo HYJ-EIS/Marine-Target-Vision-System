@@ -959,6 +959,14 @@ conda run -n ship_detect python tools/evaluation/msdc_experiment_summary.py --ma
 
 该脚本只汇总已有正式 run 产物，不重新运行检测或跟踪；执行前会先检查 main/ablation 的 `eval/motchallenge_summary.csv` 是否存在且非空，失败时不创建部分输出。脚本会生成 `main_results.csv`、`ablation_results.csv`、稳定字段的 `speed_results.csv`、`analysis_*.md`、最终 Markdown 报告和 `path_manifest.csv`。缺失指标或速度字段统一写为 `N/A`，空/异常速度文件按 malformed 记录；manifest 会在报告和 docs 结果写完后生成，并包含 summary、analysis、report/docs、`commands.jsonl` 和 `failures.csv` 等路径。
 
+正式 run 产物完整性校验：
+
+```powershell
+conda run -n ship_detect python tools/evaluation/validate_msdc_formal_run.py --run-root results/msdc_paper_phase1/<run-id> --json-output results/msdc_paper_phase1/<run-id>/summary/formal_validation.json
+```
+
+该命令会检查 MOT txt、TrackEval summary 指标、速度与分阶段耗时字段、诊断 JSONL/CSV 和可视化 MP4。正式评测完成不能只看 runner 结束；除非该校验命令退出码为 0，否则不能宣称 formal completion。
+
 论文 phase-1 实验编排入口：
 
 ```powershell
