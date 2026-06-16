@@ -154,6 +154,43 @@ def test_ablation_results_reports_roi_redetect_switch_for_known_variants(tmp_pat
     }
 
 
+def test_ablation_results_reports_new_v2_speed_ablation_switches(tmp_path):
+    variants = [
+        "v2_no_roi_redetect",
+        "v2_roi_interval10",
+        "v2_roi_interval15",
+        "v2_roi_max1",
+        "v2_candidate_topk",
+        "v2_candidate_topk_roi_max1",
+        "v2_candidate_topk_no_roi",
+        "v2_speed_diag_off",
+    ]
+    summary = tmp_path / "eval" / "motchallenge_summary.csv"
+    _write_csv(summary, [
+        {"tracker": variant, "HOTA": "60", "DetA": "61", "AssA": "62", "MOTA": "63", "IDF1": "64", "IDSW": "1", "FP": "2", "FN": "3", "IDTP": "4", "IDFP": "5", "IDFN": "6"}
+        for variant in variants
+    ])
+
+    rows = write_ablation_results(
+        metric_rows=load_metric_rows(summary),
+        output_csv=tmp_path / "ablation_results.csv",
+        run_name="ablation_full",
+        benchmark_root=tmp_path,
+    )
+    by_variant = {row["variant"]: row for row in rows}
+
+    assert by_variant["v2_no_roi_redetect"]["MSDC_USE_ROI_REDETECT"] == "False"
+    assert by_variant["v2_roi_interval10"]["MSDC_ROI_REDETECT_ACTIVE_INTERVAL"] == "10"
+    assert by_variant["v2_roi_interval15"]["MSDC_ROI_REDETECT_ACTIVE_INTERVAL"] == "15"
+    assert by_variant["v2_roi_max1"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "1"
+    assert by_variant["v2_candidate_topk"]["MSDC_LOW_OBS_TOPK"] == "32"
+    assert by_variant["v2_candidate_topk_roi_max1"]["MSDC_LOW_OBS_TOPK"] == "32"
+    assert by_variant["v2_candidate_topk_roi_max1"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "1"
+    assert by_variant["v2_candidate_topk_no_roi"]["MSDC_LOW_OBS_TOPK"] == "32"
+    assert by_variant["v2_candidate_topk_no_roi"]["MSDC_USE_ROI_REDETECT"] == "False"
+    assert by_variant["v2_speed_diag_off"]["MSDC_DEBUG_EVENTS"] == "False"
+
+
 def test_analysis_text_reports_direction_without_inventing_values():
     rows = [
         {"method": "FFCA-YOLO + OC-SORT", "IDF1": "50", "IDSW": "10", "HOTA": "20", "AssA": "30", "FP": "5", "FN": "100"},

@@ -82,7 +82,15 @@ def test_ablation_command_includes_required_variants():
 
 
 def test_ablation_command_accepts_selected_variants():
-    args = runner.parse_args(["--ablation-variants", "v2_template_off", "v2_shared_det"])
+    args = runner.parse_args([
+        "--ablation-variants",
+        "v2_no_roi_redetect",
+        "v2_roi_max1",
+        "v2_candidate_topk",
+        "v2_candidate_topk_roi_max1",
+        "v2_candidate_topk_no_roi",
+        "v2_speed_diag_off",
+    ])
     cmd = build_ablation_command(
         dataset_roots=["/data/a"],
         output_root=Path("results/ablation"),
@@ -93,8 +101,12 @@ def test_ablation_command_accepts_selected_variants():
         variants=list(args.ablation_variants),
     )
     joined = " ".join(cmd)
-    assert "v2_template_off" in joined
-    assert "v2_shared_det" in joined
+    assert "v2_no_roi_redetect" in joined
+    assert "v2_roi_max1" in joined
+    assert "v2_candidate_topk" in joined
+    assert "v2_candidate_topk_roi_max1" in joined
+    assert "v2_candidate_topk_no_roi" in joined
+    assert "v2_speed_diag_off" in joined
     assert "Ours-full" not in joined
 
 

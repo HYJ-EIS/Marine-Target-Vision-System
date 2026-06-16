@@ -14,6 +14,7 @@ from target_module.image_detect_module.utils.roi_redetect import ROIRedetector
 
 class ROITestConfig(Config):
     MSDC_USE_ROI_REDETECT = True
+    MSDC_ROI_REDETECT_ACTIVE_ENABLE = True
     MSDC_ROI_REDETECT_LOW_CONF = 0.12
     MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 1
     MSDC_ROI_REDETECT_LOST_INTERVAL = 3
@@ -24,6 +25,8 @@ class ROITestConfig(Config):
     MSDC_ROI_REDETECT_EXISTING_IOU = 0.5
     MSDC_ROI_REDETECT_MIN_BOX_SIZE = 8
     MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 2
+    MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE = 30
+    MSDC_ROI_REDETECT_COOLDOWN_FRAMES = 0
 
 
 class DummyProcessor:
@@ -198,6 +201,7 @@ def test_roi_redetect_uses_processor_stage_context_when_available():
 
     class ROIStageConfig(Config):
         MSDC_USE_ROI_REDETECT = True
+        MSDC_ROI_REDETECT_ACTIVE_ENABLE = True
         MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 1
         MSDC_ROI_REDETECT_MAX_TRACKS = 1
         MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 1
@@ -233,3 +237,74 @@ def test_roi_redetect_uses_processor_stage_context_when_available():
     assert processor.calls
     assert {call[0] for call in processor.calls} == {"roi_redetect"}
     assert processor.stage == "unspecified"
+
+
+def test_roi_redetect_defaults_skip_active_tracks_and_limit_stale_lost_tracks():
+    class LostOnlyConfig(ROITestConfig):
+        MSDC_ROI_REDETECT_ACTIVE_ENABLE = False
+        MSDC_ROI_REDETECT_LOST_INTERVAL = 1
+        MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE = 30
+
+    processor = DummyProcessor([
+        {"x": 30, "y": 30, "w": 20, "h": 20, "confidence": 0.5, "class": "UAV"},
+    ])
+    redetector = ROIRedetector(LostOnlyConfig, processor=processor)
+    active = _track(state=TrackState.ACTIVE, gid=1)
+    recent_lost = _track(state=TrackState.LOST, gid=2)
+    stale_lost = _track(state=TrackState.LOST, gid=3)
+    stale_lost.last_real_det_frame = 0
+
+    boxes, debug = redetector.update(
+        frame=_frame(),
+        tracks=[active, recent_lost, stale_lost],
+        frame_idx=31,
+        file_type="visible",
+        existing_boxes=[],
+    )
+
+    assert len(boxes) == 1
+    assert boxes[0]["roi_track_gid"] == 2
+    assert [call[1:] for call in processor.calls] == [("visible", LostOnlyConfig.MSDC_ROI_REDETECT_LOW_CONF)]
+    assert debug["num_candidate_tracks"] == 1
+    assert debug["num_skipped_tracks"] == 2
+    assert {item["reason"] for item in debug["skipped_tracks"]} == {"active_disabled", "lost_age_exceeded"}
+
+
+def test_roi_redetect_applies_cooldown_after_empty_roi_result():
+    class CooldownConfig(ROITestConfig):
+        MSDC_ROI_REDETECT_ACTIVE_ENABLE = False
+        MSDC_ROI_REDETECT_LOST_INTERVAL = 1
+        MSDC_ROI_REDETECT_COOLDOWN_FRAMES = 4
+
+    processor = DummyProcessor([])
+    redetector = ROIRedetector(CooldownConfig, processor=processor)
+    lost = _track(state=TrackState.LOST, gid=7)
+
+    first_boxes, first_debug = redetector.update(_frame(), [lost], 6, "visible", existing_boxes=[])
+    second_boxes, second_debug = redetector.update(_frame(), [lost], 7, "visible", existing_boxes=[])
+
+    assert first_boxes == []
+    assert second_boxes == []
+    assert len(processor.calls) == 1
+    assert first_debug["num_rois"] == 1
+    assert second_debug["num_rois"] == 0
+    assert second_debug["skipped_tracks"][0]["reason"] == "cooldown"
+
+
+def test_roi_redetect_prunes_expired_and_absent_track_cooldowns():
+    class CooldownConfig(ROITestConfig):
+        MSDC_ROI_REDETECT_ACTIVE_ENABLE = False
+        MSDC_ROI_REDETECT_LOST_INTERVAL = 1
+        MSDC_ROI_REDETECT_COOLDOWN_FRAMES = 1
+
+    processor = DummyProcessor([])
+    redetector = ROIRedetector(CooldownConfig, processor=processor)
+    lost_a = _track(state=TrackState.LOST, gid=7)
+    lost_b = _track(state=TrackState.LOST, gid=8)
+
+    redetector.update(_frame(), [lost_a], 6, "visible", existing_boxes=[])
+    assert 7 in redetector._cooldown_until
+
+    redetector.update(_frame(), [lost_b], 9, "visible", existing_boxes=[])
+
+    assert 7 not in redetector._cooldown_until

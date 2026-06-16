@@ -339,3 +339,110 @@ def test_tracker_update_detector_calls_do_not_subtract_nested_roi_calls(tmp_path
     assert row["detector_calls_total"] == 4
     assert row["detector_calls_tracker_update"] == 2
     assert row["detector_calls_roi_redetect"] == 1
+
+
+def test_write_msdc_share_low_high_compare_reports_speedup(tmp_path):
+    before = {
+        "tracker": "msdc_elt",
+        "processed_frames": 10,
+        "total_time_s": "20.000000",
+        "mean_fps": "0.500000",
+        "mean_latency_ms": "2000.000000",
+        "detector_calls_total": 20,
+        "detector_calls_high_det": 10,
+        "detector_calls_low_det": 10,
+        "mean_high_det_ms": "900.000000",
+        "mean_low_det_ms": "800.000000",
+        "mean_tracker_ms": "300.000000",
+    }
+    after = {
+        "tracker": "msdc_elt",
+        "processed_frames": 10,
+        "total_time_s": "10.000000",
+        "mean_fps": "1.000000",
+        "mean_latency_ms": "1000.000000",
+        "detector_calls_total": 10,
+        "detector_calls_high_det": 0,
+        "detector_calls_low_det": 10,
+        "mean_high_det_ms": "0.100000",
+        "mean_low_det_ms": "700.000000",
+        "mean_tracker_ms": "299.000000",
+    }
+
+    path = benchmark.write_msdc_share_low_high_compare(tmp_path, before, after, label_prefix="case")
+
+    with path.open("r", encoding="utf-8-sig", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert path == tmp_path / "speed_compare.csv"
+    assert [row["label"] for row in rows] == ["case_before_two_pass", "case_after_shared_low_high"]
+    assert rows[0]["share_low_high"] == "False"
+    assert rows[1]["share_low_high"] == "True"
+    assert rows[1]["fps_speedup_vs_before"] == "2.000000"
+    assert rows[1]["total_time_delta_s_vs_before"] == "-10.000000"
+    assert rows[1]["detector_call_delta_vs_before"] == "-10"
+
+
+def test_run_msdc_share_low_high_comparison_toggles_config_and_writes_rows(tmp_path, monkeypatch):
+    from target_module.image_detect_module.config import Config
+
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"not a real video")
+    calls = []
+
+    def fake_run_tracker_benchmark(**kwargs):
+        share = bool(Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET)
+        calls.append(share)
+        return {
+            "run_id": kwargs["run_id"],
+            "commit_hash": kwargs["commit_hash"],
+            "video_path": str(kwargs["input_video"]),
+            "seq_name": kwargs["seq_name"],
+            "tracker": kwargs["tracker_type"],
+            "method": "fake",
+            "resolution": "0x0",
+            "requested_frames": kwargs["requested_frames"],
+            "processed_frames": kwargs["requested_frames"],
+            "total_time_s": "10.000000" if share else "20.000000",
+            "mean_fps": "1.000000" if share else "0.500000",
+            "mean_latency_ms": "1000.000000" if share else "2000.000000",
+            "p50_latency_ms": "0.000000",
+            "p95_latency_ms": "0.000000",
+            "peak_memory_mb": "N/A",
+            "detector_calls_total": 10 if share else 20,
+            "detector_calls_high_det": 0 if share else 10,
+            "detector_calls_low_det": 10,
+            "detector_calls_tracker_update": 0,
+            "detector_calls_roi_redetect": 0,
+            "mean_read_ms": "0.000000",
+            "mean_high_det_ms": "0.000000" if share else "900.000000",
+            "mean_low_det_ms": "700.000000",
+            "mean_roi_redetect_ms": "0.000000",
+            "mean_tracker_ms": "300.000000",
+            "mean_render_ms": "0.000000",
+            "mean_write_ms": "0.000000",
+        }
+
+    monkeypatch.setattr(benchmark, "_resolve_benchmark_input", lambda args: (video, "seq", "visible"))
+    monkeypatch.setattr(benchmark, "_run_tracker_benchmark", fake_run_tracker_benchmark)
+    monkeypatch.setattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", True, raising=False)
+
+    args = argparse.Namespace(
+        output_root=str(tmp_path / "out"),
+        run_id="compare",
+        commit_hash="abc123",
+        frames=5,
+        trackers=["msdc_elt"],
+        progress_interval=0,
+        compare_label_prefix="sample",
+    )
+    results_path, timings_path, compare_path = benchmark.run_msdc_share_low_high_comparison(args)
+
+    assert calls == [False, True]
+    assert Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET is True
+    assert timings_path.is_file()
+    with results_path.open("r", encoding="utf-8-sig", newline="") as fh:
+        result_rows = list(csv.DictReader(fh))
+    with compare_path.open("r", encoding="utf-8-sig", newline="") as fh:
+        compare_rows = list(csv.DictReader(fh))
+    assert [row["tracker"] for row in result_rows] == ["msdc_elt_before_two_pass", "msdc_elt_after_shared_low_high"]
+    assert compare_rows[1]["fps_speedup_vs_before"] == "2.000000"

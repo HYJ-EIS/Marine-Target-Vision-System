@@ -7,6 +7,7 @@ ground truth and is only enabled by the MS-DC-ELT path.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import cv2
@@ -20,6 +21,7 @@ class ROIRedetector:
     def __init__(self, config=Config, processor=None):
         self.config = config or Config
         self.processor = processor
+        self._cooldown_until: dict[int, int] = {}
         self.last_debug: dict[str, Any] = self._empty_debug(enabled=self.enabled)
 
     @property
@@ -27,6 +29,7 @@ class ROIRedetector:
         return bool(getattr(self.config, "MSDC_USE_ROI_REDETECT", True))
 
     def reset(self) -> None:
+        self._cooldown_until = {}
         self.last_debug = self._empty_debug(enabled=self.enabled)
 
     def update(
@@ -47,7 +50,8 @@ class ROIRedetector:
             self.last_debug = self._empty_debug(enabled=True, disabled_reason="invalid_frame")
             return [], self.last_debug
 
-        candidates = self._select_tracks(tracks, int(frame_idx))
+        self._prune_cooldowns(tracks, int(frame_idx))
+        candidates, skipped_tracks = self._select_tracks(tracks, int(frame_idx))
         existing = list(existing_boxes or [])
         boxes: list[dict] = []
         rois = []
@@ -57,10 +61,12 @@ class ROIRedetector:
         for track in candidates:
             roi = self._track_roi(track, frame.shape, int(frame_idx))
             if roi is None:
+                skipped_tracks.append(self._skip_debug(track, "invalid_roi", int(frame_idx)))
                 continue
             x0, y0, x1, y1 = roi
             crop = frame[y0:y1, x0:x1]
             if crop.size == 0:
+                skipped_tracks.append(self._skip_debug(track, "empty_roi", int(frame_idx)))
                 continue
             inference_frame = crop
             scale = float(getattr(self.config, "MSDC_ROI_REDETECT_UPSCALE", 2.0))
@@ -74,9 +80,13 @@ class ROIRedetector:
             process_context = getattr(self.processor, "use_stage", None)
             if callable(process_context):
                 with process_context("roi_redetect"):
+                    roi_start = time.perf_counter()
                     stats = self.processor.process_frame(inference_frame, file_type, conf_override=low_conf)
+                    roi_elapsed_ms = (time.perf_counter() - roi_start) * 1000.0
             else:
+                roi_start = time.perf_counter()
                 stats = self.processor.process_frame(inference_frame, file_type, conf_override=low_conf)
+                roi_elapsed_ms = (time.perf_counter() - roi_start) * 1000.0
             local_boxes = list((stats or {}).get("boxes", []))
             roi_boxes: list[dict] = []
             for local_box in local_boxes:
@@ -102,6 +112,8 @@ class ROIRedetector:
             for mapped in roi_boxes:
                 mapped.pop("_roi_center_distance", None)
             boxes.extend(roi_boxes)
+            if not roi_boxes:
+                self._mark_cooldown(track, int(frame_idx))
             rois.append({
                 "gid": int(track.gid),
                 "public_id": None if track.public_id is None else int(track.public_id),
@@ -109,6 +121,7 @@ class ROIRedetector:
                 "roi": [int(x0), int(y0), int(x1), int(y1)],
                 "num_local_boxes": int(len(local_boxes)),
                 "num_kept_boxes": int(len(roi_boxes)),
+                "roi_call_ms": float(round(roi_elapsed_ms, 4)),
             })
 
         self.last_debug = {
@@ -120,24 +133,81 @@ class ROIRedetector:
             "num_filtered_existing": int(num_filtered_existing),
             "num_filtered_invalid": int(num_filtered_invalid),
             "num_capped_by_roi": int(num_capped_by_roi),
+            "num_skipped_tracks": int(len(skipped_tracks)),
+            "skipped_tracks": skipped_tracks[: int(getattr(self.config, "MSDC_DEBUG_DETAIL_LIMIT", 8))],
             "rois": rois[: int(getattr(self.config, "MSDC_DEBUG_DETAIL_LIMIT", 8))],
         }
         return boxes, self.last_debug
 
-    def _select_tracks(self, tracks: list[EvidenceTrack], frame_idx: int) -> list[EvidenceTrack]:
+    def _select_tracks(self, tracks: list[EvidenceTrack], frame_idx: int) -> tuple[list[EvidenceTrack], list[dict]]:
         active_interval = max(1, int(getattr(self.config, "MSDC_ROI_REDETECT_ACTIVE_INTERVAL", 1)))
         lost_interval = max(1, int(getattr(self.config, "MSDC_ROI_REDETECT_LOST_INTERVAL", 3)))
+        active_enabled = bool(getattr(self.config, "MSDC_ROI_REDETECT_ACTIVE_ENABLE", False))
+        lost_max_age = int(getattr(self.config, "MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE", 30))
         selected = []
+        skipped = []
         for track in list(tracks or []):
             state = self._state(track)
+            cooldown_until = int(self._cooldown_until.get(int(track.gid), -1))
+            if cooldown_until > int(frame_idx):
+                skipped.append(self._skip_debug(track, "cooldown", frame_idx, cooldown_until=cooldown_until))
+                continue
             if state == TrackState.ACTIVE:
+                if not active_enabled:
+                    skipped.append(self._skip_debug(track, "active_disabled", frame_idx))
+                    continue
                 if int(frame_idx) % active_interval == 0:
                     selected.append(track)
+                else:
+                    skipped.append(self._skip_debug(track, "active_interval", frame_idx))
             elif state == TrackState.LOST:
+                real_age = self._real_det_age(track, frame_idx)
+                if lost_max_age >= 0 and real_age > lost_max_age:
+                    skipped.append(self._skip_debug(track, "lost_age_exceeded", frame_idx, real_age=real_age))
+                    continue
                 if int(frame_idx) % lost_interval == 0:
                     selected.append(track)
-        selected.sort(key=lambda item: (0 if self._state(item) == TrackState.ACTIVE else 1, -float(item.evidence_score), int(item.gid)))
-        return selected[: max(0, int(getattr(self.config, "MSDC_ROI_REDETECT_MAX_TRACKS", 8)))]
+                else:
+                    skipped.append(self._skip_debug(track, "lost_interval", frame_idx, real_age=real_age))
+            else:
+                skipped.append(self._skip_debug(track, f"state_{state.value}", frame_idx))
+        selected.sort(key=lambda item: (0 if self._state(item) == TrackState.LOST else 1, -float(item.evidence_score), int(item.gid)))
+        max_tracks = max(0, int(getattr(self.config, "MSDC_ROI_REDETECT_MAX_TRACKS", 8)))
+        capped = selected[:max_tracks]
+        for track in selected[max_tracks:]:
+            skipped.append(self._skip_debug(track, "max_tracks", frame_idx))
+        return capped, skipped
+
+    def _mark_cooldown(self, track: EvidenceTrack, frame_idx: int) -> None:
+        cooldown = max(0, int(getattr(self.config, "MSDC_ROI_REDETECT_COOLDOWN_FRAMES", 0)))
+        if cooldown <= 0:
+            return
+        self._cooldown_until[int(track.gid)] = int(frame_idx) + cooldown + 1
+
+    def _prune_cooldowns(self, tracks: list[EvidenceTrack], frame_idx: int) -> None:
+        live_gids = {int(track.gid) for track in list(tracks or [])}
+        expired = [
+            gid for gid, until in self._cooldown_until.items()
+            if int(until) <= int(frame_idx) or int(gid) not in live_gids
+        ]
+        for gid in expired:
+            self._cooldown_until.pop(int(gid), None)
+
+    def _skip_debug(self, track: EvidenceTrack, reason: str, frame_idx: int, **extra: Any) -> dict:
+        payload = {
+            "gid": int(track.gid),
+            "public_id": None if track.public_id is None else int(track.public_id),
+            "state": self._state(track).value,
+            "reason": str(reason),
+            "real_det_age": int(self._real_det_age(track, frame_idx)),
+        }
+        payload.update(extra)
+        return payload
+
+    @staticmethod
+    def _real_det_age(track: EvidenceTrack, frame_idx: int) -> int:
+        last_real = int(getattr(track, "last_real_det_frame", frame_idx))
+        return max(0, int(frame_idx) - last_real)
 
     def _track_roi(self, track: EvidenceTrack, frame_shape: tuple, frame_idx: int) -> tuple[int, int, int, int] | None:
         frame_h, frame_w = int(frame_shape[0]), int(frame_shape[1])
@@ -236,6 +306,8 @@ class ROIRedetector:
             "num_filtered_existing": 0,
             "num_filtered_invalid": 0,
             "num_capped_by_roi": 0,
+            "num_skipped_tracks": 0,
+            "skipped_tracks": [],
             "rois": [],
         }
         if disabled_reason:

@@ -110,6 +110,33 @@ def test_msdc_tracking_calls_low_threshold_and_lifecycle_tracker():
     assert result["data"]["boxes"][0]["lifecycle_state"] == "active"
 
 
+def test_msdc_tracking_uses_supplied_high_low_boxes_without_detector_call():
+    detector = DummyDetector()
+    tracker = DummyTracker()
+    lifecycle = DummyLifecycleTracker()
+    result = {"data": {"boxes": []}}
+    high_boxes = [{"x": 11, "y": 12, "w": 13, "h": 14, "confidence": 0.8, "class": "UAV"}]
+    low_boxes = [{"x": 21, "y": 22, "w": 23, "h": 24, "confidence": 0.2, "class": "UAV"}]
+
+    tracked_boxes = video_main._update_tracking_for_frame(
+        tracker_type="msdc_elt",
+        tracker=tracker,
+        lifecycle_tracker=lifecycle,
+        detector=detector,
+        frame=_frame(),
+        frame_idx=5,
+        file_type="visible",
+        result=result,
+        high_boxes=high_boxes,
+        low_boxes=low_boxes,
+    )
+
+    assert tracker.calls == []
+    assert detector.processor.calls == []
+    assert lifecycle.calls[0][1:] == (5, "visible", high_boxes, low_boxes)
+    assert tracked_boxes == result["data"]["boxes"]
+
+
 def test_msdc_output_path_defaults_to_independent_outputs_dir(tmp_path):
     run_dir, output_path, debug_dir = video_main._resolve_msdc_paths(
         input_path=str(tmp_path / "sample.mp4"),

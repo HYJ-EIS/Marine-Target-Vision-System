@@ -44,6 +44,10 @@ import messaging.mq_publisher as mq
 import visualization as vis
 from output_rtsp_video.video_output_manager import create_video_output_manager
 from target_module.image_detect_module.config import Config
+from target_module.image_detect_module.utils.msdc_detection import (
+    resolve_msdc_high_low_boxes,
+    run_msdc_low_threshold_detection,
+)
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from target_module.image_detect_module.utils.file_utils import get_file_type
 
@@ -83,12 +87,6 @@ def _is_msdc_tracker(tracker_type: str | None) -> bool:
     return tracker_type == "msdc_elt"
 
 
-def _get_msdc_low_conf_thresh(file_type: str) -> float:
-    if file_type == "infrared":
-        return float(Config.MSDC_LOW_CONF_INFRARED)
-    return float(Config.MSDC_LOW_CONF_VISIBLE)
-
-
 def _safe_run_name(input_path: str) -> str:
     source_name = os.path.splitext(os.path.basename(input_path))[0] if input_path else "rtsp"
     safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in source_name)
@@ -103,20 +101,6 @@ def _resolve_msdc_paths(input_path: str, output_arg: str) -> tuple[str, str, str
     return run_dir, output_path, debug_dir
 
 
-def _run_msdc_low_threshold_detection(detector, frame, file_type: str) -> list[dict]:
-    if not bool(getattr(Config, "MSDC_USE_LOW_DET", True)):
-        return []
-    processor = getattr(detector, "processor", None)
-    if processor is None or not hasattr(processor, "process_frame"):
-        raise RuntimeError("detector.processor.process_frame(frame, file_type, conf_override=...) 不可用")
-
-    low_conf = _get_msdc_low_conf_thresh(file_type)
-    low_stats = processor.process_frame(frame, file_type, conf_override=low_conf)
-    if low_stats is None:
-        raise RuntimeError(f"低阈值检测失败: file_type={file_type}, conf_override={low_conf}")
-    return low_stats.get("boxes", [])
-
-
 def _update_tracking_for_frame(
     tracker_type: str,
     tracker,
@@ -126,12 +110,15 @@ def _update_tracking_for_frame(
     frame_idx: int,
     file_type: str,
     result: dict,
+    high_boxes: list[dict] | None = None,
+    low_boxes: list[dict] | None = None,
 ) -> list[dict]:
-    boxes = result.get("data", {}).get("boxes", [])
+    boxes = list(high_boxes) if high_boxes is not None else result.get("data", {}).get("boxes", [])
     if _is_msdc_tracker(tracker_type):
         if lifecycle_tracker is None:
             raise RuntimeError("MS-DC-ELT tracker 未初始化")
-        low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
+        if low_boxes is None:
+            low_boxes = run_msdc_low_threshold_detection(detector, frame, file_type)
         tracked_boxes = lifecycle_tracker.update(
             frame=frame,
             frame_idx=frame_idx,
@@ -290,19 +277,32 @@ def main():
 
         frame_count += 1
 
-        # 保存帧到临时文件供检测器使用
-        cv2.imwrite(tmp_frame_path, frame)
+        low_boxes = None
+        if use_msdc_elt:
+            try:
+                boxes, low_boxes = resolve_msdc_high_low_boxes(detector, frame, file_type)
+                result = {"success": True, "data": {"boxes": boxes}}
+            except RuntimeError as e:
+                print(f"[ERROR] MS-DC-ELT 检测失败: {e}")
+                if writer:
+                    writer.write(frame)
+                elif output_manager:
+                    output_manager.write_frame(frame)
+                continue
+        else:
+            # 保存帧到临时文件供检测器使用
+            cv2.imwrite(tmp_frame_path, frame)
 
-        # 检测
-        result = detector.detect_from_image_file(tmp_frame_path, file_type=file_type)
-        if result is None or not result.get("success"):
-            if writer:
-                writer.write(frame)
-            elif output_manager:
-                output_manager.write_frame(frame)
-            continue
+            # 检测
+            result = detector.detect_from_image_file(tmp_frame_path, file_type=file_type)
+            if result is None or not result.get("success"):
+                if writer:
+                    writer.write(frame)
+                elif output_manager:
+                    output_manager.write_frame(frame)
+                continue
 
-        boxes = result.get("data", {}).get("boxes", [])
+            boxes = result.get("data", {}).get("boxes", [])
 
         # 追踪（baseline 传入 frame 供 GMC 使用；MS-DC-ELT 额外执行低阈值检测）
         try:
@@ -315,6 +315,8 @@ def main():
                 frame_idx=frame_count - 1,
                 file_type=file_type,
                 result=result,
+                high_boxes=boxes if use_msdc_elt else None,
+                low_boxes=low_boxes,
             )
         except RuntimeError as e:
             if use_msdc_elt:

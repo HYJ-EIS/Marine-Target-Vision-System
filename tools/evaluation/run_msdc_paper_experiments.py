@@ -27,6 +27,14 @@ ABLATION_VARIANTS = [
     "Ours-no-template",
     "Ours-no-reacquire",
     "Ours-no-removed-guard",
+    "v2_no_roi_redetect",
+    "v2_roi_interval10",
+    "v2_roi_interval15",
+    "v2_roi_max1",
+    "v2_candidate_topk",
+    "v2_candidate_topk_roi_max1",
+    "v2_candidate_topk_no_roi",
+    "v2_speed_diag_off",
 ]
 DEFAULT_DATASET_ROOTS = [
     "/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集",

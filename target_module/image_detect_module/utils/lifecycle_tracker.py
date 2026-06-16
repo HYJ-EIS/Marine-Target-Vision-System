@@ -8,7 +8,9 @@ guard diagnostics, and EvidenceStateUpdater together.
 
 from __future__ import annotations
 
+import heapq
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +44,7 @@ class MSDCLifecycleTracker:
         self.evidence_updater = EvidenceStateUpdater(self.config)
         self.template_lock = TemplateLock(self.config)
         self.output_candidates = bool(getattr(self.config, "MSDC_OUTPUT_CANDIDATES", False))
-        self.debug_events = bool(getattr(self.config, "MSDC_DEBUG_EVENTS", True))
+        self.debug_events = bool(getattr(self.config, "MSDC_DEBUG_EVENTS", False))
         self.debug_dir = self._resolve_debug_dir(debug_dir)
         self.last_events = []
         self.last_debug_info: dict[str, Any] = {}
@@ -54,6 +56,8 @@ class MSDCLifecycleTracker:
         self.last_spawn_suppression_debug: dict[str, Any] = {}
         self.last_output_nms_debug: dict[str, Any] = self._empty_output_nms_debug()
         self.last_roi_redetect_debug: dict[str, Any] = {}
+        self.last_low_observation_budget_debug: dict[str, Any] = self._empty_low_observation_budget_debug()
+        self.last_timing_debug: dict[str, float] = self._empty_timing_debug()
 
         if self.debug_events and self.debug_dir is not None:
             self.debug_dir.mkdir(parents=True, exist_ok=True)
@@ -75,10 +79,16 @@ class MSDCLifecycleTracker:
         idx = int(frame_idx)
         modality = str(file_type or self.file_type or "unknown")
         self.file_type = modality
+        update_start = time.perf_counter()
+        step_start = update_start
 
         high_boxes = list(high_boxes or [])
         low_boxes = list(low_boxes or [])
-        low_only_boxes = self._filter_low_only_boxes(high_boxes, low_boxes)
+        raw_low_only_boxes = self._filter_low_only_boxes(high_boxes, low_boxes)
+        low_only_boxes = self._budget_low_only_boxes(raw_low_only_boxes, self.tracks)
+        low_filter_s = time.perf_counter() - step_start
+
+        step_start = time.perf_counter()
         roi_low_boxes, roi_debug = self.roi_redetector.update(
             frame=frame,
             tracks=self.tracks,
@@ -87,25 +97,39 @@ class MSDCLifecycleTracker:
             existing_boxes=high_boxes + low_boxes,
         )
         self.last_roi_redetect_debug = dict(roi_debug or {})
+        roi_redetect_s = time.perf_counter() - step_start
 
+        step_start = time.perf_counter()
         if bool(getattr(self.config, "MSDC_USE_MOTION", True)):
             motion_boxes, motion_debug = self.motion_seed.update(frame, frame_idx=idx)
         else:
             motion_boxes, motion_debug = [], {"frame_idx": idx, "num_motion_boxes": 0, "disabled": True}
         self.last_motion_debug = dict(motion_debug or {})
+        motion_s = time.perf_counter() - step_start
 
+        step_start = time.perf_counter()
         observations = []
         observations.extend(self._boxes_to_observations(high_boxes, "high_det", idx, modality))
         observations.extend(self._boxes_to_observations(low_only_boxes, "low_det", idx, modality))
         observations.extend(self._boxes_to_observations(roi_low_boxes, "roi_low_det", idx, modality))
         observations.extend(self._boxes_to_observations(motion_boxes, "motion", idx, modality))
-        template_observations = self.template_lock.match_active_tracks(self.tracks, frame, idx, modality=modality)
-        if self.evidence_updater.should_reacquire_frame(idx):
-            template_observations.extend(self.template_lock.match_lost_tracks(self.tracks, frame, idx, modality=modality))
-        observations.extend(template_observations)
+        observation_build_s = time.perf_counter() - step_start
 
+        step_start = time.perf_counter()
+        template_observations = []
+        if self._template_enabled():
+            template_observations = self.template_lock.match_active_tracks(self.tracks, frame, idx, modality=modality)
+            if self.evidence_updater.should_reacquire_frame(idx):
+                template_observations.extend(self.template_lock.match_lost_tracks(self.tracks, frame, idx, modality=modality))
+        observations.extend(template_observations)
+        template_match_s = time.perf_counter() - step_start
+
+        step_start = time.perf_counter()
         self.tracks, events = self.evidence_updater.update_tracks(self.tracks, observations, idx)
         self.last_events = events
+        evidence_update_s = time.perf_counter() - step_start
+
+        step_start = time.perf_counter()
         self.last_template_debug = self._sync_active_templates(frame, template_observations, idx)
         self.last_reacquire_debug = dict(getattr(self.evidence_updater, "last_reacquire_debug", {}) or {})
         self.last_low_inherit_debug = dict(getattr(self.evidence_updater, "last_low_inherit_debug", {}) or {})
@@ -115,21 +139,53 @@ class MSDCLifecycleTracker:
             "last_spawn_suppression_debug",
             {},
         ) or {})
+        template_sync_s = time.perf_counter() - step_start
 
+        step_start = time.perf_counter()
         output_boxes = self._tracks_to_output_boxes(self.tracks, frame_idx=idx)
-        self.last_debug_info = self._frame_debug_info(
-            frame_idx=idx,
-            file_type=modality,
-            high_boxes=high_boxes,
-            low_boxes=low_boxes,
-            low_only_boxes=low_only_boxes,
-            roi_low_boxes=roi_low_boxes,
-            motion_boxes=motion_boxes,
-            template_observations=template_observations,
-            observations=observations,
-            output_boxes=output_boxes,
-        )
-        self._write_debug(events, self.last_debug_info)
+        output_s = time.perf_counter() - step_start
+
+        step_start = time.perf_counter()
+        if self.debug_events and self.debug_dir is not None:
+            self.last_debug_info = self._frame_debug_info(
+                frame_idx=idx,
+                file_type=modality,
+                high_boxes=high_boxes,
+                low_boxes=low_boxes,
+                low_only_boxes=low_only_boxes,
+                roi_low_boxes=roi_low_boxes,
+                motion_boxes=motion_boxes,
+                template_observations=template_observations,
+                observations=observations,
+                output_boxes=output_boxes,
+            )
+            self._write_debug(events, self.last_debug_info)
+        else:
+            self.last_debug_info = self._minimal_frame_debug_info(
+                frame_idx=idx,
+                file_type=modality,
+                high_boxes=high_boxes,
+                low_boxes=low_boxes,
+                low_only_boxes=low_only_boxes,
+                roi_low_boxes=roi_low_boxes,
+                motion_boxes=motion_boxes,
+                template_observations=template_observations,
+                observations=observations,
+                output_boxes=output_boxes,
+            )
+        debug_s = time.perf_counter() - step_start
+        self.last_timing_debug = {
+            "low_filter_s": float(low_filter_s),
+            "roi_redetect_s": float(roi_redetect_s),
+            "motion_s": float(motion_s),
+            "observation_build_s": float(observation_build_s),
+            "template_match_s": float(template_match_s),
+            "evidence_update_s": float(evidence_update_s),
+            "template_sync_s": float(template_sync_s),
+            "output_s": float(output_s),
+            "debug_s": float(debug_s),
+            "total_update_s": float(time.perf_counter() - update_start),
+        }
         return output_boxes
 
     def reset(self) -> None:
@@ -148,6 +204,23 @@ class MSDCLifecycleTracker:
         self.last_spawn_suppression_debug = {}
         self.last_output_nms_debug = self._empty_output_nms_debug()
         self.last_roi_redetect_debug = {}
+        self.last_low_observation_budget_debug = self._empty_low_observation_budget_debug()
+        self.last_timing_debug = self._empty_timing_debug()
+
+    @staticmethod
+    def _empty_timing_debug() -> dict[str, float]:
+        return {
+            "low_filter_s": 0.0,
+            "roi_redetect_s": 0.0,
+            "motion_s": 0.0,
+            "observation_build_s": 0.0,
+            "template_match_s": 0.0,
+            "evidence_update_s": 0.0,
+            "template_sync_s": 0.0,
+            "output_s": 0.0,
+            "debug_s": 0.0,
+            "total_update_s": 0.0,
+        }
 
     def _tracks_to_output_boxes(self, tracks: list[EvidenceTrack], frame_idx: int | None = None) -> list[dict]:
         active_boxes = []
@@ -359,6 +432,213 @@ class MSDCLifecycleTracker:
                 low_only.append(box)
         return low_only
 
+    def _budget_low_only_boxes(self, low_only_boxes: list[dict], tracks: list[EvidenceTrack]) -> list[dict]:
+        topk = max(0, int(getattr(self.config, "MSDC_LOW_OBS_TOPK", 0)))
+        global_topk = max(0, int(getattr(self.config, "MSDC_LOW_OBS_GLOBAL_TOPK", topk)))
+        per_track_nearest = max(0, int(getattr(self.config, "MSDC_LOW_OBS_PER_TRACK_NEAREST", 1)))
+        max_per_frame = max(0, int(getattr(self.config, "MSDC_LOW_OBS_MAX_PER_FRAME", 0)))
+        min_conf = float(getattr(self.config, "MSDC_LOW_OBS_MIN_CONF", 0.0))
+        valid = [box for box in low_only_boxes if self._is_valid_project_box(box)]
+        enabled = bool(topk > 0 or min_conf > 0.0)
+        after_min_conf = [
+            box for box in valid
+            if float(box.get("confidence", box.get("score", 0.0))) >= min_conf
+        ] if enabled else list(valid)
+        proximity_enabled = bool(getattr(self.config, "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY", True))
+        proximity_tracks = [
+            track
+            for track in tracks
+            if self._track_state(track) in {TrackState.ACTIVE, TrackState.LOST}
+        ]
+        after_gate = after_min_conf
+        gate_mask = np.ones(len(after_min_conf), dtype=bool)
+        iou_matrix = np.zeros((len(after_min_conf), len(proximity_tracks)), dtype=np.float64)
+        distance_matrix = np.zeros((len(after_min_conf), len(proximity_tracks)), dtype=np.float64)
+        if proximity_enabled and proximity_tracks and after_min_conf:
+            gate_mask, iou_matrix, distance_matrix = self._low_boxes_motion_gate(after_min_conf, proximity_tracks)
+            after_gate = [
+                box
+                for box, keep in zip(after_min_conf, gate_mask)
+                if bool(keep)
+            ]
+
+        gated_original_indices = [idx for idx, keep in enumerate(gate_mask.tolist()) if bool(keep)]
+        score_key = lambda box: float(box.get("confidence", box.get("score", 0.0)))
+        selected_indices: list[int] = []
+        kept_global_count = 0
+        kept_nearest_count = 0
+        if global_topk > 0:
+            ranked = heapq.nlargest(global_topk, gated_original_indices, key=lambda idx: score_key(after_min_conf[idx]))
+            selected_indices.extend(ranked)
+            kept_global_count = len(ranked)
+        elif enabled:
+            ranked = sorted(gated_original_indices, key=lambda idx: score_key(after_min_conf[idx]), reverse=True)
+            selected_indices.extend(ranked)
+            kept_global_count = len(ranked)
+        elif enabled:
+            selected_indices.extend(gated_original_indices)
+            kept_global_count = len(gated_original_indices)
+        else:
+            selected_indices.extend(gated_original_indices)
+            kept_global_count = len(gated_original_indices)
+
+        if per_track_nearest > 0 and proximity_enabled and proximity_tracks and gated_original_indices:
+            gated_set = set(gated_original_indices)
+            for track_col in range(len(proximity_tracks)):
+                ordered_by_distance = sorted(
+                    gated_original_indices,
+                    key=lambda idx: (
+                        float(distance_matrix[idx, track_col]),
+                        -float(iou_matrix[idx, track_col]),
+                        -score_key(after_min_conf[idx]),
+                    ),
+                )
+                for idx in ordered_by_distance[:per_track_nearest]:
+                    if idx in gated_set:
+                        selected_indices.append(idx)
+                        kept_nearest_count += 1
+
+        deduped_indices = list(dict.fromkeys(selected_indices))
+        if max_per_frame > 0 and len(deduped_indices) > max_per_frame:
+            deduped_indices = deduped_indices[:max_per_frame]
+        output = [after_min_conf[idx] for idx in deduped_indices]
+        ordered_count = len(after_gate)
+        self.last_low_observation_budget_debug = {
+            "enabled": enabled,
+            "topk": int(topk),
+            "global_topk": int(global_topk),
+            "per_track_nearest": int(per_track_nearest),
+            "max_per_frame": int(max_per_frame),
+            "min_conf": float(min_conf),
+            "track_proximity_enabled": bool(proximity_enabled),
+            "track_proximity_center_dist": float(getattr(self.config, "MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST", getattr(self.config, "MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST", 240.0))),
+            "track_proximity_iou": float(getattr(self.config, "MSDC_LOW_OBS_MOTION_GATE_IOU", getattr(self.config, "MSDC_LOW_OBS_TRACK_PROXIMITY_IOU", 0.01))),
+            "track_proximity_track_count": int(len(proximity_tracks)),
+            "num_input": int(len(low_only_boxes)),
+            "num_valid": int(len(valid)),
+            "num_after_min_conf": int(len(after_min_conf)),
+            "num_after_track_proximity": int(len(after_gate)),
+            "num_after_motion_gate": int(len(after_gate)),
+            "num_output": int(len(output)),
+            "num_filtered_invalid": int(len(low_only_boxes) - len(valid)),
+            "num_filtered_min_conf": int(len(valid) - len(after_min_conf)),
+            "num_filtered_track_proximity": int(len(after_min_conf) - len(after_gate)),
+            "num_filtered_motion_gate": int(len(after_min_conf) - len(after_gate)),
+            "num_filtered_topk": int(max(0, ordered_count - len(output))),
+            "num_kept_global_topk": int(kept_global_count),
+            "num_kept_per_track_nearest": int(kept_nearest_count),
+            "active_track_count": int(sum(1 for track in tracks if self._track_state(track) == TrackState.ACTIVE)),
+            "lost_track_count": int(sum(1 for track in tracks if self._track_state(track) == TrackState.LOST)),
+        }
+        return output
+
+    def _low_boxes_motion_gate(self, boxes: list[dict], tracks: list[EvidenceTrack]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if not boxes:
+            return np.zeros(0, dtype=bool), np.zeros((0, 0), dtype=np.float64), np.zeros((0, 0), dtype=np.float64)
+        if not tracks:
+            return np.ones(len(boxes), dtype=bool), np.zeros((len(boxes), 0), dtype=np.float64), np.zeros((len(boxes), 0), dtype=np.float64)
+        box_xyxy = np.vstack([xywh_to_xyxy(box) for box in boxes])
+        track_xyxy = np.vstack([self._predict_track_xyxy(track) for track in tracks])
+        iou = self._iou_matrix(box_xyxy, track_xyxy)
+        distances = self._center_distance_matrix(box_xyxy, track_xyxy)
+        iou_thresh = float(getattr(
+            self.config,
+            "MSDC_LOW_OBS_MOTION_GATE_IOU",
+            getattr(self.config, "MSDC_LOW_OBS_TRACK_PROXIMITY_IOU", 0.01),
+        ))
+        center_thresh = float(getattr(
+            self.config,
+            "MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST",
+            getattr(self.config, "MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST", 240.0),
+        ))
+        keep_mask = np.logical_or(
+            np.max(iou, axis=1) >= iou_thresh,
+            np.min(distances, axis=1) <= center_thresh,
+        )
+        return keep_mask, iou, distances
+
+    def _low_boxes_near_tracks_mask(self, boxes: list[dict], tracks: list[EvidenceTrack]) -> np.ndarray:
+        if not boxes or not tracks:
+            return np.ones(len(boxes), dtype=bool)
+        box_xyxy = np.vstack([xywh_to_xyxy(box) for box in boxes])
+        track_xyxy = np.vstack([self._predict_track_xyxy(track) for track in tracks])
+        iou = self._iou_matrix(box_xyxy, track_xyxy)
+        distances = self._center_distance_matrix(box_xyxy, track_xyxy)
+        iou_thresh = float(getattr(self.config, "MSDC_LOW_OBS_TRACK_PROXIMITY_IOU", 0.01))
+        center_thresh = float(getattr(self.config, "MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST", 240.0))
+        return np.logical_or(
+            np.max(iou, axis=1) >= iou_thresh,
+            np.min(distances, axis=1) <= center_thresh,
+        )
+
+    @staticmethod
+    def _predict_track_xyxy(track: EvidenceTrack) -> np.ndarray:
+        box = np.asarray(track.box, dtype=np.float64).reshape(4).copy()
+        velocity = np.asarray(track.velocity, dtype=np.float64).reshape(-1)
+        if velocity.size >= 2:
+            box[[0, 2]] += float(velocity[0])
+            box[[1, 3]] += float(velocity[1])
+        return box
+
+    def _template_enabled(self) -> bool:
+        return bool(getattr(self.config, "MSDC_USE_TEMPLATE", False)) and bool(
+            getattr(self.config, "MSDC_TEMPLATE_ENABLE", False)
+        )
+
+    @staticmethod
+    def _empty_low_observation_budget_debug() -> dict:
+        return {
+            "enabled": False,
+            "topk": 0,
+            "global_topk": 0,
+            "per_track_nearest": 0,
+            "max_per_frame": 0,
+            "min_conf": 0.0,
+            "num_input": 0,
+            "num_valid": 0,
+            "num_after_min_conf": 0,
+            "num_after_track_proximity": 0,
+            "num_after_motion_gate": 0,
+            "num_output": 0,
+            "num_filtered_invalid": 0,
+            "num_filtered_min_conf": 0,
+            "num_filtered_track_proximity": 0,
+            "num_filtered_motion_gate": 0,
+            "num_filtered_topk": 0,
+            "num_kept_global_topk": 0,
+            "num_kept_per_track_nearest": 0,
+            "track_proximity_enabled": False,
+            "track_proximity_center_dist": 0.0,
+            "track_proximity_iou": 0.0,
+            "track_proximity_track_count": 0,
+            "active_track_count": 0,
+            "lost_track_count": 0,
+        }
+
+    @staticmethod
+    def _iou_matrix(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        if len(left) == 0 or len(right) == 0:
+            return np.zeros((len(left), len(right)), dtype=np.float64)
+        xx1 = np.maximum(left[:, 0:1], right[:, 0].reshape(1, -1))
+        yy1 = np.maximum(left[:, 1:2], right[:, 1].reshape(1, -1))
+        xx2 = np.minimum(left[:, 2:3], right[:, 2].reshape(1, -1))
+        yy2 = np.minimum(left[:, 3:4], right[:, 3].reshape(1, -1))
+        inter = np.maximum(0.0, xx2 - xx1) * np.maximum(0.0, yy2 - yy1)
+        left_area = np.maximum(0.0, left[:, 2] - left[:, 0]) * np.maximum(0.0, left[:, 3] - left[:, 1])
+        right_area = np.maximum(0.0, right[:, 2] - right[:, 0]) * np.maximum(0.0, right[:, 3] - right[:, 1])
+        union = left_area[:, None] + right_area[None, :] - inter
+        return inter / np.maximum(union, 1e-10)
+
+    @staticmethod
+    def _center_distance_matrix(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        if len(left) == 0 or len(right) == 0:
+            return np.zeros((len(left), len(right)), dtype=np.float64)
+        left_cx = (left[:, 0] + left[:, 2]) / 2.0
+        left_cy = (left[:, 1] + left[:, 3]) / 2.0
+        right_cx = (right[:, 0] + right[:, 2]) / 2.0
+        right_cy = (right[:, 1] + right[:, 3]) / 2.0
+        return np.sqrt((left_cx[:, None] - right_cx[None, :]) ** 2 + (left_cy[:, None] - right_cy[None, :]) ** 2)
+
     @staticmethod
     def _iou_one_to_many(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
         if boxes.size == 0:
@@ -421,6 +701,7 @@ class MSDCLifecycleTracker:
             "output_box_count": int(len(output_boxes)),
             "motion_debug": self.last_motion_debug,
             "roi_redetect_debug": self._compact_roi_redetect_debug(self.last_roi_redetect_debug),
+            "low_observation_budget_debug": dict(self.last_low_observation_budget_debug),
             "template_score": self.last_template_debug["template_score"],
             "template_updated": self.last_template_debug["template_updated"],
             "template_match_box": self.last_template_debug["template_match_box"],
@@ -436,6 +717,43 @@ class MSDCLifecycleTracker:
             "_low_boxes": low_boxes,
             "_low_only_boxes": low_only_boxes,
             "_roi_low_boxes": roi_low_boxes,
+        }
+
+    def _minimal_frame_debug_info(
+        self,
+        frame_idx: int,
+        file_type: str,
+        high_boxes: list[dict],
+        low_boxes: list[dict],
+        low_only_boxes: list[dict],
+        roi_low_boxes: list[dict],
+        motion_boxes: list[dict],
+        template_observations: list[Observation],
+        observations: list[Observation],
+        output_boxes: list[dict],
+    ) -> dict:
+        active_count = sum(1 for track in self.tracks if self._track_state(track) == TrackState.ACTIVE)
+        candidate_count = sum(1 for track in self.tracks if self._track_state(track) == TrackState.CANDIDATE)
+        low_candidate_count = sum(1 for track in self.tracks if self._track_state(track) == TrackState.LOW_CANDIDATE)
+        lost_count = sum(1 for track in self.tracks if self._track_state(track) == TrackState.LOST)
+        return {
+            "debug_events": False,
+            "frame_idx": int(frame_idx),
+            "file_type": str(file_type),
+            "num_high": int(len(high_boxes)),
+            "num_low": int(len(low_boxes)),
+            "num_low_only": int(len(low_only_boxes)),
+            "num_roi_low": int(len(roi_low_boxes)),
+            "num_motion": int(len(motion_boxes)),
+            "num_template": int(len(template_observations)),
+            "num_observations": int(len(observations)),
+            "num_events": int(len(self.last_events)),
+            "active_track_count": int(active_count),
+            "candidate_track_count": int(candidate_count),
+            "low_candidate_track_count": int(low_candidate_count),
+            "lost_track_count": int(lost_count),
+            "output_box_count": int(len(output_boxes)),
+            "low_observation_budget_debug": dict(self.last_low_observation_budget_debug),
         }
 
     @staticmethod
@@ -645,6 +963,8 @@ class MSDCLifecycleTracker:
         return Path(default) if default else None
 
     def _sync_active_templates(self, frame: np.ndarray, template_observations: list[Observation], frame_idx: int) -> dict:
+        if not self._template_enabled():
+            return self._empty_template_debug()
         updated = False
         track_by_gid = {int(track.gid): track for track in self.tracks}
         for observation in template_observations:

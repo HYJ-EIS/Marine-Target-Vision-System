@@ -238,6 +238,7 @@ class EvidenceStateUpdater:
         tracks.extend(new_tracks)
         events.extend(new_events)
         tracks = self._prune_stale_removed_tracks(tracks, frame_idx)
+        tracks = self._enforce_track_caps(tracks, frame_idx)
         return tracks, events
 
     def merge_observations(self, observations: list[Observation]) -> list[_ObservationGroup]:
@@ -278,17 +279,17 @@ class EvidenceStateUpdater:
 
         center_thresh = float(self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0))
         iou_thresh = float(self._cfg("MSDC_ASSOC_IOU_THRESH", 0.2))
-        candidates: list[tuple[float, int, int]] = []
-
-        for local_track_idx, track_idx in enumerate(track_indices):
-            for group_idx in range(len(observation_groups)):
-                dist = float(distances[local_track_idx, group_idx])
-                iou_score = float(iou[local_track_idx, group_idx])
-                if iou_score < iou_thresh and dist > center_thresh:
-                    continue
-                center_bonus = max(0.0, 1.0 - dist / max(center_thresh, 1e-6))
-                score = iou_score + 0.5 * center_bonus
-                candidates.append((score, track_idx, group_idx))
+        valid_pairs = np.logical_or(iou >= iou_thresh, distances <= center_thresh)
+        local_track_rows, group_cols = np.where(valid_pairs)
+        if local_track_rows.size:
+            center_bonus = np.maximum(0.0, 1.0 - distances[local_track_rows, group_cols] / max(center_thresh, 1e-6))
+            scores = iou[local_track_rows, group_cols] + 0.5 * center_bonus
+            candidates = [
+                (float(score), int(track_indices[int(local_track_idx)]), int(group_idx))
+                for score, local_track_idx, group_idx in zip(scores, local_track_rows, group_cols)
+            ]
+        else:
+            candidates = []
 
         matches: list[tuple[int, int]] = []
         used_tracks: set[int] = set()
@@ -1249,6 +1250,104 @@ class EvidenceStateUpdater:
             if int(frame_idx) - removed_frame_idx <= guard_frames:
                 kept.append(track)
         return kept
+
+    def _enforce_track_caps(self, tracks: list[EvidenceTrack], frame_idx: int) -> list[EvidenceTrack]:
+        max_active = int(self._cfg("MSDC_MAX_ACTIVE_TRACKS", 64))
+        max_lost = int(self._cfg("MSDC_MAX_LOST_TRACKS", 32))
+        max_candidates = int(self._cfg("MSDC_MAX_CANDIDATES", 32))
+        max_low_candidates = int(self._cfg("MSDC_MAX_LOW_CANDIDATES", 24))
+
+        if max_active > 0:
+            self._cap_state_pool(tracks, TrackState.ACTIVE, max_active, frame_idx, overflow_state=TrackState.LOST)
+        if max_lost > 0:
+            self._cap_state_pool(tracks, TrackState.LOST, max_lost, frame_idx, overflow_state=TrackState.REMOVED)
+        if max_candidates > 0:
+            self._cap_state_pool(tracks, TrackState.CANDIDATE, max_candidates, frame_idx, overflow_state=TrackState.REMOVED)
+        if max_low_candidates > 0:
+            self._cap_state_pool(tracks, TrackState.LOW_CANDIDATE, max_low_candidates, frame_idx, overflow_state=TrackState.REMOVED)
+
+        max_total = int(self._cfg("MSDC_MAX_TOTAL_TRACKS", 128))
+        if max_total > 0:
+            tracks = self._cap_total_track_list(tracks, max_total, frame_idx)
+        return tracks
+
+    def _cap_state_pool(
+        self,
+        tracks: list[EvidenceTrack],
+        state: TrackState,
+        limit: int,
+        frame_idx: int,
+        overflow_state: TrackState,
+    ) -> None:
+        state_tracks = [track for track in tracks if _as_state(track.state) == state]
+        if len(state_tracks) <= limit:
+            return
+        kept = set(id(track) for track in sorted(state_tracks, key=self._track_keep_score, reverse=True)[:limit])
+        for track in state_tracks:
+            if id(track) in kept:
+                continue
+            if overflow_state == TrackState.REMOVED:
+                track.retired_signature = self._make_removed_signature(track, frame_idx)
+            track.state = overflow_state
+            if overflow_state == TrackState.LOST:
+                track.misses = max(int(track.misses), 1)
+
+    def _cap_total_track_list(
+        self,
+        tracks: list[EvidenceTrack],
+        limit: int,
+        frame_idx: int,
+    ) -> list[EvidenceTrack]:
+        live_tracks = [track for track in tracks if _as_state(track.state) != TrackState.REMOVED]
+        if len(live_tracks) > limit:
+            kept_live = set(id(track) for track in sorted(live_tracks, key=self._track_keep_score, reverse=True)[:limit])
+            for track in live_tracks:
+                if id(track) in kept_live:
+                    continue
+                track.retired_signature = self._make_removed_signature(track, frame_idx)
+                track.state = TrackState.REMOVED
+
+        if len(tracks) <= limit:
+            return tracks
+        ordered = sorted(tracks, key=self._total_keep_key, reverse=True)
+        return ordered[:limit]
+
+    @staticmethod
+    def _track_keep_score(track: EvidenceTrack) -> tuple[float, int, int, int]:
+        state = _as_state(track.state)
+        state_priority = {
+            TrackState.ACTIVE: 4,
+            TrackState.LOST: 3,
+            TrackState.CANDIDATE: 2,
+            TrackState.LOW_CANDIDATE: 1,
+            TrackState.REMOVED: 0,
+        }.get(state, 0)
+        return (
+            float(track.evidence_score),
+            int(track.last_seen),
+            int(track.hits),
+            state_priority,
+        )
+
+    def _total_keep_key(self, track: EvidenceTrack) -> tuple[int, float, int, int]:
+        state = _as_state(track.state)
+        state_priority = {
+            TrackState.ACTIVE: 5,
+            TrackState.LOST: 4,
+            TrackState.CANDIDATE: 3,
+            TrackState.LOW_CANDIDATE: 2,
+            TrackState.REMOVED: 1,
+        }.get(state, 0)
+        removed_age = int(track.last_seen)
+        if state == TrackState.REMOVED:
+            signature = track.retired_signature or {}
+            removed_age = int(signature.get("removed_frame_idx", signature.get("last_seen", track.last_seen)))
+        return (
+            state_priority,
+            float(track.evidence_score),
+            int(removed_age),
+            int(track.gid),
+        )
 
     def _make_removed_guard_event(
         self,

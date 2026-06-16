@@ -25,13 +25,11 @@ import visualization as vis
 from cv_utils import imwrite_unicode
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.utils.file_utils import get_file_type
+from target_module.image_detect_module.utils.msdc_detection import resolve_msdc_high_low_boxes
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from tools.evaluation.export_mot_results import (
     TRACKER_CHOICES,
     _is_msdc_tracker,
-    _run_msdc_high_threshold_detection,
-    _run_msdc_low_threshold_detection,
-    _split_msdc_high_from_low_boxes,
     _update_tracking_for_frame,
 )
 
@@ -127,11 +125,7 @@ def render_tracking_video(
 
             low_boxes = None
             if _is_msdc_tracker(tracker_type):
-                if bool(getattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", False)):
-                    low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
-                    boxes = _split_msdc_high_from_low_boxes(low_boxes, file_type)
-                else:
-                    boxes = _run_msdc_high_threshold_detection(detector, frame, file_type)
+                boxes, low_boxes = resolve_msdc_high_low_boxes(detector, frame, file_type)
             else:
                 if not imwrite_unicode(str(tmp_path), frame):
                     raise RuntimeError(f"Failed to write temporary frame: {tmp_path}")

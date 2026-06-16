@@ -119,6 +119,14 @@ class ReacquireScaleGateSkippedFrameConfig(ReacquireScaleGateConfig):
     MSDC_LOW_SPAWN_MIN_CONF = 0.30
 
 
+class HardCapConfig(Config):
+    MSDC_MAX_ACTIVE_TRACKS = 2
+    MSDC_MAX_LOST_TRACKS = 1
+    MSDC_MAX_CANDIDATES = 2
+    MSDC_MAX_LOW_CANDIDATES = 1
+    MSDC_MAX_TOTAL_TRACKS = 6
+
+
 def _low_history(start_frame, boxes, score=0.35):
     history = []
     for offset, box in enumerate(boxes):
@@ -131,6 +139,25 @@ def _low_history(start_frame, boxes, score=0.35):
             "center": [float((x1 + x2) / 2), float((y1 + y2) / 2)],
         })
     return history
+
+
+def _track(gid, state, score=1.0, last_seen=0):
+    return EvidenceTrack(
+        gid=gid,
+        public_id=gid if state in {TrackState.ACTIVE, TrackState.LOST} else None,
+        state=state,
+        box=[gid * 10, 10, gid * 10 + 8, 18],
+        velocity=[0.0, 0.0],
+        evidence_score=score,
+        hits=4,
+        misses=0,
+        age=4,
+        last_seen=last_seen,
+        last_real_det_frame=last_seen,
+        real_det_hits=4,
+        class_id=2,
+        class_name="UAV",
+    )
 
 
 def test_high_observation_accumulates_into_active_track():
@@ -173,6 +200,34 @@ def test_high_observation_accumulates_into_active_track():
         "public_id": tracks[0].public_id,
         "lifecycle_state": "active",
     }]
+
+
+def test_update_tracks_enforces_state_pool_hard_caps():
+    updater = EvidenceStateUpdater(HardCapConfig)
+    tracks = [
+        _track(1, TrackState.ACTIVE, score=1.0, last_seen=10),
+        _track(2, TrackState.ACTIVE, score=3.0, last_seen=12),
+        _track(3, TrackState.ACTIVE, score=2.0, last_seen=11),
+        _track(4, TrackState.LOST, score=1.5, last_seen=8),
+        _track(5, TrackState.LOST, score=2.0, last_seen=9),
+        _track(6, TrackState.CANDIDATE, score=0.5, last_seen=10),
+        _track(7, TrackState.CANDIDATE, score=1.5, last_seen=12),
+        _track(8, TrackState.CANDIDATE, score=1.0, last_seen=11),
+        _track(9, TrackState.LOW_CANDIDATE, score=0.4, last_seen=11),
+        _track(10, TrackState.LOW_CANDIDATE, score=0.8, last_seen=12),
+    ]
+
+    tracks, _ = updater.update_tracks(tracks, [], frame_idx=13)
+    states_by_gid = {track.gid: track.state for track in tracks}
+
+    assert sum(1 for track in tracks if track.state == TrackState.ACTIVE) <= HardCapConfig.MSDC_MAX_ACTIVE_TRACKS
+    assert sum(1 for track in tracks if track.state == TrackState.LOST) <= HardCapConfig.MSDC_MAX_LOST_TRACKS
+    assert sum(1 for track in tracks if track.state == TrackState.CANDIDATE) <= HardCapConfig.MSDC_MAX_CANDIDATES
+    assert sum(1 for track in tracks if track.state == TrackState.LOW_CANDIDATE) <= HardCapConfig.MSDC_MAX_LOW_CANDIDATES
+    assert sum(1 for track in tracks if track.state != TrackState.REMOVED) <= HardCapConfig.MSDC_MAX_TOTAL_TRACKS
+    assert states_by_gid[2] == TrackState.ACTIVE
+    assert states_by_gid[5] == TrackState.LOST
+    assert states_by_gid[10] == TrackState.LOW_CANDIDATE
 
 
 def test_motion_only_candidate_does_not_confirm_active():

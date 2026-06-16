@@ -15,9 +15,11 @@ def test_default_onnx_model_paths_exist_on_current_platform():
 
 
 def test_msdc_v2_formal_defaults_avoid_template_and_duplicate_full_frame_detection():
+    assert Config.MSDC_USE_MOTION is False
     assert Config.MSDC_USE_TEMPLATE is False
     assert Config.MSDC_TEMPLATE_ENABLE is False
     assert Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET is True
+    assert Config.MSDC_DEBUG_EVENTS is False
 
 
 def test_msdc_v2_roi_budget_defaults_are_low_frequency(monkeypatch):
@@ -90,5 +92,100 @@ def test_msdc_v2_tuning_knobs_are_environment_backed(monkeypatch):
             assert reloaded.Config.MSDC_REACQUIRE_SCORE == 1.5
             assert reloaded.Config.MSDC_REACQUIRE_IOU_THRESH == 0.05
             assert reloaded.Config.MSDC_REACQUIRE_CENTER_DIST == 160.0
+    finally:
+        importlib.reload(config_module)
+
+
+def test_msdc_roi_and_low_observation_budget_knobs_are_environment_backed(monkeypatch):
+    import importlib
+    import target_module.image_detect_module.config as config_module
+
+    env_names = [
+        "MSDC_ROI_REDETECT_ACTIVE_ENABLE",
+        "MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE",
+        "MSDC_ROI_REDETECT_COOLDOWN_FRAMES",
+        "MSDC_LOW_OBS_TOPK",
+        "MSDC_LOW_OBS_MIN_CONF",
+    ]
+
+    try:
+        with monkeypatch.context() as override_env:
+            for name in env_names:
+                override_env.delenv(name, raising=False)
+            override_env.setenv("MSDC_ROI_REDETECT_ACTIVE_ENABLE", "1")
+            override_env.setenv("MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE", "45")
+            override_env.setenv("MSDC_ROI_REDETECT_COOLDOWN_FRAMES", "7")
+            override_env.setenv("MSDC_LOW_OBS_TOPK", "16")
+            override_env.setenv("MSDC_LOW_OBS_MIN_CONF", "0.28")
+
+            reloaded = importlib.reload(config_module)
+            assert reloaded.Config.MSDC_ROI_REDETECT_ACTIVE_ENABLE is True
+            assert reloaded.Config.MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE == 45
+            assert reloaded.Config.MSDC_ROI_REDETECT_COOLDOWN_FRAMES == 7
+            assert reloaded.Config.MSDC_LOW_OBS_TOPK == 16
+            assert reloaded.Config.MSDC_LOW_OBS_MIN_CONF == 0.28
+    finally:
+        importlib.reload(config_module)
+
+
+def test_msdc_lifecycle_acceleration_knobs_are_environment_backed(monkeypatch):
+    import importlib
+    import target_module.image_detect_module.config as config_module
+
+    env_names = [
+        "MSDC_LOST_MAX_AGE",
+        "MSDC_REMOVED_GUARD_FRAMES",
+        "MSDC_MAX_ACTIVE_TRACKS",
+        "MSDC_MAX_LOST_TRACKS",
+        "MSDC_MAX_CANDIDATES",
+        "MSDC_MAX_LOW_CANDIDATES",
+        "MSDC_MAX_TOTAL_TRACKS",
+        "MSDC_LOW_OBS_GLOBAL_TOPK",
+        "MSDC_LOW_OBS_PER_TRACK_NEAREST",
+        "MSDC_LOW_OBS_MAX_PER_FRAME",
+        "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY",
+        "MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST",
+        "MSDC_LOW_OBS_TRACK_PROXIMITY_IOU",
+        "MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST",
+        "MSDC_LOW_OBS_MOTION_GATE_IOU",
+    ]
+
+    try:
+        with monkeypatch.context() as override_env:
+            for name in env_names:
+                override_env.delenv(name, raising=False)
+            override_env.setenv("MSDC_LOST_MAX_AGE", "33")
+            override_env.setenv("MSDC_REMOVED_GUARD_FRAMES", "44")
+            override_env.setenv("MSDC_MAX_ACTIVE_TRACKS", "11")
+            override_env.setenv("MSDC_MAX_LOST_TRACKS", "12")
+            override_env.setenv("MSDC_MAX_CANDIDATES", "13")
+            override_env.setenv("MSDC_MAX_LOW_CANDIDATES", "14")
+            override_env.setenv("MSDC_MAX_TOTAL_TRACKS", "15")
+            override_env.setenv("MSDC_LOW_OBS_GLOBAL_TOPK", "16")
+            override_env.setenv("MSDC_LOW_OBS_PER_TRACK_NEAREST", "2")
+            override_env.setenv("MSDC_LOW_OBS_MAX_PER_FRAME", "18")
+            override_env.setenv("MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY", "0")
+            override_env.setenv("MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST", "88")
+            override_env.setenv("MSDC_LOW_OBS_TRACK_PROXIMITY_IOU", "0.07")
+            override_env.setenv("MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST", "99")
+            override_env.setenv("MSDC_LOW_OBS_MOTION_GATE_IOU", "0.08")
+
+            reloaded = importlib.reload(config_module)
+            assert reloaded.Config.MSDC_LOST_MAX_AGE == 33
+            assert reloaded.Config.MSDC_REMOVED_GUARD_FRAMES == 44
+            assert reloaded.Config.MSDC_removed_GUARD_FRAMES == 44
+            assert reloaded.Config.MSDC_MAX_ACTIVE_TRACKS == 11
+            assert reloaded.Config.MSDC_MAX_LOST_TRACKS == 12
+            assert reloaded.Config.MSDC_MAX_CANDIDATES == 13
+            assert reloaded.Config.MSDC_MAX_LOW_CANDIDATES == 14
+            assert reloaded.Config.MSDC_MAX_TOTAL_TRACKS == 15
+            assert reloaded.Config.MSDC_LOW_OBS_GLOBAL_TOPK == 16
+            assert reloaded.Config.MSDC_LOW_OBS_PER_TRACK_NEAREST == 2
+            assert reloaded.Config.MSDC_LOW_OBS_MAX_PER_FRAME == 18
+            assert reloaded.Config.MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY is False
+            assert reloaded.Config.MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST == 88.0
+            assert reloaded.Config.MSDC_LOW_OBS_TRACK_PROXIMITY_IOU == 0.07
+            assert reloaded.Config.MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST == 99.0
+            assert reloaded.Config.MSDC_LOW_OBS_MOTION_GATE_IOU == 0.08
     finally:
         importlib.reload(config_module)

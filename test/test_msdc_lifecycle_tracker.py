@@ -25,6 +25,9 @@ class LifecycleTestConfig(Config):
     MSDC_REACQUIRE_INTERVAL = 5
     MSDC_REACQUIRE_SCORE = 1.0
     MSDC_OUTPUT_MIN_BOX_SIZE = 8
+    MSDC_LOW_OBS_TOPK = 0
+    MSDC_LOW_OBS_MIN_CONF = 0.0
+    MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY = False
 
 
 class CandidateOutputConfig(LifecycleTestConfig):
@@ -64,6 +67,50 @@ class ROILifecycleConfig(ReacquireLifecycleConfig):
     MSDC_ROI_REDETECT_MAX_TRACKS = 4
     MSDC_ROI_REDETECT_EXISTING_IOU = 0.5
     MSDC_ROI_REACQUIRE_CENTER_DIST = 600.0
+
+
+class LowObservationBudgetConfig(LifecycleTestConfig):
+    MSDC_LOW_CANDIDATE_ENABLE = True
+    MSDC_LOW_OBS_TOPK = 2
+    MSDC_LOW_OBS_GLOBAL_TOPK = 2
+    MSDC_LOW_OBS_MAX_PER_FRAME = 2
+    MSDC_LOW_OBS_MIN_CONF = 0.25
+    MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY = False
+
+
+class LowObservationProximityConfig(LifecycleTestConfig):
+    MSDC_LOW_CANDIDATE_ENABLE = True
+    MSDC_LOW_OBS_TOPK = 10
+    MSDC_LOW_OBS_GLOBAL_TOPK = 10
+    MSDC_LOW_OBS_MAX_PER_FRAME = 10
+    MSDC_LOW_OBS_MIN_CONF = 0.25
+    MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY = True
+    MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST = 35.0
+    MSDC_LOW_OBS_TRACK_PROXIMITY_IOU = 0.01
+    MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST = 35.0
+    MSDC_LOW_OBS_MOTION_GATE_IOU = 0.01
+
+
+class LowObservationNearestConfig(LifecycleTestConfig):
+    MSDC_LOW_CANDIDATE_ENABLE = True
+    MSDC_LOW_OBS_TOPK = 1
+    MSDC_LOW_OBS_GLOBAL_TOPK = 1
+    MSDC_LOW_OBS_MAX_PER_FRAME = 4
+    MSDC_LOW_OBS_MIN_CONF = 0.25
+    MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY = True
+    MSDC_LOW_OBS_PER_TRACK_NEAREST = 1
+    MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST = 30.0
+    MSDC_LOW_OBS_MOTION_GATE_IOU = 0.01
+    MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST = 30.0
+    MSDC_LOW_OBS_TRACK_PROXIMITY_IOU = 0.01
+
+
+class DebugDisabledConfig(LifecycleTestConfig):
+    MSDC_DEBUG_EVENTS = False
+
+
+class MotionLifecycleConfig(LifecycleTestConfig):
+    MSDC_USE_MOTION = True
 
 
 class DummyROIProcessor:
@@ -199,6 +246,229 @@ def test_lifecycle_tracker_does_not_output_hidden_low_candidates_for_debug(tmp_p
     assert pool_stats[-1]["low_candidate_track_count"] == 1
 
 
+def test_lifecycle_tracker_limits_low_only_observations_before_tracker_update(tmp_path):
+    tracker = MSDCLifecycleTracker(config=LowObservationBudgetConfig, debug_dir=tmp_path)
+    low_boxes = [
+        _box(confidence=0.20, x=1, y=1),
+        _box(confidence=0.45, x=10, y=10),
+        _box(confidence=0.35, x=22, y=10),
+        _box(confidence=0.30, x=34, y=10),
+    ]
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=0,
+        file_type="visible",
+        high_boxes=[],
+        low_boxes=low_boxes,
+    )
+
+    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
+    debug = frames[-1]["low_observation_budget_debug"]
+    assert frames[-1]["num_low_only"] == 2
+    assert debug["enabled"] is True
+    assert debug["num_input"] == 4
+    assert debug["num_after_min_conf"] == 3
+    assert debug["num_output"] == 2
+    assert debug["num_filtered_min_conf"] == 1
+    assert debug["num_filtered_topk"] == 1
+    assert [box["confidence"] for box in frames[-1]["_low_only_boxes"]] == [0.45, 0.35]
+
+
+def test_lifecycle_tracker_filters_low_only_observations_far_from_tracks(tmp_path):
+    tracker = MSDCLifecycleTracker(config=LowObservationProximityConfig, debug_dir=tmp_path)
+    for frame_idx in range(4):
+        tracker.update(
+            frame=_frame(),
+            frame_idx=frame_idx,
+            file_type="visible",
+            high_boxes=[_box(x=10, y=10)],
+            low_boxes=[],
+        )
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=4,
+        file_type="visible",
+        high_boxes=[],
+        low_boxes=[
+            _box(confidence=0.35, x=12, y=10),
+            _box(confidence=0.50, x=52, y=52),
+        ],
+    )
+
+    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
+    debug = frames[-1]["low_observation_budget_debug"]
+    assert frames[-1]["num_low_only"] == 1
+    assert debug["track_proximity_enabled"] is True
+    assert debug["track_proximity_track_count"] == 1
+    assert debug["num_filtered_track_proximity"] == 1
+    assert frames[-1]["_low_only_boxes"][0]["x"] == 12
+
+
+def test_lifecycle_tracker_keeps_nearest_low_det_for_each_track_beyond_global_topk(tmp_path):
+    tracker = MSDCLifecycleTracker(config=LowObservationNearestConfig, debug_dir=tmp_path)
+    tracker.tracks = [
+        EvidenceTrack(
+            gid=1,
+            public_id=1,
+            state=TrackState.ACTIVE,
+            box=[10, 10, 20, 20],
+            velocity=[0, 0],
+            evidence_score=3.0,
+            hits=4,
+            last_seen=3,
+            last_real_det_frame=3,
+            real_det_hits=4,
+            class_id=2,
+            class_name="UAV",
+        ),
+        EvidenceTrack(
+            gid=2,
+            public_id=2,
+            state=TrackState.LOST,
+            box=[40, 10, 50, 20],
+            velocity=[0, 0],
+            evidence_score=2.5,
+            hits=4,
+            last_seen=3,
+            last_real_det_frame=3,
+            real_det_hits=4,
+            class_id=2,
+            class_name="UAV",
+        ),
+    ]
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=4,
+        file_type="visible",
+        high_boxes=[],
+        low_boxes=[
+            _box(confidence=0.90, x=11, y=10),
+            _box(confidence=0.30, x=41, y=10),
+            _box(confidence=0.80, x=63, y=52),
+        ],
+    )
+
+    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
+    debug = frames[-1]["low_observation_budget_debug"]
+    kept_x = [box["x"] for box in frames[-1]["_low_only_boxes"]]
+    assert kept_x == [11, 41]
+    assert debug["num_kept_global_topk"] == 1
+    assert debug["num_kept_per_track_nearest"] == 2
+    assert debug["num_filtered_motion_gate"] == 1
+    assert debug["num_output"] == 2
+
+
+def test_lifecycle_tracker_drops_low_dets_outside_motion_gate(tmp_path):
+    tracker = MSDCLifecycleTracker(config=LowObservationNearestConfig, debug_dir=tmp_path)
+    tracker.tracks = [
+        EvidenceTrack(
+            gid=1,
+            public_id=1,
+            state=TrackState.ACTIVE,
+            box=[10, 10, 20, 20],
+            velocity=[0, 0],
+            evidence_score=3.0,
+            hits=4,
+            last_seen=3,
+            last_real_det_frame=3,
+            real_det_hits=4,
+            class_id=2,
+            class_name="UAV",
+        )
+    ]
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=4,
+        file_type="visible",
+        high_boxes=[],
+        low_boxes=[
+            _box(confidence=0.99, x=52, y=52),
+            _box(confidence=0.35, x=12, y=10),
+        ],
+    )
+
+    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
+    debug = frames[-1]["low_observation_budget_debug"]
+    assert [box["x"] for box in frames[-1]["_low_only_boxes"]] == [12]
+    assert debug["num_filtered_motion_gate"] == 1
+    assert debug["num_output"] == 1
+
+
+def test_lifecycle_tracker_skips_debug_jsonl_when_disabled(tmp_path):
+    tracker = MSDCLifecycleTracker(config=DebugDisabledConfig, debug_dir=tmp_path)
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=0,
+        file_type="visible",
+        high_boxes=[_box()],
+        low_boxes=[],
+    )
+
+    assert not (tmp_path / "lifecycle_events.jsonl").exists()
+    assert not (tmp_path / "msdc_tracks.jsonl").exists()
+    assert tracker.last_debug_info["debug_events"] is False
+    assert tracker.last_debug_info["frame_idx"] == 0
+
+
+def test_lifecycle_tracker_records_internal_timing_when_debug_disabled(tmp_path):
+    tracker = MSDCLifecycleTracker(config=DebugDisabledConfig, debug_dir=tmp_path)
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=0,
+        file_type="visible",
+        high_boxes=[_box()],
+        low_boxes=[],
+    )
+
+    timing = tracker.last_timing_debug
+    expected_keys = {
+        "low_filter_s",
+        "roi_redetect_s",
+        "motion_s",
+        "observation_build_s",
+        "template_match_s",
+        "evidence_update_s",
+        "template_sync_s",
+        "output_s",
+        "debug_s",
+        "total_update_s",
+    }
+    assert expected_keys <= set(timing)
+    assert timing["total_update_s"] >= 0.0
+
+
+def test_lifecycle_tracker_skips_template_matcher_when_template_disabled(tmp_path):
+    class FailingTemplateLock:
+        def match_active_tracks(self, *args, **kwargs):
+            raise AssertionError("active template matcher should be skipped")
+
+        def match_lost_tracks(self, *args, **kwargs):
+            raise AssertionError("lost template matcher should be skipped")
+
+        def reset(self):
+            pass
+
+    tracker = MSDCLifecycleTracker(config=LifecycleTestConfig, debug_dir=tmp_path)
+    tracker.template_lock = FailingTemplateLock()
+
+    tracker.update(
+        frame=_frame(),
+        frame_idx=0,
+        file_type="visible",
+        high_boxes=[_box()],
+        low_boxes=[],
+    )
+
+    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
+    assert frames[-1]["num_template"] == 0
+
+
 def test_lifecycle_tracker_calls_motion_seed_generator(tmp_path):
     class DummyMotionSeed:
         def __init__(self):
@@ -216,7 +486,7 @@ def test_lifecycle_tracker_calls_motion_seed_generator(tmp_path):
                 "frame_idx": frame_idx,
             }], {"frame_idx": frame_idx, "num_motion_boxes": 1}
 
-    tracker = MSDCLifecycleTracker(config=LifecycleTestConfig, debug_dir=tmp_path)
+    tracker = MSDCLifecycleTracker(config=MotionLifecycleConfig, debug_dir=tmp_path)
     dummy = DummyMotionSeed()
     tracker.motion_seed = dummy
 

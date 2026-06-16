@@ -50,6 +50,7 @@
 - `target_module/image_detect_module/utils/motion_seed.py`：MS-DC-ELT 运动种子生成调试模块，不接入 baseline tracker；连通域分数使用一次性聚合，避免 4K 视频逐连通域构造整帧 mask
 - `target_module/image_detect_module/utils/msdc_types.py`：MS-DC-ELT 生命周期核心数据结构与输出转换 helper
 - `target_module/image_detect_module/utils/evidence_state.py`：MS-DC-ELT-lite 证据积分和基础生命周期状态机，当前不接入 baseline tracker；removed guard 使用每帧签名缓存和向量化几何计算以支持长视频评测
+- `target_module/image_detect_module/utils/msdc_detection.py`：MS-DC-ELT high/low 检测公共 runtime helper，供 `video_main.py`、MOT 导出、直接渲染和测速脚本复用
 - `target_module/image_detect_module/utils/lifecycle_tracker.py`：MS-DC-ELT-lite 最小 tracker 主类，串联 high/low/motion observation 与 evidence state，可通过 `video_main.py --tracker msdc_elt` 独立启用
 - `target_module/image_detect_module/utils/template_lock.py`：MS-DC-ELT active-only 轻量模板锁定，基于局部 OpenCV NCC，不对 candidate 启动模板
 - `target_module/image_detect_module/utils/roi_redetect.py`：MS-DC-ELT 轨迹驱动 ROI 低阈值重检，只服务 active/lost track 的漏检诊断与重捕，不对 candidate 无界扩张
@@ -199,18 +200,23 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT 运动种子 debug 默认关闭：`MSDC_MOTION_DEBUG = False`
 - MS-DC-ELT 运动种子 debug 默认输出根目录：`MSDC_MOTION_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
 - MS-DC-ELT 主链路默认关闭：`MSDC_ENABLE = False`
-- MS-DC-ELT 消融开关：`MSDC_USE_LOW_DET = True`，`MSDC_USE_MOTION = True`，`MSDC_USE_TEMPLATE = False`，`MSDC_USE_REACQUIRE = True`，`MSDC_USE_ROI_REDETECT = True`，`MSDC_REUSE_GUARD_ENABLE = True`
-- MS-DC-ELT MOT 导出默认加速：`MSDC_EXPORT_SHARE_LOW_HIGH_DET = True`；`msdc_elt` 导出路径默认只跑一次低阈值检测，再按默认阈值切分 high boxes，baseline tracker 不使用该分支；如需复现实验旧路径，可设置环境变量 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=0` 恢复 high/low 双次全图检测；MOT 结果按帧流式写入，长视频导出时可用 `--progress-interval N` 定期打印进度并 flush 结果文件
+- MS-DC-ELT 消融开关：`MSDC_USE_LOW_DET = True`，`MSDC_USE_MOTION = False`，`MSDC_USE_TEMPLATE = False`，`MSDC_USE_REACQUIRE = True`，`MSDC_USE_ROI_REDETECT = False`，`MSDC_REUSE_GUARD_ENABLE = True`
+- MS-DC-ELT 正式默认配置采用 `v2_candidate_topk_no_roi`：共享 high/low 检测、关闭 ROI 重检、关闭 template、关闭 motion seed、低阈值候选池 `topK=32` 且 `min_conf=0.25`
+- MS-DC-ELT 默认检测加速：`MSDC_EXPORT_SHARE_LOW_HIGH_DET = True`；`msdc_elt` 正式运行和导出路径默认只跑一次低阈值检测，再按默认阈值切分 high boxes，baseline tracker 不使用该分支；如需复现实验旧路径，可设置环境变量 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=0` 恢复 high/low 双次全图检测；MOT 结果按帧流式写入，长视频导出时可用 `--progress-interval N` 定期打印进度并 flush 结果文件
 - MS-DC-ELT 默认只输出 active：`MSDC_OUTPUT_CANDIDATES = False`
-- MS-DC-ELT lifecycle debug JSONL 默认开启：`MSDC_DEBUG_EVENTS = True`，可用环境变量 `MSDC_DEBUG_EVENTS=0` 关闭；长视频评测时每帧 debug 只保留非 removed 轨迹快照，快照上限 `MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT = 128`，细节列表上限 `MSDC_DEBUG_DETAIL_LIMIT = 8`
+- MS-DC-ELT lifecycle debug JSONL 默认关闭：`MSDC_DEBUG_EVENTS = False`，正式诊断/消融脚本会显式设置 `MSDC_DEBUG_EVENTS=1`；长视频评测时每帧 debug 只保留非 removed 轨迹快照，快照上限 `MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT = 128`，细节列表上限 `MSDC_DEBUG_DETAIL_LIMIT = 8`
 - MS-DC-ELT lifecycle debug 默认输出目录：`MSDC_LIFECYCLE_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
 - MS-DC-ELT evidence score：`MSDC_EVIDENCE_ALPHA = 0.85`，`MSDC_WEIGHT_HIGH = 1.3`，`MSDC_WEIGHT_LOW = 1.0`，`MSDC_WEIGHT_ROI_LOW = 1.0`，`MSDC_WEIGHT_MOTION = 0.6`，`MSDC_WEIGHT_TEMPLATE = 0.4`，`MSDC_NEGATIVE_WEIGHT = 0.5`
 - MS-DC-ELT 生命周期阈值：`MSDC_CONFIRM_SCORE = 2.5`，`MSDC_CONFIRM_MIN_HITS = 4`，`MSDC_PRUNE_SCORE = 0.1`，`MSDC_CANDIDATE_MAX_AGE = 5`
 - MS-DC-ELT 候选确认检测门控：`MSDC_CONFIRM_REQUIRE_DET = True`，`MSDC_CONFIRM_MIN_REAL_DET_HITS = 4`，`MSDC_CONFIRM_REQUIRE_HIGH_DET = True`，`MSDC_CONFIRM_ALLOW_MOTION_ONLY = False`；motion/template 只能作为辅助证据，不能单独起轨或确认 active
 - MS-DC-ELT 低阈值受约束确认：`MSDC_LOW_CANDIDATE_ENABLE = True`，`MSDC_LOW_SPAWN_MIN_CONF = 0.30`，`MSDC_LOW_CONFIRM_MIN_HITS = 5`，`MSDC_LOW_CONFIRM_WINDOW = 8`，`MSDC_LOW_CONFIRM_MIN_AVG_SCORE = 0.22`，`MSDC_LOW_CONFIRM_MAX_MISSES = 1`，`MSDC_LOW_CONFIRM_MAX_AREA_CHANGE = 1.8`，`MSDC_LOW_CONFIRM_MAX_CENTER_STEP_FACTOR = 3.0`；low-only 新目标先进入 hidden `low_candidate`，通过 M-of-N 和稳定性门控后才确认 active
 - MS-DC-ELT low-candidate ID 继承：`MSDC_LOW_INHERIT_ENABLE = True`，`MSDC_LOW_INHERIT_SCORE = 0.40`，`MSDC_LOW_INHERIT_IOU_THRESH = 0.02`，`MSDC_LOW_INHERIT_CENTER_DIST = 220.0`，`MSDC_LOW_INHERIT_MAX_LOST_AGE = 120`，`MSDC_LOW_INHERIT_USE_HISTORY_VELOCITY = True`，`MSDC_LOW_INHERIT_MAX_PREDICT_AGE = 120`，`MSDC_LOW_INHERIT_MOTION_MIN = 0.15`，`MSDC_LOW_INHERIT_CLASS_MATCH = True`，`MSDC_LOW_INHERIT_CLASS_MISMATCH_CENTER_DIST = 80.0`，`MSDC_LOW_INHERIT_CLASS_MISMATCH_PENALTY = 0.0`；稳定 low-candidate 确认前会优先接到 nearby lost track 并继承其 `public_id`，lost 预测优先使用低阈值历史的稳健中位速度，类别不一致时不再硬拒绝但要求更近，失败后才允许生成新公开 ID
-- MS-DC-ELT 丢失与重捕阈值：`MSDC_ACTIVE_MISSING_PATIENCE = 2`，`MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = 6`，`MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = 8`，`MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2`，`MSDC_LOST_MAX_AGE = 80`，`MSDC_REACQUIRE_INTERVAL = 5`，`MSDC_REACQUIRE_SCORE = 1.5`，`MSDC_REACQUIRE_CENTER_SCALE_FACTOR = 4.0`，`MSDC_REACQUIRE_MAX_CENTER_DIST = 240.0`；近期有 low/roi-low 真实证据且当前仍有 template/motion 辅助支持时，active 可短时间延迟转 lost
-- MS-DC-ELT ROI 重检：`MSDC_USE_ROI_REDETECT = True`，`MSDC_ROI_REDETECT_LOW_CONF = 0.12`，`MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 8`，`MSDC_ROI_REDETECT_LOST_INTERVAL = 3`，`MSDC_ROI_REDETECT_MAX_TRACKS = 2`，`MSDC_ROI_REDETECT_SEARCH_SCALE = 4.0`，`MSDC_ROI_REDETECT_UPSCALE = 2.0`，`MSDC_ROI_REDETECT_EXISTING_IOU = 0.5`，`MSDC_ROI_REDETECT_MIN_BOX_SIZE = 8`，`MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 1`；ROI 重检作为低频重捕工具，只针对已有 active/lost track，过滤 tiny / existing-overlap box，且不单独生成新 candidate
+- MS-DC-ELT 丢失与重捕阈值：`MSDC_ACTIVE_MISSING_PATIENCE = 2`，`MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = 6`，`MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = 8`，`MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2`，`MSDC_LOST_MAX_AGE = 40`，`MSDC_REACQUIRE_INTERVAL = 5`，`MSDC_REACQUIRE_SCORE = 1.5`，`MSDC_REACQUIRE_CENTER_SCALE_FACTOR = 4.0`，`MSDC_REACQUIRE_MAX_CENTER_DIST = 240.0`；近期有 low/roi-low 真实证据且当前仍有 template/motion 辅助支持时，active 可短时间延迟转 lost
+- MS-DC-ELT lifecycle 加速默认上限：`MSDC_MAX_ACTIVE_TRACKS = 64`，`MSDC_MAX_LOST_TRACKS = 32`，`MSDC_MAX_CANDIDATES = 32`，`MSDC_MAX_LOW_CANDIDATES = 24`，`MSDC_MAX_TOTAL_TRACKS = 128`，`MSDC_REMOVED_GUARD_FRAMES = 80`；超出上限时优先保留高 evidence、最近更新的轨迹，并更快清理 lost/removed 状态池
+- MS-DC-ELT low-only 几何门控默认开启：`MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY = True`，`MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST = 240.0`，`MSDC_LOW_OBS_MOTION_GATE_IOU = 0.01`；已有 active/lost 时，超出预测框运动/几何门控的低阈值候选会直接丢弃，避免远处低分噪声扩大 candidate 池；首帧或无 active/lost 时仍允许 low-only 按 `topK/min_conf` 起候选
+- `tools/evaluation/msdc_speed_benchmark.py` 会在 `speed_results.csv` 和 `speed_timings.jsonl` 中输出 MS-DC 内部耗时：low-only filter、ROI、motion、observation build、template match/sync、evidence update、output 和 debug，用于定位 tracker/lifecycle 内部瓶颈
+- MS-DC-ELT ROI 重检：`MSDC_USE_ROI_REDETECT = False`，`MSDC_ROI_REDETECT_LOW_CONF = 0.12`，`MSDC_ROI_REDETECT_ACTIVE_ENABLE = False`，`MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 8`，`MSDC_ROI_REDETECT_LOST_INTERVAL = 3`，`MSDC_ROI_REDETECT_MAX_TRACKS = 2`，`MSDC_ROI_REDETECT_SEARCH_SCALE = 4.0`，`MSDC_ROI_REDETECT_UPSCALE = 2.0`，`MSDC_ROI_REDETECT_EXISTING_IOU = 0.5`，`MSDC_ROI_REDETECT_MIN_BOX_SIZE = 8`，`MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 1`，`MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE = 30`，`MSDC_ROI_REDETECT_COOLDOWN_FRAMES = 3`；需要复现 ROI 消融时可通过环境变量重新开启
+- MS-DC-ELT low-only observation 预算：`MSDC_LOW_OBS_TOPK = 32`，`MSDC_LOW_OBS_GLOBAL_TOPK = 32`，`MSDC_LOW_OBS_PER_TRACK_NEAREST = 1`，`MSDC_LOW_OBS_MAX_PER_FRAME = 64`，`MSDC_LOW_OBS_MIN_CONF = 0.25`；默认先用全局 confidence topK 控 FP，再为每条 active/lost prediction 额外保留最近的 gated low det，最后用每帧上限兜底
 - MS-DC-ELT removed guard：`MSDC_REUSE_GUARD_ENABLE = True`，`MSDC_REMOVED_GUARD_FRAMES = 120`，`MSDC_removed_GUARD_FRAMES = 120`，`MSDC_REMOVED_GUARD_IOU_THRESH = 0.3`，`MSDC_REMOVED_GUARD_CENTER_DIST = 80.0`
 - MS-DC-ELT evidence 关联阈值：`MSDC_ASSOC_IOU_THRESH = 0.2`，`MSDC_ASSOC_CENTER_DIST = 80.0`，`MSDC_OBS_MERGE_IOU_THRESH = 0.5`
 - MS-DC-ELT active 近邻候选抑制：`MSDC_SPAWN_SUPPRESS_ENABLE = True`，`MSDC_SPAWN_SUPPRESS_IOU = 0.1`，`MSDC_SPAWN_SUPPRESS_CENTER_DIST = 80.0`，`MSDC_LOW_SPAWN_SUPPRESS_CENTER_DIST = 120.0`；low-only 候选靠近 active track 时使用更宽 suppression，避免浪花/重复低阈值框确认成新公开 ID
@@ -670,7 +676,7 @@ conda run -n ship_detect pytest test/test_msdc_evidence_state.py -q
 
 ### 10.17 `target_module/image_detect_module/utils/lifecycle_tracker.py`
 
-MS-DC-ELT tracker 主类，负责串联 `high_det`、`low_det`、ROI 低阈值重检、`motion`、active-only template observation、lost reacquire / removed guard 和 `EvidenceStateUpdater`。Task 6 起可通过 `video_main.py --tracker msdc_elt` 独立启用。
+MS-DC-ELT tracker 主类，负责串联 `high_det`、`low_det`、可选 ROI 低阈值重检、`motion`、active-only template observation、lost reacquire / removed guard 和 `EvidenceStateUpdater`。Task 6 起可通过 `video_main.py --tracker msdc_elt` 独立启用。
 
 核心接口：
 
@@ -693,8 +699,8 @@ tracked_boxes = tracker.update(
 输入：
 
 - `high_boxes`：默认阈值检测框，转为 `Observation(source="high_det")`
-- `low_boxes`：低阈值检测框；与 high box IoU 达到 `MSDC_LOW_HIGH_IOU_THRESH` 的框会过滤掉，只保留 `low_only` 并转为 `Observation(source="low_det")`；未匹配 high 的新目标默认只生成 hidden `low_candidate`，不会直接输出框或公开 ID；`low_det` 匹配到已有 active track 时只刷新真实检测年龄、证据分和 low history，不刷新 active 主框或速度，避免低阈值噪声污染主关联
-- `active/lost tracks`：当 `MSDC_USE_ROI_REDETECT = True` 且传入 `processor` 时，按轨迹预测框裁剪局部 ROI，用 `MSDC_ROI_REDETECT_LOW_CONF` 重检并转为 `Observation(source="roi_low_det")`；ROI 结果会过滤 tiny / existing-overlap box，并按每个 ROI 的候选上限保留高分近邻
+- `low_boxes`：低阈值检测框；与 high box IoU 达到 `MSDC_LOW_HIGH_IOU_THRESH` 的框会过滤掉，只保留 `low_only`；进入 lifecycle 前先按 `MSDC_LOW_OBS_MIN_CONF` 过滤，再对 active/lost prediction 做运动/几何 gate，gate 外 low det 直接丢弃；保留集合由全局 confidence topK 和每条 active/lost prediction 的 nearest low det 合并得到，最后受 `MSDC_LOW_OBS_MAX_PER_FRAME` 约束，再转为 `Observation(source="low_det")`；未匹配 high 的新目标默认只生成 hidden `low_candidate`，不会直接输出框或公开 ID；`low_det` 匹配到已有 active track 时只刷新真实检测年龄、证据分和 low history，不刷新 active 主框或速度，避免低阈值噪声污染主关联
+- `active/lost tracks`：当 `MSDC_USE_ROI_REDETECT = True` 且传入 `processor` 时，按轨迹预测框裁剪局部 ROI，用 `MSDC_ROI_REDETECT_LOW_CONF` 重检并转为 `Observation(source="roi_low_det")`；ROI 默认不扫 active track，只对未超过 `MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE` 的 lost track 低频触发，失败后按 `MSDC_ROI_REDETECT_COOLDOWN_FRAMES` 冷却；ROI 结果会过滤 tiny / existing-overlap box，并按每个 ROI 的候选上限保留高分近邻
 - `frame`：送入 `MotionSeedGenerator.update(...)`，motion boxes 转为 `Observation(source="motion")`；海面运动连通域爆炸时写出 `clutter_limited=True` 并降低 motion box 上限
 - active tracks：仅当 `MSDC_USE_TEMPLATE=1` 且 `MSDC_TEMPLATE_ENABLE=1` 时送入 `TemplateLock.match(...)`，局部模板匹配结果转为 `Observation(source="template")`
 
@@ -728,15 +734,17 @@ boxes = result.get("data", {}).get("boxes", [])
 tracked_boxes = tracker.update(boxes, frame.shape, frame=frame)
 ```
 
-仅当 `--tracker msdc_elt` 时，新增分支会执行：
+仅当 `--tracker msdc_elt` 时，正式运行分支会通过 `utils/msdc_detection.py` 执行：
 
 ```text
 frame
-  -> detect_from_image_file(...)                         -> high_boxes
-  -> detector.processor.process_frame(..., conf_override) -> low_boxes
+  -> detector.processor.process_frame(..., low_conf) -> low_boxes
+  -> split low_boxes by default conf threshold       -> high_boxes
   -> MSDCLifecycleTracker.update(frame, high_boxes, low_boxes)
   -> result["data"]["boxes"] = tracked_boxes
 ```
+
+如果设置 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=0`，则恢复旧的 high/low 双次全图检测路径。
 
 运行示例：
 
@@ -896,6 +904,17 @@ MS-DC-ELT 诊断文件：
 - `MSDC_ROI_REDETECT_LOST_INTERVAL`
 - `MSDC_ROI_REDETECT_MAX_TRACKS`
 - `MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI`
+- `MSDC_ROI_REDETECT_ACTIVE_ENABLE`
+- `MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE`
+- `MSDC_ROI_REDETECT_COOLDOWN_FRAMES`
+- `MSDC_LOW_OBS_TOPK`
+- `MSDC_LOW_OBS_GLOBAL_TOPK`
+- `MSDC_LOW_OBS_PER_TRACK_NEAREST`
+- `MSDC_LOW_OBS_MAX_PER_FRAME`
+- `MSDC_LOW_OBS_MIN_CONF`
+- `MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST`
+- `MSDC_LOW_OBS_MOTION_GATE_IOU`
+- `MSDC_DEBUG_EVENTS`
 - `MSDC_REACQUIRE_INTERVAL`
 - `MSDC_REACQUIRE_CENTER_DIST`
 - `MSDC_REACQUIRE_MAX_CENTER_DIST`
@@ -905,10 +924,14 @@ MS-DC-ELT 诊断文件：
 - `v2_template_off`: TemplateLock off, dual high/low detection retained for template-only isolation.
 - `v2_shared_det`: TemplateLock off, shared low-threshold inference split into high/low boxes.
 - `v2_low_clean`: v2 default low-det behavior; low-det supports active tracks without refreshing active boxes.
-- `v2_output_age5_size8` / `v2_output_age8_size8` / `v2_output_age12_size8`: output recall gate sweep.
-- `v2_candidate_low3_window6` / `v2_candidate_low4_window8` / `v2_candidate_real2_age8`: candidate confirmation sweep.
-- `v2_roi_budget_active8_max2` / `v2_roi_budget_active10_max2`: ROI frequency and track budget sweep.
-- `v2_reacquire_interval1` / `v2_reacquire_interval2` / `v2_reacquire_interval5_center240`: reacquire frequency and gate sweep.
+- `v2_no_roi_redetect`: 关闭 ROI 重检，判断 ROI 对 FN / IDF1 的净收益。
+- `v2_roi_interval10` / `v2_roi_interval15`: 降低 ROI 重检频率，观察是否保住指标并降低 `mean_roi_redetect_ms`。
+- `v2_roi_max1`: 每帧最多 1 个 ROI，限制当前最重瓶颈。
+- `v2_candidate_topk`: `MSDC_LOW_OBS_TOPK=32`、`MSDC_LOW_OBS_MIN_CONF=0.25`，限制进入 lifecycle 关联的低阈值候选池。
+- `v2_candidate_topk_roi_max1`: 同时启用 `v2_candidate_topk` 和 `v2_roi_max1`，测试组合速度上限。
+- `v2_candidate_topk_no_roi`: 同时启用 `v2_candidate_topk` 并关闭 ROI 重检，用于验证最终候选默认配置。
+- `v2_speed_diag_off`: 关闭 MS-DC-ELT debug JSONL，用于纯算法速度对照。
+- 历史分支 `v2_output_age5_size8` / `v2_output_age8_size8`、`v2_candidate_low3_window6`、`v2_candidate_real2_age8`、`v2_reacquire_interval1` 保留为复现实验入口，但当前不推荐进入 formal 主矩阵。
 
 消融脚本默认只打印命令；加 `--run` 才执行：
 
@@ -943,6 +966,14 @@ conda run -n ship_detect python tools/evaluation/msdc_dataset_benchmark.py --dat
 
 `*_per_gt_stage_coverage.csv` 会按 GT ID 统计 `high_det`、`low_det`、`low_only`、`roi_low_det` 和最终 `output` 的覆盖帧数，用来判断持续漏检是检测器阶段没有候选，还是 lifecycle 阶段未保住同一 ID。
 
+检测缓存 replay 诊断入口：
+
+```powershell
+conda run -n ship_detect python tools/evaluation/detection_replay_benchmark.py --dataset-root "/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集" "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集" --max-frames 300 --output-root "results/msdc_replay_diagnostics" --run-id "<run-id>" --progress-interval 100
+```
+
+该脚本用于隔离 detector 波动：先把每个视频前 N 帧的默认高阈值检测框缓存到 `detections/<seq>_high_detections.jsonl`，再让 `botsort`、`ocsort` 和 high-only `msdc_elt` 读取同一份检测框 replay。MS-DC replay 会关闭 low-det、motion、template 和 ROI 重检，只保留 lifecycle tracker 对同一高阈值检测输入的关联表现；输出包括 `trackers/<tracker>_replay/data/<seq>.txt`、`eval/motchallenge_summary.csv`、`summary/replay_summary.csv` 和 `diagnostics/<seq>/*_per_gt_diagnostics.csv`。
+
 速度与复杂度基准脚本：
 
 ```powershell
@@ -950,6 +981,14 @@ conda run -n ship_detect python tools/evaluation/msdc_speed_benchmark.py --datas
 ```
 
 该脚本使用同一视频和同一请求帧数依次测试 `ocsort`、`botsort`、`msdc_elt`，不渲染视频、不发送 MQ、不运行 TrackEval，并在测速期间关闭 MS-DC-ELT debug JSONL。输出目录为 `<output-root>/<run-id>/`，包含逐帧阶段耗时 `speed_timings.jsonl` 和汇总表 `speed_results.csv`；汇总字段包括处理帧数、总耗时、平均 FPS、平均/P50/P95 延迟、检测器调用次数，以及读取、高阈值检测、低阈值检测、ROI 重检、tracker update、渲染和写盘的平均耗时。该 speed benchmark 本身不渲染、不写 MOT，因此 `mean_render_ms` 和 `mean_write_ms` 记录为 `0.000000`，用于 formal summary 中显式占位。MS-DC-ELT speed CSV separates full-frame detector calls from ROI redetect calls via `detector_calls_roi_redetect` and `mean_roi_redetect_ms`; `detector_calls_tracker_update` excludes ROI detector calls and represents detector calls still hidden inside lifecycle update. `peak_memory_mb` 为写入每个 tracker 汇总行时当前进程已观测到的 peak RSS，不是隔离的单 tracker 内存增量。
+
+MS-DC-ELT high/low 共享检测前后速度对比：
+
+```powershell
+conda run -n ship_detect python tools/evaluation/msdc_speed_benchmark.py --dataset-root "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集" --frames 300 --output-root "results/msdc_speed_compare" --run-id "<run-id>" --compare-msdc-share-low-high --compare-label-prefix "usv" --progress-interval 100
+```
+
+`--compare-msdc-share-low-high` 会在同一视频和帧数上强制运行两次 `msdc_elt`：`MSDC_EXPORT_SHARE_LOW_HIGH_DET=False` 的双次 high/low 全图检测作为 before，`MSDC_EXPORT_SHARE_LOW_HIGH_DET=True` 的一次低阈值检测切分 high/low 作为 after。除常规 `speed_results.csv` 和 `speed_timings.jsonl` 外，额外输出 `speed_compare.csv`，其中包含 before/after 总耗时、FPS、平均延迟、检测调用数和相对加速比。
 
 实验汇总与报告生成：
 
@@ -979,8 +1018,8 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 # 正式完整实验必须显式加 --run-formal
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id "<run-id>"
 
-# formal v2 主对比默认使用 v2_low_clean；--duration-seconds 120 表示每个视频只评测前 2 分钟
-conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v2_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_template_off v2_shared_det v2_low_clean v2_output_age5_size8 v2_output_age8_size8 v2_candidate_low3_window6 v2_candidate_real2_age8 v2_roi_budget_active8_max2 v2_reacquire_interval1
+# formal v2 速度/ROI 诊断矩阵；--duration-seconds 120 表示每个视频只评测前 2 分钟
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v2_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_low_clean v2_no_roi_redetect v2_roi_interval10 v2_roi_interval15 v2_roi_max1 v2_candidate_topk v2_candidate_topk_roi_max1 v2_candidate_topk_no_roi v2_speed_diag_off
 
 # 查看或校验最近一次正式实验输出路径
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --print-latest
@@ -1159,6 +1198,12 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 - `usable`
 
 ## 13. Changelog
+
+### 2026-06-14
+
+- `perf`: MS-DC-ELT ROI 重检默认改为 lost 优先，active ROI 默认关闭，并新增 lost age 上限、失败 cooldown、ROI 调用耗时和 skipped reason debug，降低 ROI 重检对 tracker update 的持续占用
+- `feat`: MS-DC-ELT lifecycle 新增 `MSDC_LOW_OBS_TOPK` / `MSDC_LOW_OBS_MIN_CONF`，可在低阈值候选进入关联前做候选池预算消融；TemplateLock 关闭时不再调用模板匹配和模板 debug 同步
+- `docs`: formal v2 消融矩阵更新为 `v2_no_roi_redetect`、`v2_roi_interval10/15`、`v2_roi_max1`、`v2_candidate_topk`、`v2_candidate_topk_roi_max1`、`v2_candidate_topk_no_roi` 和 `v2_speed_diag_off`，不再推荐输出门控、激进 candidate 和 interval1 进入主矩阵
 
 ### 2026-06-11
 

@@ -43,14 +43,55 @@ SPEED_FIELDS = [
     "mean_low_det_ms",
     "mean_roi_redetect_ms",
     "mean_tracker_ms",
+    "mean_msdc_low_filter_ms",
+    "mean_msdc_roi_redetect_internal_ms",
+    "mean_msdc_motion_ms",
+    "mean_msdc_observation_build_ms",
+    "mean_msdc_template_match_ms",
+    "mean_msdc_evidence_update_ms",
+    "mean_msdc_template_sync_ms",
+    "mean_msdc_output_ms",
+    "mean_msdc_debug_ms",
+    "mean_msdc_total_update_ms",
     "mean_render_ms",
     "mean_write_ms",
+]
+COMPARE_FIELDS = [
+    "label",
+    "share_low_high",
+    "tracker",
+    "processed_frames",
+    "total_time_s",
+    "mean_fps",
+    "mean_latency_ms",
+    "detector_calls_total",
+    "detector_calls_high_det",
+    "detector_calls_low_det",
+    "mean_high_det_ms",
+    "mean_low_det_ms",
+    "mean_tracker_ms",
+    "total_time_delta_s_vs_before",
+    "latency_delta_ms_vs_before",
+    "fps_speedup_vs_before",
+    "detector_call_delta_vs_before",
 ]
 METHOD_LABELS = {
     "ocsort": "FFCA-YOLO + OC-SORT",
     "botsort": "FFCA-YOLO + BoT-SORT",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
 }
+MSDC_INTERNAL_TIMING_KEYS = [
+    "low_filter_s",
+    "roi_redetect_s",
+    "motion_s",
+    "observation_build_s",
+    "template_match_s",
+    "evidence_update_s",
+    "template_sync_s",
+    "output_s",
+    "debug_s",
+    "total_update_s",
+]
 
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
@@ -144,10 +185,22 @@ def _mean_ms(values: list[float]) -> float:
     return (sum(values) / len(values) * 1000.0) if values else 0.0
 
 
+def _empty_msdc_internal_timing() -> dict[str, float]:
+    return {key: 0.0 for key in MSDC_INTERNAL_TIMING_KEYS}
+
+
 def _format_float(value: float | int | str) -> str:
     if isinstance(value, str):
         return value
     return f"{float(value):.6f}"
+
+
+def _float_value(row: dict[str, Any], key: str) -> float:
+    return float(row.get(key, 0.0) or 0.0)
+
+
+def _int_value(row: dict[str, Any], key: str) -> int:
+    return int(float(row.get(key, 0) or 0))
 
 
 def _default_run_id() -> str:
@@ -214,12 +267,14 @@ def _run_tracker_benchmark(
     import target_module.image_detect_module.target_detection as td
     from target_module.image_detect_module.config import Config
     from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
+    from target_module.image_detect_module.utils.msdc_detection import (
+        run_msdc_high_threshold_detection,
+        run_msdc_low_threshold_detection,
+        split_msdc_high_from_low_boxes,
+    )
     from target_module.image_detect_module.utils.tracker import MultiObjectTracker
     from tools.evaluation.export_mot_results import (
         _is_msdc_tracker,
-        _run_msdc_high_threshold_detection,
-        _run_msdc_low_threshold_detection,
-        _split_msdc_high_from_low_boxes,
         _update_tracking_for_frame,
     )
 
@@ -257,6 +312,7 @@ def _run_tracker_benchmark(
         high_det_times: list[float] = []
         low_det_times: list[float] = []
         tracker_times: list[float] = []
+        msdc_internal_times: dict[str, list[float]] = {key: [] for key in MSDC_INTERNAL_TIMING_KEYS}
         processed_frames = 0
 
         while processed_frames < requested_frames:
@@ -271,26 +327,27 @@ def _run_tracker_benchmark(
             high_det_s = 0.0
             low_det_s = 0.0
             tracker_s = 0.0
+            msdc_timing = _empty_msdc_internal_timing()
 
             if _is_msdc_tracker(tracker_type):
                 if bool(getattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", False)):
                     stage_start = time.perf_counter()
                     with processor.use_stage("low_det"):
-                        low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
+                        low_boxes = run_msdc_low_threshold_detection(detector, frame, file_type)
                     low_det_s = time.perf_counter() - stage_start
 
                     stage_start = time.perf_counter()
-                    boxes = _split_msdc_high_from_low_boxes(low_boxes, file_type)
+                    boxes = split_msdc_high_from_low_boxes(low_boxes, file_type)
                     high_det_s = time.perf_counter() - stage_start
                 else:
                     stage_start = time.perf_counter()
                     with processor.use_stage("high_det"):
-                        boxes = _run_msdc_high_threshold_detection(detector, frame, file_type)
+                        boxes = run_msdc_high_threshold_detection(detector, frame, file_type)
                     high_det_s = time.perf_counter() - stage_start
 
                     stage_start = time.perf_counter()
                     with processor.use_stage("low_det"):
-                        low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
+                        low_boxes = run_msdc_low_threshold_detection(detector, frame, file_type)
                     low_det_s = time.perf_counter() - stage_start
 
                 stage_start = time.perf_counter()
@@ -307,6 +364,14 @@ def _run_tracker_benchmark(
                         low_boxes=low_boxes,
                     )
                 tracker_s = time.perf_counter() - stage_start
+                if lifecycle_tracker is not None:
+                    msdc_timing = {
+                        key: float(value)
+                        for key, value in dict(getattr(lifecycle_tracker, "last_timing_debug", {}) or {}).items()
+                        if key in msdc_internal_times
+                    }
+                    for key in MSDC_INTERNAL_TIMING_KEYS:
+                        msdc_timing.setdefault(key, 0.0)
             else:
                 stage_start = time.perf_counter()
                 with processor.use_stage("high_det"):
@@ -327,21 +392,22 @@ def _run_tracker_benchmark(
             high_det_times.append(high_det_s)
             low_det_times.append(low_det_s)
             tracker_times.append(tracker_s)
+            for key, value in msdc_timing.items():
+                msdc_internal_times[key].append(float(value))
 
-            _write_timing_row(
-                timing_fh,
-                {
-                    "frame_id": processed_frames,
-                    "tracker": tracker_type,
-                    "read_s": read_s,
-                    "high_det_s": high_det_s,
-                    "low_det_s": low_det_s,
-                    "tracker_s": tracker_s,
-                    "render_s": 0.0,
-                    "write_s": 0.0,
-                    "total_s": total_s,
-                },
-            )
+            timing_row = {
+                "frame_id": processed_frames,
+                "tracker": tracker_type,
+                "read_s": read_s,
+                "high_det_s": high_det_s,
+                "low_det_s": low_det_s,
+                "tracker_s": tracker_s,
+                "render_s": 0.0,
+                "write_s": 0.0,
+                "total_s": total_s,
+            }
+            timing_row.update({f"msdc_{key}": float(msdc_timing.get(key, 0.0)) for key in MSDC_INTERNAL_TIMING_KEYS})
+            _write_timing_row(timing_fh, timing_row)
             if progress_interval > 0 and processed_frames % progress_interval == 0:
                 print(f"[PROGRESS] {tracker_type} {seq_name}: {processed_frames}/{requested_frames}", flush=True)
 
@@ -375,6 +441,16 @@ def _run_tracker_benchmark(
             "mean_low_det_ms": _format_float(_mean_ms(low_det_times)),
             "mean_roi_redetect_ms": _format_float((roi_seconds / roi_calls * 1000.0) if roi_calls else 0.0),
             "mean_tracker_ms": _format_float(_mean_ms(tracker_times)),
+            "mean_msdc_low_filter_ms": _format_float(_mean_ms(msdc_internal_times["low_filter_s"])),
+            "mean_msdc_roi_redetect_internal_ms": _format_float(_mean_ms(msdc_internal_times["roi_redetect_s"])),
+            "mean_msdc_motion_ms": _format_float(_mean_ms(msdc_internal_times["motion_s"])),
+            "mean_msdc_observation_build_ms": _format_float(_mean_ms(msdc_internal_times["observation_build_s"])),
+            "mean_msdc_template_match_ms": _format_float(_mean_ms(msdc_internal_times["template_match_s"])),
+            "mean_msdc_evidence_update_ms": _format_float(_mean_ms(msdc_internal_times["evidence_update_s"])),
+            "mean_msdc_template_sync_ms": _format_float(_mean_ms(msdc_internal_times["template_sync_s"])),
+            "mean_msdc_output_ms": _format_float(_mean_ms(msdc_internal_times["output_s"])),
+            "mean_msdc_debug_ms": _format_float(_mean_ms(msdc_internal_times["debug_s"])),
+            "mean_msdc_total_update_ms": _format_float(_mean_ms(msdc_internal_times["total_update_s"])),
             "mean_render_ms": _format_float(0.0),
             "mean_write_ms": _format_float(0.0),
         }
@@ -425,6 +501,116 @@ def run_speed_benchmark(args: argparse.Namespace) -> tuple[Path, Path]:
     return results_path, timings_path
 
 
+def write_msdc_share_low_high_compare(
+    output_dir: str | Path,
+    before_row: dict[str, Any],
+    after_row: dict[str, Any],
+    label_prefix: str = "msdc",
+) -> Path:
+    """Write compact before/after speed deltas for MS-DC shared high/low detection."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    before_total = _float_value(before_row, "total_time_s")
+    before_latency = _float_value(before_row, "mean_latency_ms")
+    before_fps = _float_value(before_row, "mean_fps")
+    before_calls = _int_value(before_row, "detector_calls_total")
+
+    def materialize(label: str, share_low_high: bool, row: dict[str, Any]) -> dict[str, str | int]:
+        total = _float_value(row, "total_time_s")
+        latency = _float_value(row, "mean_latency_ms")
+        fps = _float_value(row, "mean_fps")
+        calls = _int_value(row, "detector_calls_total")
+        return {
+            "label": label,
+            "share_low_high": str(bool(share_low_high)),
+            "tracker": str(row.get("tracker", "msdc_elt")),
+            "processed_frames": _int_value(row, "processed_frames"),
+            "total_time_s": _format_float(total),
+            "mean_fps": _format_float(fps),
+            "mean_latency_ms": _format_float(latency),
+            "detector_calls_total": calls,
+            "detector_calls_high_det": _int_value(row, "detector_calls_high_det"),
+            "detector_calls_low_det": _int_value(row, "detector_calls_low_det"),
+            "mean_high_det_ms": _format_float(_float_value(row, "mean_high_det_ms")),
+            "mean_low_det_ms": _format_float(_float_value(row, "mean_low_det_ms")),
+            "mean_tracker_ms": _format_float(_float_value(row, "mean_tracker_ms")),
+            "total_time_delta_s_vs_before": _format_float(total - before_total),
+            "latency_delta_ms_vs_before": _format_float(latency - before_latency),
+            "fps_speedup_vs_before": _format_float((fps / before_fps) if before_fps > 0 else 0.0),
+            "detector_call_delta_vs_before": calls - before_calls,
+        }
+
+    rows = [
+        materialize(f"{label_prefix}_before_two_pass", False, before_row),
+        materialize(f"{label_prefix}_after_shared_low_high", True, after_row),
+    ]
+    compare_path = output_dir / "speed_compare.csv"
+    with compare_path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.DictWriter(fh, fieldnames=COMPARE_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return compare_path
+
+
+def run_msdc_share_low_high_comparison(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+    """Benchmark MS-DC before and after one-pass low/high detector sharing."""
+    from target_module.image_detect_module.config import Config
+
+    input_video, seq_name, file_type = _resolve_benchmark_input(args)
+    run_id = args.run_id or _default_run_id()
+    commit_hash = args.commit_hash or _git_commit_hash()
+    output_dir = Path(args.output_root) / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timings_path = output_dir / "speed_timings.jsonl"
+    results_path = output_dir / "speed_results.csv"
+
+    old_share = getattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", True)
+    had_debug_attr = hasattr(Config, "MSDC_DEBUG_EVENTS")
+    old_debug_events = getattr(Config, "MSDC_DEBUG_EVENTS", None)
+    Config.MSDC_DEBUG_EVENTS = False
+    rows: list[dict[str, Any]] = []
+    try:
+        with timings_path.open("w", encoding="utf-8") as timing_fh:
+            for label, share_low_high in [
+                ("msdc_elt_before_two_pass", False),
+                ("msdc_elt_after_shared_low_high", True),
+            ]:
+                Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET = share_low_high
+                row = _run_tracker_benchmark(
+                    input_video=input_video,
+                    seq_name=seq_name,
+                    file_type=file_type,
+                    tracker_type="msdc_elt",
+                    requested_frames=int(args.frames),
+                    run_id=run_id,
+                    commit_hash=commit_hash,
+                    timing_fh=timing_fh,
+                    progress_interval=int(args.progress_interval),
+                )
+                row = dict(row)
+                row["tracker"] = label
+                row["method"] = f"{METHOD_LABELS['msdc_elt']} ({'shared low/high' if share_low_high else 'two-pass high+low'})"
+                rows.append(row)
+    finally:
+        Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET = old_share
+        if had_debug_attr:
+            Config.MSDC_DEBUG_EVENTS = old_debug_events
+        else:
+            delattr(Config, "MSDC_DEBUG_EVENTS")
+
+    with results_path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.DictWriter(fh, fieldnames=SPEED_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    compare_path = write_msdc_share_low_high_compare(
+        output_dir,
+        rows[0],
+        rows[1],
+        label_prefix=str(getattr(args, "compare_label_prefix", "") or "msdc"),
+    )
+    return results_path, timings_path, compare_path
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark detector/tracker speed without rendering or TrackEval")
     parser.add_argument("--dataset-root", required=True, help="Single-sequence dataset root")
@@ -437,6 +623,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trackers", nargs="+", choices=TRACKER_CHOICES, default=DEFAULT_TRACKERS)
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
+    parser.add_argument(
+        "--compare-msdc-share-low-high",
+        action="store_true",
+        help="Run MS-DC twice with shared high/low detector off then on and write speed_compare.csv",
+    )
+    parser.add_argument("--compare-label-prefix", default="msdc", help="Label prefix for speed_compare.csv rows")
     args = parser.parse_args(argv)
     if int(args.frames) < 0:
         parser.error("--frames must be >= 0")
@@ -446,7 +638,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
-    results_path, timings_path = run_speed_benchmark(parse_args(argv))
+    args = parse_args(argv)
+    if args.compare_msdc_share_low_high:
+        results_path, timings_path, compare_path = run_msdc_share_low_high_comparison(args)
+        print(f"[OK] Speed results: {results_path.resolve()}")
+        print(f"[OK] Per-frame timings: {timings_path.resolve()}")
+        print(f"[OK] Speed compare: {compare_path.resolve()}")
+        return
+    results_path, timings_path = run_speed_benchmark(args)
     print(f"[OK] Speed results: {results_path.resolve()}")
     print(f"[OK] Per-frame timings: {timings_path.resolve()}")
 
