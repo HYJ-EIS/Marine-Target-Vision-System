@@ -7,7 +7,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from target_module.image_detect_module.config import Config
-from target_module.image_detect_module.utils.evidence_state import EvidenceStateUpdater
+from target_module.image_detect_module.utils.evidence_state import EvidenceStateUpdater, assign_state
 from target_module.image_detect_module.utils.msdc_types import EvidenceTrack, Observation, TrackState
 
 
@@ -125,6 +125,35 @@ class HardCapConfig(Config):
     MSDC_MAX_CANDIDATES = 2
     MSDC_MAX_LOW_CANDIDATES = 1
     MSDC_MAX_TOTAL_TRACKS = 6
+
+
+class StateDecisionConfig(Config):
+    MSDC_CONFIRM_SCORE = 2.5
+    MSDC_PRUNE_SCORE = 0.1
+    MSDC_ACTIVE_MISSING_PATIENCE = 2
+    MSDC_LOST_MAX_AGE = 4
+
+
+def test_assign_state_is_priority_ordered_and_complete():
+    cases = [
+        (0.0, 0.0, 10, 5, TrackState.REMOVED),
+        (3.0, 0.0, 0, 1, TrackState.LOST),
+        (3.0, 1.0, 0, 0, TrackState.ACTIVE),
+        (1.0, 1.0, 0, 0, TrackState.CANDIDATE),
+        (0.0, 1.0, 99, 99, TrackState.CANDIDATE),
+    ]
+
+    for p_t, v_t, m_t, dt, expected in cases:
+        first = assign_state(p_t, v_t, m_t, dt, config=StateDecisionConfig)
+        second = assign_state(p_t, v_t, m_t, dt, config=StateDecisionConfig)
+        assert first == expected
+        assert second == expected
+
+
+def test_assign_state_requires_observation_for_confirmed_state():
+    assert assign_state(3.0, 0.0, 99, 0, config=StateDecisionConfig) == TrackState.CANDIDATE
+    assert assign_state(3.0, 0.0, 0, 0, config=StateDecisionConfig) == TrackState.LOST
+    assert assign_state(3.0, 1.0, 0, 0, config=StateDecisionConfig) == TrackState.ACTIVE
 
 
 def _low_history(start_frame, boxes, score=0.35):

@@ -1203,6 +1203,8 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 
 - `perf`: MS-DC-ELT ROI 重检默认改为 lost 优先，active ROI 默认关闭，并新增 lost age 上限、失败 cooldown、ROI 调用耗时和 skipped reason debug，降低 ROI 重检对 tracker update 的持续占用
 - `feat`: MS-DC-ELT lifecycle 新增 `MSDC_LOW_OBS_TOPK` / `MSDC_LOW_OBS_MIN_CONF`，可在低阈值候选进入关联前做候选池预算消融；TemplateLock 关闭时不再调用模板匹配和模板 debug 同步
+- `fix`: MS-DC-ELT evidence lifecycle 新增单入口 `assign_state(p_t, v_t, m_t, dt)` 优先级决策函数，Removed / Lost / Active / Candidate 状态互斥返回，并要求 Active 确认走 observation gating
+- `test`: 扩展 `test/test_msdc_evidence_state.py`，覆盖 `assign_state` 的优先级、完备性、可重复性和 Confirmed/Active observation gating
 - `docs`: formal v2 消融矩阵更新为 `v2_no_roi_redetect`、`v2_roi_interval10/15`、`v2_roi_max1`、`v2_candidate_topk`、`v2_candidate_topk_roi_max1`、`v2_candidate_topk_no_roi` 和 `v2_speed_diag_off`，不再推荐输出门控、激进 candidate 和 interval1 进入主矩阵
 
 ### 2026-06-11

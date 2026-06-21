@@ -87,6 +87,34 @@ def _as_state(state: TrackState | str) -> TrackState:
     return TrackState(str(state))
 
 
+def _config_value(config: Any, name: str, default: Any) -> Any:
+    return getattr(config or Config, name, default)
+
+
+def assign_state(
+    p_t: float,
+    v_t: float,
+    m_t: float,
+    dt: int,
+    config=Config,
+) -> TrackState:
+    """Return exactly one lifecycle state from priority-ordered evidence terms."""
+    theta_p = float(_config_value(config, "MSDC_CONFIRM_SCORE", 2.5))
+    theta_p_low = float(_config_value(config, "MSDC_PRUNE_SCORE", 0.1))
+    theta_v = float(_config_value(config, "MSDC_STATE_THETA_V", 0.5))
+    theta_m = float(_config_value(config, "MSDC_STATE_THETA_M", 1.0))
+    tau_max = int(_config_value(config, "MSDC_LOST_MAX_AGE", 5))
+
+    observed = float(v_t) >= theta_v
+    if not observed and float(p_t) < theta_p_low and int(dt) > tau_max:
+        return TrackState.REMOVED
+    if not observed and float(m_t) < theta_m:
+        return TrackState.LOST
+    if observed and float(p_t) > theta_p and float(m_t) < theta_m:
+        return TrackState.ACTIVE
+    return TrackState.CANDIDATE
+
+
 @dataclass
 class _ObservationGroup:
     observations: list[Observation] = field(default_factory=list)
@@ -1454,50 +1482,104 @@ class EvidenceStateUpdater:
         reacquire_score: float,
     ) -> list[LifecycleEvent]:
         state = _as_state(track.state)
+        current_dt = int(frame_idx) - int(track.last_seen)
+        target_state = state
+        event_type = ""
+        reason = ""
+        extra = None
         if state == TrackState.LOW_CANDIDATE:
             if self._low_candidate_can_confirm(track, frame_idx):
-                return [self._set_state(track, frame_idx, TrackState.ACTIVE, "CONFIRM_LOW_ACTIVE", "low_temporal_gate_confirmed")]
-            if int(track.age) > 1 and (
+                target_state = TrackState.ACTIVE
+                event_type = "CONFIRM_LOW_ACTIVE"
+                reason = "low_temporal_gate_confirmed"
+            elif int(track.age) > 1 and (
                 int(track.misses) > int(self._cfg("MSDC_LOW_CONFIRM_MAX_MISSES", 1))
                 or int(track.age) > int(self._cfg("MSDC_LOW_CONFIRM_WINDOW", 8))
                 or float(track.evidence_score) < float(self._cfg("MSDC_PRUNE_SCORE", 0.1))
             ):
-                return [self._set_state(track, frame_idx, TrackState.REMOVED, "PRUNED_LOW_CANDIDATE", "low_candidate_pruned")]
+                target_state = TrackState.REMOVED
+                event_type = "PRUNED_LOW_CANDIDATE"
+                reason = "low_candidate_pruned"
         elif state == TrackState.CANDIDATE:
-            if (
+            confirm_ready = (
                 float(track.evidence_score) >= float(self._cfg("MSDC_CONFIRM_SCORE", 2.5))
                 and int(track.hits) >= int(self._cfg("MSDC_CONFIRM_MIN_HITS", 3))
                 and self._candidate_has_required_detection(track)
-            ):
-                return [self._set_state(track, frame_idx, TrackState.ACTIVE, "CONFIRM_ACTIVE", "evidence_confirmed")]
-            if int(track.age) > 1 and (
+            )
+            target_state = assign_state(
+                p_t=float(track.evidence_score),
+                v_t=1.0 if confirm_ready and matched else 0.0,
+                m_t=0.0 if confirm_ready else float(self._cfg("MSDC_STATE_THETA_M", 1.0)),
+                dt=current_dt,
+                config=self.config,
+            )
+            if target_state == TrackState.ACTIVE:
+                event_type = "CONFIRM_ACTIVE"
+                reason = "evidence_confirmed"
+            elif int(track.age) > 1 and (
                 int(track.age) > int(self._cfg("MSDC_CANDIDATE_MAX_AGE", 5))
                 or float(track.evidence_score) < float(self._cfg("MSDC_PRUNE_SCORE", 0.1))
             ):
-                return [self._set_state(track, frame_idx, TrackState.REMOVED, "PRUNED_CANDIDATE", "candidate_pruned")]
+                target_state = TrackState.REMOVED
+                event_type = "PRUNED_CANDIDATE"
+                reason = "candidate_pruned"
+            else:
+                target_state = state
         elif state == TrackState.ACTIVE:
             if int(track.misses) > self._active_missing_patience(track, frame_idx):
-                return [self._set_state(track, frame_idx, TrackState.LOST, "ACTIVE_TO_LOST", "missing_patience_exceeded")]
+                target_state = assign_state(
+                    p_t=float(track.evidence_score),
+                    v_t=0.0,
+                    m_t=0.0,
+                    dt=current_dt,
+                    config=self.config,
+                )
+                if target_state == TrackState.LOST:
+                    event_type = "ACTIVE_TO_LOST"
+                    reason = "missing_patience_exceeded"
+                else:
+                    target_state = state
         elif state == TrackState.LOST:
             if matched and reacquire_score >= float(self._cfg("MSDC_REACQUIRE_SCORE", 1.0)):
                 track.misses = 0
-                return [self._set_state(
+                target_state = assign_state(
+                    p_t=max(float(track.evidence_score), float(self._cfg("MSDC_CONFIRM_SCORE", 2.5)) + 1e-6),
+                    v_t=1.0,
+                    m_t=0.0,
+                    dt=current_dt,
+                    config=self.config,
+                )
+                if target_state == TrackState.ACTIVE:
+                    event_type = "LOST_REACQUIRED"
+                    reason = f"reacquire_score>={float(self._cfg('MSDC_REACQUIRE_SCORE', 1.0))}"
+                    extra = {"reacquire_score": float(reacquire_score)}
+                else:
+                    target_state = state
+            else:
+                timed_out = current_dt > int(self._cfg("MSDC_LOST_MAX_AGE", 5))
+                target_state = assign_state(
+                    p_t=0.0 if timed_out else float(track.evidence_score),
+                    v_t=0.0,
+                    m_t=float(self._cfg("MSDC_STATE_THETA_M", 1.0)),
+                    dt=current_dt,
+                    config=self.config,
+                )
+                if target_state == TrackState.REMOVED:
+                    event_type = "LOST_TO_removed"
+                    reason = "lost_timeout"
+                else:
+                    target_state = state
+        if target_state != state and event_type:
+            return [
+                self._set_state(
                     track,
                     frame_idx,
-                    TrackState.ACTIVE,
-                    "LOST_REACQUIRED",
-                    f"reacquire_score>={float(self._cfg('MSDC_REACQUIRE_SCORE', 1.0))}",
-                    extra={"reacquire_score": float(reacquire_score)},
-                )]
-            return self._transition_lost_timeout(track, frame_idx)
-        return []
-
-    def _transition_lost_timeout(self, track: EvidenceTrack, frame_idx: int) -> list[LifecycleEvent]:
-        if _as_state(track.state) != TrackState.LOST:
-            return []
-        lost_age = int(frame_idx) - int(track.last_seen)
-        if lost_age > int(self._cfg("MSDC_LOST_MAX_AGE", 5)):
-            return [self._set_state(track, frame_idx, TrackState.REMOVED, "LOST_TO_removed", "lost_timeout")]
+                    target_state,
+                    event_type,
+                    reason,
+                    extra=extra,
+                )
+            ]
         return []
 
     def _set_state(
