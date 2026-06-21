@@ -201,10 +201,10 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT 运动种子 debug 默认输出根目录：`MSDC_MOTION_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
 - MS-DC-ELT 主链路默认关闭：`MSDC_ENABLE = False`
 - MS-DC-ELT 消融开关：`MSDC_USE_LOW_DET = True`，`MSDC_USE_MOTION = False`，`MSDC_USE_TEMPLATE = False`，`MSDC_USE_REACQUIRE = True`，`MSDC_USE_ROI_REDETECT = False`，`MSDC_REUSE_GUARD_ENABLE = True`
-- MS-DC-ELT 正式默认配置采用 `v2_candidate_topk_no_roi`：共享 high/low 检测、关闭 ROI 重检、关闭 template、关闭 motion seed、低阈值候选池 `topK=32` 且 `min_conf=0.25`
+- MS-DC-ELT 正式默认配置采用 `v3_candidate_topk_no_roi_no_motion`：共享 high/low 检测、关闭 ROI 重检、关闭 template、关闭 motion seed、低阈值候选池 `topK=32` 且 `min_conf=0.25`
 - MS-DC-ELT 默认检测加速：`MSDC_EXPORT_SHARE_LOW_HIGH_DET = True`；`msdc_elt` 正式运行和导出路径默认只跑一次低阈值检测，再按默认阈值切分 high boxes，baseline tracker 不使用该分支；如需复现实验旧路径，可设置环境变量 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=0` 恢复 high/low 双次全图检测；MOT 结果按帧流式写入，长视频导出时可用 `--progress-interval N` 定期打印进度并 flush 结果文件
 - MS-DC-ELT 默认只输出 active：`MSDC_OUTPUT_CANDIDATES = False`
-- MS-DC-ELT lifecycle debug JSONL 默认关闭：`MSDC_DEBUG_EVENTS = False`，正式诊断/消融脚本会显式设置 `MSDC_DEBUG_EVENTS=1`；长视频评测时每帧 debug 只保留非 removed 轨迹快照，快照上限 `MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT = 128`，细节列表上限 `MSDC_DEBUG_DETAIL_LIMIT = 8`
+- MS-DC-ELT lifecycle debug JSONL 默认关闭：`MSDC_DEBUG_EVENTS = False`；长视频评测时每帧 debug 只保留非 removed 轨迹快照，快照上限 `MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT = 128`，细节列表上限 `MSDC_DEBUG_DETAIL_LIMIT = 8`
 - MS-DC-ELT lifecycle debug 默认输出目录：`MSDC_LIFECYCLE_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
 - MS-DC-ELT evidence score：`MSDC_EVIDENCE_ALPHA = 0.85`，`MSDC_WEIGHT_HIGH = 1.3`，`MSDC_WEIGHT_LOW = 1.0`，`MSDC_WEIGHT_ROI_LOW = 1.0`，`MSDC_WEIGHT_MOTION = 0.6`，`MSDC_WEIGHT_TEMPLATE = 0.4`，`MSDC_NEGATIVE_WEIGHT = 0.5`
 - MS-DC-ELT 生命周期阈值：`MSDC_CONFIRM_SCORE = 2.5`，`MSDC_CONFIRM_MIN_HITS = 4`，`MSDC_PRUNE_SCORE = 0.1`，`MSDC_CANDIDATE_MAX_AGE = 5`
@@ -919,7 +919,7 @@ MS-DC-ELT 诊断文件：
 - `MSDC_REACQUIRE_CENTER_DIST`
 - `MSDC_REACQUIRE_MAX_CENTER_DIST`
 
-### MS-DC-ELT v2 experiment variants
+### MS-DC-ELT experiment variants
 
 - `v2_template_off`: TemplateLock off, dual high/low detection retained for template-only isolation.
 - `v2_shared_det`: TemplateLock off, shared low-threshold inference split into high/low boxes.
@@ -929,7 +929,8 @@ MS-DC-ELT 诊断文件：
 - `v2_roi_max1`: 每帧最多 1 个 ROI，限制当前最重瓶颈。
 - `v2_candidate_topk`: `MSDC_LOW_OBS_TOPK=32`、`MSDC_LOW_OBS_MIN_CONF=0.25`，限制进入 lifecycle 关联的低阈值候选池。
 - `v2_candidate_topk_roi_max1`: 同时启用 `v2_candidate_topk` 和 `v2_roi_max1`，测试组合速度上限。
-- `v2_candidate_topk_no_roi`: 同时启用 `v2_candidate_topk` 并关闭 ROI 重检，用于验证最终候选默认配置。
+- `v2_candidate_topk_no_roi`: 同时启用 `v2_candidate_topk` 并关闭 ROI 重检，用于复现 v2 候选池配置。
+- `v3_candidate_topk_no_roi_no_motion`: 当前正式默认变体；基于 v2 baseline，关闭 ROI 重检、关闭 motion/template，启用共享 high/low 检测、low-observation topK 预算和正式速度上限。
 - `v2_speed_diag_off`: 关闭 MS-DC-ELT debug JSONL，用于纯算法速度对照。
 - 历史分支 `v2_output_age5_size8` / `v2_output_age8_size8`、`v2_candidate_low3_window6`、`v2_candidate_real2_age8`、`v2_reacquire_interval1` 保留为复现实验入口，但当前不推荐进入 formal 主矩阵。
 
@@ -980,7 +981,7 @@ conda run -n ship_detect python tools/evaluation/detection_replay_benchmark.py -
 conda run -n ship_detect python tools/evaluation/msdc_speed_benchmark.py --dataset-root "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集" --trackers ocsort botsort msdc_elt --frames 1000 --output-root "results/msdc_paper_phase1/<run-id>/speed" --run-id "<speed-run-id>" --progress-interval 100
 ```
 
-该脚本使用同一视频和同一请求帧数依次测试 `ocsort`、`botsort`、`msdc_elt`，不渲染视频、不发送 MQ、不运行 TrackEval，并在测速期间关闭 MS-DC-ELT debug JSONL。输出目录为 `<output-root>/<run-id>/`，包含逐帧阶段耗时 `speed_timings.jsonl` 和汇总表 `speed_results.csv`；汇总字段包括处理帧数、总耗时、平均 FPS、平均/P50/P95 延迟、检测器调用次数，以及读取、高阈值检测、低阈值检测、ROI 重检、tracker update、渲染和写盘的平均耗时。该 speed benchmark 本身不渲染、不写 MOT，因此 `mean_render_ms` 和 `mean_write_ms` 记录为 `0.000000`，用于 formal summary 中显式占位。MS-DC-ELT speed CSV separates full-frame detector calls from ROI redetect calls via `detector_calls_roi_redetect` and `mean_roi_redetect_ms`; `detector_calls_tracker_update` excludes ROI detector calls and represents detector calls still hidden inside lifecycle update. `peak_memory_mb` 为写入每个 tracker 汇总行时当前进程已观测到的 peak RSS，不是隔离的单 tracker 内存增量。
+该脚本使用同一视频和同一请求帧数依次测试 `ocsort`、`botsort`、`msdc_elt`，不渲染视频、不发送 MQ、不运行 TrackEval；测速期间会对 MS-DC-ELT 临时应用 formal v3 配置（`v3_candidate_topk_no_roi_no_motion`，关闭 motion/template/ROI、共享 high/low、low-observation topK=32、debug off），退出后恢复调用前的 `Config` 值。输出目录为 `<output-root>/<run-id>/`，包含逐帧阶段耗时 `speed_timings.jsonl` 和汇总表 `speed_results.csv`；汇总字段包括处理帧数、总耗时、平均 FPS、平均/P50/P95 延迟、检测器调用次数，以及读取、高阈值检测、低阈值检测、ROI 重检、tracker update、渲染和写盘的平均耗时。该 speed benchmark 本身不渲染、不写 MOT，因此 `mean_render_ms` 和 `mean_write_ms` 记录为 `0.000000`，用于 formal summary 中显式占位。MS-DC-ELT speed CSV separates full-frame detector calls from ROI redetect calls via `detector_calls_roi_redetect` and `mean_roi_redetect_ms`; `detector_calls_tracker_update` excludes ROI detector calls and represents detector calls still hidden inside lifecycle update. `peak_memory_mb` 为写入每个 tracker 汇总行时当前进程已观测到的 peak RSS，不是隔离的单 tracker 内存增量。
 
 MS-DC-ELT high/low 共享检测前后速度对比：
 
@@ -1018,15 +1019,15 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 # 正式完整实验必须显式加 --run-formal
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id "<run-id>"
 
-# formal v2 速度/ROI 诊断矩阵；--duration-seconds 120 表示每个视频只评测前 2 分钟
-conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v2_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_low_clean v2_no_roi_redetect v2_roi_interval10 v2_roi_interval15 v2_roi_max1 v2_candidate_topk v2_candidate_topk_roi_max1 v2_candidate_topk_no_roi v2_speed_diag_off
+# formal v3 速度/ROI 诊断矩阵；--duration-seconds 120 表示每个视频只评测前 2 分钟
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v3_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_no_roi_redetect v2_roi_interval10 v2_roi_interval15 v2_roi_max1 v2_candidate_topk v2_candidate_topk_roi_max1 v2_candidate_topk_no_roi v3_candidate_topk_no_roi_no_motion v2_speed_diag_off
 
 # 查看或校验最近一次正式实验输出路径
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --print-latest
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --check-latest
 ```
 
-该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`；相对 `--output-root` 会按仓库根目录解析，避免从不同 cwd 启动时写到不同位置。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；formal v2 的 main comparison 会用 `ocsort`、`botsort` 和 `msdc_elt` 的 `v2_low_clean` 变体，确保主结果默认 TemplateLock off 且共享 low/high 推理。正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果的绝对路径。`--ablation-variants` 可指定本次 ablation 只运行选定变体；`--duration-seconds` 可将 main/ablation 的每个视频限制到前 N 秒，默认 0 表示完整视频；`--render-class-source none` 会跳过渲染阶段的二次检测并把可视化类别写为 `target`，适合 CPU fallback 环境；未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
+该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`；相对 `--output-root` 会按仓库根目录解析，避免从不同 cwd 启动时写到不同位置。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；formal v3 的 main comparison 会用 `ocsort`、`botsort` 和 `msdc_elt` 的 `v3_candidate_topk_no_roi_no_motion` 变体，确保主结果默认关闭 motion/template/ROI，启用共享 low/high 推理和 low-observation topK 预算。正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果的绝对路径。`--ablation-variants` 可指定本次 ablation 只运行选定变体；`--duration-seconds` 可将 main/ablation 的每个视频限制到前 N 秒，默认 0 表示完整视频；`--render-class-source none` 会跳过渲染阶段的二次检测并把可视化类别写为 `target`，适合 CPU fallback 环境；未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
 
 结果表模板：
 
@@ -1201,6 +1202,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 
 ### 2026-06-14
 
+- `feat`: formal MS-DC-ELT 主变体切换为 `v3_candidate_topk_no_roi_no_motion`，在 runner、ablation、summary 和 speed benchmark 中统一使用关闭 motion/template/ROI、low-observation topK=32、debug off 的正式默认配置
 - `perf`: MS-DC-ELT ROI 重检默认改为 lost 优先，active ROI 默认关闭，并新增 lost age 上限、失败 cooldown、ROI 调用耗时和 skipped reason debug，降低 ROI 重检对 tracker update 的持续占用
 - `feat`: MS-DC-ELT lifecycle 新增 `MSDC_LOW_OBS_TOPK` / `MSDC_LOW_OBS_MIN_CONF`，可在低阈值候选进入关联前做候选池预算消融；TemplateLock 关闭时不再调用模板匹配和模板 debug 同步
 - `fix`: MS-DC-ELT evidence lifecycle 新增单入口 `assign_state(p_t, v_t, m_t, dt)` 优先级决策函数，Removed / Lost / Active / Candidate 状态互斥返回，并要求 Active 确认走 observation gating

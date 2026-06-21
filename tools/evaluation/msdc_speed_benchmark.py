@@ -97,6 +97,68 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from tools.experiments.run_msdc_ablation import V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV  # noqa: E402
+
+
+_FORMAL_V3_BOOL_KEYS = {
+    "MSDC_USE_LOW_DET",
+    "MSDC_USE_MOTION",
+    "MSDC_USE_TEMPLATE",
+    "MSDC_TEMPLATE_ENABLE",
+    "MSDC_USE_REACQUIRE",
+    "MSDC_USE_ROI_REDETECT",
+    "MSDC_REUSE_GUARD_ENABLE",
+    "MSDC_EXPORT_SHARE_LOW_HIGH_DET",
+    "MSDC_DEBUG_EVENTS",
+    "MSDC_ROI_REDETECT_ACTIVE_ENABLE",
+    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY",
+}
+_FORMAL_V3_INT_KEYS = {
+    "MSDC_OUTPUT_MAX_REAL_DET_AGE",
+    "MSDC_OUTPUT_MIN_BOX_SIZE",
+    "MSDC_LOW_CONFIRM_MIN_HITS",
+    "MSDC_LOW_CONFIRM_WINDOW",
+    "MSDC_CONFIRM_MIN_REAL_DET_HITS",
+    "MSDC_CANDIDATE_MAX_AGE",
+    "MSDC_ROI_REDETECT_ACTIVE_INTERVAL",
+    "MSDC_ROI_REDETECT_LOST_INTERVAL",
+    "MSDC_ROI_REDETECT_MAX_TRACKS",
+    "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI",
+    "MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE",
+    "MSDC_ROI_REDETECT_COOLDOWN_FRAMES",
+    "MSDC_LOW_OBS_TOPK",
+    "MSDC_LOW_OBS_GLOBAL_TOPK",
+    "MSDC_LOW_OBS_PER_TRACK_NEAREST",
+    "MSDC_LOW_OBS_MAX_PER_FRAME",
+    "MSDC_MAX_ACTIVE_TRACKS",
+    "MSDC_MAX_LOST_TRACKS",
+    "MSDC_MAX_CANDIDATES",
+    "MSDC_MAX_LOW_CANDIDATES",
+    "MSDC_MAX_TOTAL_TRACKS",
+    "MSDC_REACQUIRE_INTERVAL",
+}
+_FORMAL_V3_FLOAT_KEYS = {
+    "MSDC_LOW_OBS_MIN_CONF",
+    "MSDC_REACQUIRE_CENTER_DIST",
+    "MSDC_REACQUIRE_MAX_CENTER_DIST",
+}
+
+
+def _coerce_formal_v3_value(key: str, value: str) -> bool | int | float:
+    if key in _FORMAL_V3_BOOL_KEYS:
+        return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+    if key in _FORMAL_V3_INT_KEYS:
+        return int(value)
+    if key in _FORMAL_V3_FLOAT_KEYS:
+        return float(value)
+    raise KeyError(f"Unsupported formal v3 speed config key: {key}")
+
+
+FORMAL_V3_CONFIG_OVERRIDES = {
+    key: _coerce_formal_v3_value(key, V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV[key])
+    for key in [*_FORMAL_V3_BOOL_KEYS, *_FORMAL_V3_INT_KEYS, *_FORMAL_V3_FLOAT_KEYS]
+}
+
 
 def percentile(values: list[float] | tuple[float, ...], q: float) -> float:
     """Return a percentile using sorted linear interpolation."""
@@ -245,6 +307,24 @@ def _resolve_benchmark_input(args: argparse.Namespace) -> tuple[Path, str, str]:
 def _reset_detector_singleton(td_module: Any) -> None:
     if hasattr(td_module, "_detector_instance"):
         td_module._detector_instance = None
+
+
+@contextmanager
+def _temporary_config_overrides(config: Any, overrides: dict[str, bool | int | float]) -> Iterator[None]:
+    previous = {
+        key: (hasattr(config, key), getattr(config, key, None))
+        for key in overrides
+    }
+    try:
+        for key, value in overrides.items():
+            setattr(config, key, value)
+        yield
+    finally:
+        for key, (had_attr, value) in previous.items():
+            if had_attr:
+                setattr(config, key, value)
+            else:
+                delattr(config, key)
 
 
 def _write_timing_row(timing_fh, row: dict[str, Any]) -> None:
@@ -469,10 +549,7 @@ def run_speed_benchmark(args: argparse.Namespace) -> tuple[Path, Path]:
     timings_path = output_dir / "speed_timings.jsonl"
     results_path = output_dir / "speed_results.csv"
 
-    had_debug_attr = hasattr(Config, "MSDC_DEBUG_EVENTS")
-    old_debug_events = getattr(Config, "MSDC_DEBUG_EVENTS", None)
-    Config.MSDC_DEBUG_EVENTS = False
-    try:
+    with _temporary_config_overrides(Config, FORMAL_V3_CONFIG_OVERRIDES):
         with timings_path.open("w", encoding="utf-8") as timing_fh:
             rows = [
                 _run_tracker_benchmark(
@@ -488,11 +565,6 @@ def run_speed_benchmark(args: argparse.Namespace) -> tuple[Path, Path]:
                 )
                 for tracker_type in args.trackers
             ]
-    finally:
-        if had_debug_attr:
-            Config.MSDC_DEBUG_EVENTS = old_debug_events
-        else:
-            delattr(Config, "MSDC_DEBUG_EVENTS")
 
     with results_path.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.DictWriter(fh, fieldnames=SPEED_FIELDS)

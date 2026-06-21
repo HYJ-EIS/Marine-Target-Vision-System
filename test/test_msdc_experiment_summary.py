@@ -89,12 +89,12 @@ def test_main_results_maps_trackers_to_method_labels(tmp_path):
     assert out.read_text(encoding="utf-8-sig").splitlines()[0].startswith("run_name,method,tracker")
 
 
-def test_main_results_include_v2_low_clean_as_msdc_v2(tmp_path):
+def test_main_results_include_v3_candidate_topk_no_roi_no_motion_as_msdc_v3(tmp_path):
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [
         {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
         {"tracker": "botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
-        {"tracker": "v2_low_clean", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
+        {"tracker": "v3_candidate_topk_no_roi_no_motion", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
     rows = write_main_results(
@@ -104,8 +104,8 @@ def test_main_results_include_v2_low_clean_as_msdc_v2(tmp_path):
         benchmark_root=tmp_path,
     )
 
-    assert [row["tracker"] for row in rows] == ["ocsort", "botsort", "v2_low_clean"]
-    assert rows[2]["method"] == METHOD_LABELS["v2_low_clean"]
+    assert [row["tracker"] for row in rows] == ["ocsort", "botsort", "v3_candidate_topk_no_roi_no_motion"]
+    assert rows[2]["method"] == METHOD_LABELS["v3_candidate_topk_no_roi_no_motion"]
 
 
 def test_ablation_results_keeps_variant_names(tmp_path):
@@ -163,6 +163,7 @@ def test_ablation_results_reports_new_v2_speed_ablation_switches(tmp_path):
         "v2_candidate_topk",
         "v2_candidate_topk_roi_max1",
         "v2_candidate_topk_no_roi",
+        "v3_candidate_topk_no_roi_no_motion",
         "v2_speed_diag_off",
     ]
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
@@ -188,6 +189,9 @@ def test_ablation_results_reports_new_v2_speed_ablation_switches(tmp_path):
     assert by_variant["v2_candidate_topk_roi_max1"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "1"
     assert by_variant["v2_candidate_topk_no_roi"]["MSDC_LOW_OBS_TOPK"] == "32"
     assert by_variant["v2_candidate_topk_no_roi"]["MSDC_USE_ROI_REDETECT"] == "False"
+    assert by_variant["v3_candidate_topk_no_roi_no_motion"]["MSDC_LOW_OBS_TOPK"] == "32"
+    assert by_variant["v3_candidate_topk_no_roi_no_motion"]["MSDC_USE_ROI_REDETECT"] == "False"
+    assert by_variant["v3_candidate_topk_no_roi_no_motion"]["MSDC_USE_MOTION"] == "False"
     assert by_variant["v2_speed_diag_off"]["MSDC_DEBUG_EVENTS"] == "False"
 
 

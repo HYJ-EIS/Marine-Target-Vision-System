@@ -31,7 +31,7 @@ def test_main_command_uses_full_video_and_render():
     assert "--render" in cmd
     assert "--run" in cmd
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == ["ocsort", "botsort", "msdc_elt"]
-    assert cmd[cmd.index("--variants") + 1] == "v2_low_clean"
+    assert cmd[cmd.index("--variants") + 1] == "v3_candidate_topk_no_roi_no_motion"
 
 
 def test_formal_commands_accept_duration_limit():
@@ -61,7 +61,7 @@ def test_formal_commands_accept_duration_limit():
     assert ablation_cmd[ablation_cmd.index("--duration-seconds") + 1] == "120.0"
     assert main_cmd[main_cmd.index("--render-class-source") + 1] == "none"
     assert ablation_cmd[ablation_cmd.index("--render-class-source") + 1] == "none"
-    assert main_cmd[main_cmd.index("--variants") + 1] == "v2_low_clean"
+    assert main_cmd[main_cmd.index("--variants") + 1] == "v3_candidate_topk_no_roi_no_motion"
 
 
 def test_ablation_command_includes_required_variants():
@@ -89,6 +89,7 @@ def test_ablation_command_accepts_selected_variants():
         "v2_candidate_topk",
         "v2_candidate_topk_roi_max1",
         "v2_candidate_topk_no_roi",
+        "v3_candidate_topk_no_roi_no_motion",
         "v2_speed_diag_off",
     ])
     cmd = build_ablation_command(
@@ -106,6 +107,7 @@ def test_ablation_command_accepts_selected_variants():
     assert "v2_candidate_topk" in joined
     assert "v2_candidate_topk_roi_max1" in joined
     assert "v2_candidate_topk_no_roi" in joined
+    assert "v3_candidate_topk_no_roi_no_motion" in joined
     assert "v2_speed_diag_off" in joined
     assert "Ours-full" not in joined
 
@@ -297,6 +299,7 @@ def test_v2_ablation_variants_are_available():
         "v2_reacquire_interval1",
         "v2_reacquire_interval2",
         "v2_reacquire_interval5_center240",
+        "v3_candidate_topk_no_roi_no_motion",
     }
     assert expected <= set(ABLATION_VARIANTS)
     assert ABLATION_VARIANTS["v2_template_off"]["MSDC_USE_TEMPLATE"] == "0"
@@ -311,6 +314,15 @@ def test_v2_ablation_variants_are_available():
     assert env["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
     assert env["MSDC_CANDIDATE_MAX_AGE"] == "8"
 
+    formal_env = _variant_env("v3_candidate_topk_no_roi_no_motion")
+    assert formal_env["MSDC_USE_MOTION"] == "0"
+    assert formal_env["MSDC_USE_ROI_REDETECT"] == "0"
+    assert formal_env["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "1"
+    assert formal_env["MSDC_LOW_OBS_TOPK"] == "32"
+    assert formal_env["MSDC_LOW_OBS_GLOBAL_TOPK"] == "32"
+    assert formal_env["MSDC_LOW_OBS_MIN_CONF"] == "0.25"
+    assert formal_env["MSDC_DEBUG_EVENTS"] == "0"
+
 
 def test_v2_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):
     from tools.experiments.run_msdc_ablation import _execution_env, _variant_env
@@ -319,8 +331,9 @@ def test_v2_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):
     monkeypatch.setenv("MSDC_CONFIRM_REQUIRE_HIGH_DET", "0")
     monkeypatch.setenv("UNRELATED_FLAG", "keep")
 
-    env = _execution_env("v2_candidate_real2_age8", _variant_env("v2_candidate_real2_age8"))
+    env = _execution_env("v3_candidate_topk_no_roi_no_motion", _variant_env("v3_candidate_topk_no_roi_no_motion"))
 
     assert env["MSDC_USE_LOW_DET"] == "1"
+    assert env["MSDC_USE_MOTION"] == "0"
     assert "MSDC_CONFIRM_REQUIRE_HIGH_DET" not in env
     assert env["UNRELATED_FLAG"] == "keep"

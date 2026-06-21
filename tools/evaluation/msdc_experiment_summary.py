@@ -40,6 +40,7 @@ SPEED_FIELDS = [
     "mean_write_ms",
 ]
 SPEED_OUTPUT_FIELDS = [*SPEED_FIELDS, "status", "failure"]
+FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
 
 METHOD_LABELS = {
     "ocsort": "FFCA-YOLO + OC-SORT",
@@ -47,9 +48,10 @@ METHOD_LABELS = {
     "Ours-full": "FFCA-YOLO + MS-DC-ELT",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
     "v2_low_clean": "FFCA-YOLO + MS-DC-ELT v2",
+    FORMAL_MSDC_VARIANT: "FFCA-YOLO + MS-DC-ELT v3",
 }
 
-MAIN_MSDC_TRACKER = "v2_low_clean"
+MAIN_MSDC_TRACKER = FORMAL_MSDC_VARIANT
 MAIN_TRACKERS = {"ocsort", "botsort", "Ours-full", "msdc_elt", MAIN_MSDC_TRACKER}
 
 ABLATION_FIELDS = [
@@ -75,8 +77,17 @@ ABLATION_FIELDS = [
     "MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE",
     "MSDC_ROI_REDETECT_COOLDOWN_FRAMES",
     "MSDC_LOW_OBS_TOPK",
+    "MSDC_LOW_OBS_GLOBAL_TOPK",
+    "MSDC_LOW_OBS_PER_TRACK_NEAREST",
+    "MSDC_LOW_OBS_MAX_PER_FRAME",
     "MSDC_LOW_OBS_MIN_CONF",
+    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY",
     "MSDC_DEBUG_EVENTS",
+    "MSDC_MAX_ACTIVE_TRACKS",
+    "MSDC_MAX_LOST_TRACKS",
+    "MSDC_MAX_CANDIDATES",
+    "MSDC_MAX_LOW_CANDIDATES",
+    "MSDC_MAX_TOTAL_TRACKS",
     "MSDC_REACQUIRE_INTERVAL",
     "MSDC_REACQUIRE_CENTER_DIST",
     "MSDC_REACQUIRE_MAX_CENTER_DIST",
@@ -105,8 +116,17 @@ ABLATION_SWITCH_DEFAULTS = {
     "MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE": "30",
     "MSDC_ROI_REDETECT_COOLDOWN_FRAMES": "3",
     "MSDC_LOW_OBS_TOPK": "0",
+    "MSDC_LOW_OBS_GLOBAL_TOPK": "0",
+    "MSDC_LOW_OBS_PER_TRACK_NEAREST": "1",
+    "MSDC_LOW_OBS_MAX_PER_FRAME": "64",
     "MSDC_LOW_OBS_MIN_CONF": "0.0",
+    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY": "True",
     "MSDC_DEBUG_EVENTS": "True",
+    "MSDC_MAX_ACTIVE_TRACKS": "128",
+    "MSDC_MAX_LOST_TRACKS": "64",
+    "MSDC_MAX_CANDIDATES": "64",
+    "MSDC_MAX_LOW_CANDIDATES": "48",
+    "MSDC_MAX_TOTAL_TRACKS": "256",
     "MSDC_REACQUIRE_INTERVAL": "5",
     "MSDC_REACQUIRE_CENTER_DIST": "160",
     "MSDC_REACQUIRE_MAX_CENTER_DIST": "240",
@@ -243,6 +263,7 @@ ABLATION_SWITCH_OVERRIDES = {
     },
     "v2_candidate_topk": {
         "MSDC_LOW_OBS_TOPK": "32",
+        "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
         "MSDC_LOW_OBS_MIN_CONF": "0.25",
         "MSDC_USE_TEMPLATE": "False",
         "MSDC_TEMPLATE_ENABLE": "False",
@@ -250,6 +271,7 @@ ABLATION_SWITCH_OVERRIDES = {
     },
     "v2_candidate_topk_roi_max1": {
         "MSDC_LOW_OBS_TOPK": "32",
+        "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
         "MSDC_LOW_OBS_MIN_CONF": "0.25",
         "MSDC_ROI_REDETECT_MAX_TRACKS": "1",
         "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI": "1",
@@ -259,11 +281,34 @@ ABLATION_SWITCH_OVERRIDES = {
     },
     "v2_candidate_topk_no_roi": {
         "MSDC_LOW_OBS_TOPK": "32",
+        "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
         "MSDC_LOW_OBS_MIN_CONF": "0.25",
         "MSDC_USE_ROI_REDETECT": "False",
         "MSDC_USE_TEMPLATE": "False",
         "MSDC_TEMPLATE_ENABLE": "False",
         "MSDC_EXPORT_SHARE_LOW_HIGH_DET": "True",
+    },
+    FORMAL_MSDC_VARIANT: {
+        "MSDC_USE_LOW_DET": "True",
+        "MSDC_USE_MOTION": "False",
+        "MSDC_USE_TEMPLATE": "False",
+        "MSDC_TEMPLATE_ENABLE": "False",
+        "MSDC_USE_REACQUIRE": "True",
+        "MSDC_USE_ROI_REDETECT": "False",
+        "MSDC_REUSE_GUARD_ENABLE": "True",
+        "MSDC_EXPORT_SHARE_LOW_HIGH_DET": "True",
+        "MSDC_LOW_OBS_TOPK": "32",
+        "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
+        "MSDC_LOW_OBS_PER_TRACK_NEAREST": "1",
+        "MSDC_LOW_OBS_MAX_PER_FRAME": "64",
+        "MSDC_LOW_OBS_MIN_CONF": "0.25",
+        "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY": "True",
+        "MSDC_DEBUG_EVENTS": "False",
+        "MSDC_MAX_ACTIVE_TRACKS": "128",
+        "MSDC_MAX_LOST_TRACKS": "64",
+        "MSDC_MAX_CANDIDATES": "64",
+        "MSDC_MAX_LOW_CANDIDATES": "48",
+        "MSDC_MAX_TOTAL_TRACKS": "256",
     },
     "v2_speed_diag_off": {
         "MSDC_DEBUG_EVENTS": "False",
