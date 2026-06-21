@@ -18,6 +18,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 
+FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
 
 V2_BASELINE_ENV = {
     "MSDC_USE_LOW_DET": "1",
@@ -47,6 +48,27 @@ V2_BASELINE_ENV = {
     "MSDC_REACQUIRE_CENTER_DIST": "160",
     "MSDC_REACQUIRE_MAX_CENTER_DIST": "240",
     "MSDC_DEBUG_EVENTS": "1",
+}
+
+V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV = {
+    **V2_BASELINE_ENV,
+    "MSDC_USE_MOTION": "0",
+    "MSDC_USE_ROI_REDETECT": "0",
+    "MSDC_USE_TEMPLATE": "0",
+    "MSDC_TEMPLATE_ENABLE": "0",
+    "MSDC_EXPORT_SHARE_LOW_HIGH_DET": "1",
+    "MSDC_LOW_OBS_TOPK": "32",
+    "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
+    "MSDC_LOW_OBS_PER_TRACK_NEAREST": "1",
+    "MSDC_LOW_OBS_MAX_PER_FRAME": "64",
+    "MSDC_LOW_OBS_MIN_CONF": "0.25",
+    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY": "1",
+    "MSDC_DEBUG_EVENTS": "0",
+    "MSDC_MAX_ACTIVE_TRACKS": "128",
+    "MSDC_MAX_LOST_TRACKS": "64",
+    "MSDC_MAX_CANDIDATES": "64",
+    "MSDC_MAX_LOW_CANDIDATES": "48",
+    "MSDC_MAX_TOTAL_TRACKS": "256",
 }
 
 
@@ -238,6 +260,7 @@ ABLATION_VARIANTS = {
         "MSDC_TEMPLATE_ENABLE": "0",
         "MSDC_EXPORT_SHARE_LOW_HIGH_DET": "1",
     },
+    FORMAL_MSDC_VARIANT: dict(V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV),
     "v2_speed_diag_off": {
         "MSDC_DEBUG_EVENTS": "0",
         "MSDC_USE_TEMPLATE": "0",
@@ -271,6 +294,10 @@ def _quote_command(argv: list[str]) -> str:
     return " ".join(shlex.quote(item) for item in argv)
 
 
+def _uses_isolated_msdc_env(variant: str) -> bool:
+    return variant.startswith(("v2_", "v3_"))
+
+
 def _variant_env(variant: str) -> dict[str, str]:
     if variant.startswith("v2_"):
         env = dict(V2_BASELINE_ENV)
@@ -280,7 +307,7 @@ def _variant_env(variant: str) -> dict[str, str]:
 
 
 def _execution_env(label: str, env_delta: dict[str, str]) -> dict[str, str]:
-    if label.startswith("v2_"):
+    if _uses_isolated_msdc_env(label):
         env = {key: value for key, value in os.environ.items() if not key.startswith("MSDC_")}
     else:
         env = os.environ.copy()

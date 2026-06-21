@@ -58,7 +58,7 @@ tracked_boxes = tracker.update(boxes, frame.shape, frame=frame)
 - `tools/validation/tracker_effect_test.py:41-48` 定义 `TRACKER_CHOICES`。
 - `tools/validation/tracker_effect_test.py:147-153` 暴露 `--trackers`。
 - `tools/validation/video_test_tracking.py:62-68` 暴露 `--tracker`。
-- `tools/dataset/extract_tracking_frames.py:147` 也有 tracker choices，但 dataset extraction 不是第一阶段 MS-DC-ELT 接入的必要目标，建议等视频主链路和评测链路稳定后再考虑。
+- 抽帧 tracker choices 已迁移到 `/home/hyj/Anti_Drone_Project/Marine-Frame-Extraction`，不属于本仓库 MS-DC-ELT 视频/评测链路。
 
 实施结论：最小实施先改 `video_main.py`；正式评测阶段再改 `export_mot_results.py` 和 validation 工具。
 

@@ -201,7 +201,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT 运动种子 debug 默认输出根目录：`MSDC_MOTION_DEBUG_OUTPUT_DIR = outputs/msdc_debug`
 - MS-DC-ELT 主链路默认关闭：`MSDC_ENABLE = False`
 - MS-DC-ELT 消融开关：`MSDC_USE_LOW_DET = True`，`MSDC_USE_MOTION = False`，`MSDC_USE_TEMPLATE = False`，`MSDC_USE_REACQUIRE = True`，`MSDC_USE_ROI_REDETECT = False`，`MSDC_REUSE_GUARD_ENABLE = True`
-- MS-DC-ELT 正式默认配置采用 `v2_candidate_topk_no_roi`：共享 high/low 检测、关闭 ROI 重检、关闭 template、关闭 motion seed、低阈值候选池 `topK=32` 且 `min_conf=0.25`
+- MS-DC-ELT 正式默认配置采用 `v3_candidate_topk_no_roi_no_motion`：缓存/复用检测结果口径、共享 high/low 检测、关闭 ROI 重检、关闭 template、明确关闭 motion seed、低阈值候选池 `topK=32` 且 `min_conf=0.25`
 - MS-DC-ELT 默认检测加速：`MSDC_EXPORT_SHARE_LOW_HIGH_DET = True`；`msdc_elt` 正式运行和导出路径默认只跑一次低阈值检测，再按默认阈值切分 high boxes，baseline tracker 不使用该分支；如需复现实验旧路径，可设置环境变量 `MSDC_EXPORT_SHARE_LOW_HIGH_DET=0` 恢复 high/low 双次全图检测；MOT 结果按帧流式写入，长视频导出时可用 `--progress-interval N` 定期打印进度并 flush 结果文件
 - MS-DC-ELT 默认只输出 active：`MSDC_OUTPUT_CANDIDATES = False`
 - MS-DC-ELT lifecycle debug JSONL 默认关闭：`MSDC_DEBUG_EVENTS = False`，正式诊断/消融脚本会显式设置 `MSDC_DEBUG_EVENTS=1`；长视频评测时每帧 debug 只保留非 removed 轨迹快照，快照上限 `MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT = 128`，细节列表上限 `MSDC_DEBUG_DETAIL_LIMIT = 8`
@@ -212,7 +212,7 @@ python video_main.py --input "video.mp4" --output results\out.mp4 --no-display
 - MS-DC-ELT 低阈值受约束确认：`MSDC_LOW_CANDIDATE_ENABLE = True`，`MSDC_LOW_SPAWN_MIN_CONF = 0.30`，`MSDC_LOW_CONFIRM_MIN_HITS = 5`，`MSDC_LOW_CONFIRM_WINDOW = 8`，`MSDC_LOW_CONFIRM_MIN_AVG_SCORE = 0.22`，`MSDC_LOW_CONFIRM_MAX_MISSES = 1`，`MSDC_LOW_CONFIRM_MAX_AREA_CHANGE = 1.8`，`MSDC_LOW_CONFIRM_MAX_CENTER_STEP_FACTOR = 3.0`；low-only 新目标先进入 hidden `low_candidate`，通过 M-of-N 和稳定性门控后才确认 active
 - MS-DC-ELT low-candidate ID 继承：`MSDC_LOW_INHERIT_ENABLE = True`，`MSDC_LOW_INHERIT_SCORE = 0.40`，`MSDC_LOW_INHERIT_IOU_THRESH = 0.02`，`MSDC_LOW_INHERIT_CENTER_DIST = 220.0`，`MSDC_LOW_INHERIT_MAX_LOST_AGE = 120`，`MSDC_LOW_INHERIT_USE_HISTORY_VELOCITY = True`，`MSDC_LOW_INHERIT_MAX_PREDICT_AGE = 120`，`MSDC_LOW_INHERIT_MOTION_MIN = 0.15`，`MSDC_LOW_INHERIT_CLASS_MATCH = True`，`MSDC_LOW_INHERIT_CLASS_MISMATCH_CENTER_DIST = 80.0`，`MSDC_LOW_INHERIT_CLASS_MISMATCH_PENALTY = 0.0`；稳定 low-candidate 确认前会优先接到 nearby lost track 并继承其 `public_id`，lost 预测优先使用低阈值历史的稳健中位速度，类别不一致时不再硬拒绝但要求更近，失败后才允许生成新公开 ID
 - MS-DC-ELT 丢失与重捕阈值：`MSDC_ACTIVE_MISSING_PATIENCE = 2`，`MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = 6`，`MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = 8`，`MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2`，`MSDC_LOST_MAX_AGE = 40`，`MSDC_REACQUIRE_INTERVAL = 5`，`MSDC_REACQUIRE_SCORE = 1.5`，`MSDC_REACQUIRE_CENTER_SCALE_FACTOR = 4.0`，`MSDC_REACQUIRE_MAX_CENTER_DIST = 240.0`；近期有 low/roi-low 真实证据且当前仍有 template/motion 辅助支持时，active 可短时间延迟转 lost
-- MS-DC-ELT lifecycle 加速默认上限：`MSDC_MAX_ACTIVE_TRACKS = 64`，`MSDC_MAX_LOST_TRACKS = 32`，`MSDC_MAX_CANDIDATES = 32`，`MSDC_MAX_LOW_CANDIDATES = 24`，`MSDC_MAX_TOTAL_TRACKS = 128`，`MSDC_REMOVED_GUARD_FRAMES = 80`；超出上限时优先保留高 evidence、最近更新的轨迹，并更快清理 lost/removed 状态池
+- MS-DC-ELT lifecycle 加速默认上限：`MSDC_MAX_ACTIVE_TRACKS = 128`，`MSDC_MAX_LOST_TRACKS = 64`，`MSDC_MAX_CANDIDATES = 64`，`MSDC_MAX_LOW_CANDIDATES = 48`，`MSDC_MAX_TOTAL_TRACKS = 256`，`MSDC_REMOVED_GUARD_FRAMES = 80`；超出上限时优先保留高 evidence、最近更新的轨迹，并更快清理 lost/removed 状态池
 - MS-DC-ELT low-only 几何门控默认开启：`MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY = True`，`MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST = 240.0`，`MSDC_LOW_OBS_MOTION_GATE_IOU = 0.01`；已有 active/lost 时，超出预测框运动/几何门控的低阈值候选会直接丢弃，避免远处低分噪声扩大 candidate 池；首帧或无 active/lost 时仍允许 low-only 按 `topK/min_conf` 起候选
 - `tools/evaluation/msdc_speed_benchmark.py` 会在 `speed_results.csv` 和 `speed_timings.jsonl` 中输出 MS-DC 内部耗时：low-only filter、ROI、motion、observation build、template match/sync、evidence update、output 和 debug，用于定位 tracker/lifecycle 内部瓶颈
 - MS-DC-ELT ROI 重检：`MSDC_USE_ROI_REDETECT = False`，`MSDC_ROI_REDETECT_LOW_CONF = 0.12`，`MSDC_ROI_REDETECT_ACTIVE_ENABLE = False`，`MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 8`，`MSDC_ROI_REDETECT_LOST_INTERVAL = 3`，`MSDC_ROI_REDETECT_MAX_TRACKS = 2`，`MSDC_ROI_REDETECT_SEARCH_SCALE = 4.0`，`MSDC_ROI_REDETECT_UPSCALE = 2.0`，`MSDC_ROI_REDETECT_EXISTING_IOU = 0.5`，`MSDC_ROI_REDETECT_MIN_BOX_SIZE = 8`，`MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = 1`，`MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE = 30`，`MSDC_ROI_REDETECT_COOLDOWN_FRAMES = 3`；需要复现 ROI 消融时可通过环境变量重新开启
@@ -468,6 +468,198 @@ conda run -n ship_detect python tools/evaluation/export_mot_results.py --input "
 `--tracker-name` 只改变 MOT 输出目录名，实际 tracker 仍由 `--tracker` 决定；用于把同一个 `msdc_elt` 按 `Ours-full` 或消融名写入独立 TrackEval tracker 目录。MS-DC-ELT 的 lifecycle 诊断会写到 `<output-root>/<tracker-name>/diagnostics/<seq-name>/`，不写入 MOT txt 内。
 `msdc_elt` 导出分支直接使用 `detector.processor.process_frame(frame, ...)` 处理内存帧，避免每帧写临时 JPEG 后再读回；baseline tracker 导出仍保持原文件路径检测逻辑。
 
+#### 10.4.1 `tools/evaluation/export_dual_modal_mot_results.py`
+
+最小 RGB/IR 双模态支撑实验导出脚本，只支持 `--tracker botsort`，用于对比同一 BoT-SORT 下的 `rgb_only`、`rgb_ir_support`、`rgb_ir_proben`、`rgb_ir_proben_lost_reacquire` 与 `rgb_ir_presence_roi_redetect`。输出目录为 `<output-root>/<run-name>/data/<seq-name>.txt`，融合后的检测层输入会同步写到 `<output-root>/<run-name>/detections/<seq-name>.txt`。`<output-root>/<run-name>/stats.json` 记录 processed frames、RGB high/low 数量、IR 支撑数量、track support 保留数量、suppressed 数量、IR/mapped IR 数量、ProbEn-lite 匹配/拒绝/IR-only 诊断计数、IR lost-track reacquire 候选/确认/拒绝计数、IR presence 验证/ROI 重检计数、MOT txt 路径、det txt 路径、总耗时和 FPS。正式 run 还会写出 `<output-root>/<run-name>/stage_timings.json` 和 `<output-root>/<run-name>/diagnostics.csv`，其中阶段耗时固定包含视频读取/解码、检测、alignment mapping、fusion、低阈值检测或 ROI 重检、motion/template/lifecycle tracker、可视化渲染、结果写盘/导出；当前脚本内不做可视化，`visualization_rendering` 记为 `0`，可视化视频由 `render_mot_video.py` 单独写入本次 run 的 `visualizations/` 目录。
+
+`rgb_ir_support`、`rgb_ir_proben`、`rgb_ir_proben_lost_reacquire` 和 `rgb_ir_presence_roi_redetect` 必须提供已有 RGB/IR 标定或 alignment report，脚本只读取已有 IR->RGB 仿射矩阵，不做无标定估计；alignment report 可包含单个仿射矩阵，也可包含 `transforms.piecewise_affine.segments` 分段仿射，导出时会按当前帧号选择对应 segment。若 `alignment_config.yaml` 中的同步模式不是逐帧同步，或 calib/alignment_report 缺失有效仿射矩阵，脚本会直接报错退出。IR 检测只用于支撑或融合 RGB 框，不覆盖 RGB 类别。`rgb_ir_support` 和 `rgb_ir_proben` 不输出 IR-only 框，也不允许 IR-only 创建新轨迹。仅有 track support 的低置信 RGB 框会以 `allow_new_track=False` 送入本地 OC-SORT/BoT-SORT 通道，未匹配已有轨迹时不会创建新 ID。
+
+`rgb_ir_proben` 使用 `tools/evaluation/proben_fusion.py` 中的 ProbEn-lite late-fusion：先对 RGB 检测和映射后的 IR 检测做几何/尺度门控匹配，再用 binary ProbEn 分数融合。默认 `--proben-box-mode score_only` 只改 confidence、不移动 RGB 框；`--proben-box-mode savg` 会使用 score-weighted box fusion，并通过 `--proben-ir-box-weight` 控制 IR 框对融合框位置的影响。`--save-proben-diagnostics` 会写 `<output-root>/<run-name>/proben_diagnostics.jsonl`，逐条记录 RGB/IR 匹配、score gain、box shift、IR-only 未输出原因和拒绝原因。
+
+`rgb_ir_proben_lost_reacquire` 是第二阶段受控重捕模式：先沿用 ProbEn-lite `score_only`，再把 ProbEn 诊断中 `ir_only_not_emitted` 的映射 IR 框放入 `IRReacquireBuffer`。候选必须连续命中 `--ir-reacquire-confirm-frames` 帧，并且靠近当前 tracker 的 lost track；通过后才以 `support_type=ir_lost_reacquire`、`allow_new_track=False` 转换为 tracker detection。因此该模式只允许 IR-only 帮助已有 lost track 重激活，不允许 IR-only 直接创建新轨迹。`--ir-reacquire-diagnostics` 会写 `<output-root>/<run-name>/ir_reacquire_diagnostics.jsonl`，记录候选创建、确认、低置信拒绝、无 lost track 拒绝、门控拒绝、未达到连续帧确认和每帧上限拒绝。
+
+`rgb_ir_presence_roi_redetect` 不运行 IR detector，也不把 IR 框送入 tracker。该模式把 RGB 检测框按标定反向映射到 IR，使用 ROI 高亮热响应验证 RGB 目标存在性；高置信 RGB 框可被 IR presence 轻量提升 confidence，低置信 RGB 框只有通过热响应验证才进入 tracker。对当前未被 RGB detection 匹配的已有 track，脚本会在该 track 的 IR 映射 ROI 中检查热响应，若存在稳定热响应，则把 IR hot component 反向映射回 RGB 并执行一次局部低阈值 RGB 重检；只有几何上靠近原 track 的 RGB low detection 会以 `support_type=ir_presence_roi_redetect`、`allow_new_track=False` 送入 tracker。`--ir-presence-diagnostics` 会写 `<output-root>/<run-name>/ir_presence_diagnostics.jsonl`，记录 RGB presence 验证、track skip/reject、ROI 重检触发和拒绝原因。
+
+BoT-SORT RGB-only：
+
+```bash
+conda run -n ship_detect python tools/evaluation/export_dual_modal_mot_results.py \
+  --visible-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_W/<visible_video> \
+  --tracker botsort \
+  --fusion rgb_only \
+  --run-name botsort_rgb \
+  --seq-name <seq> \
+  --output-root results/rgb_ir_support_ablation \
+  --rgb-high-conf 0.50 \
+  --rgb-low-conf 0.30 \
+  --max-frames 0 \
+  --progress-interval 100
+```
+
+BoT-SORT RGB + IR support：
+
+```bash
+conda run -n ship_detect python tools/evaluation/export_dual_modal_mot_results.py \
+  --visible-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_W/<visible_video> \
+  --infrared-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_T/<infrared_video> \
+  --tracker botsort \
+  --fusion rgb_ir_support \
+  --run-name botsort_rgb_ir_support \
+  --seq-name <seq> \
+  --output-root results/rgb_ir_support_ablation \
+  --calib /home/hyj/Anti_Drone_Project/IR_RGB_match/outputs/minimal_alignment/alignment_report.json \
+  --config /home/hyj/Anti_Drone_Project/IR_RGB_match/config/alignment_config.yaml \
+  --rgb-high-conf 0.50 \
+  --rgb-low-conf 0.30 \
+  --ir-conf 0.45 \
+  --alpha 0.7 \
+  --max-frames 0 \
+  --progress-interval 100
+```
+
+BoT-SORT RGB + IR ProbEn-lite：
+
+```bash
+conda run -n ship_detect python tools/evaluation/export_dual_modal_mot_results.py \
+  --visible-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_W/<visible_video> \
+  --infrared-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_T/<infrared_video> \
+  --tracker botsort \
+  --fusion rgb_ir_proben \
+  --run-name botsort_rgb_ir_proben_score_only \
+  --seq-name <seq> \
+  --output-root results/rgb_ir_support_ablation \
+  --calib /home/hyj/Anti_Drone_Project/IR_RGB_match/outputs/minimal_alignment/alignment_report.json \
+  --config /home/hyj/Anti_Drone_Project/IR_RGB_match/config/alignment_config.yaml \
+  --rgb-high-conf 0.50 \
+  --rgb-low-conf 0.30 \
+  --ir-conf 0.45 \
+  --proben-match-iou 0.15 \
+  --proben-match-dist-factor 1.5 \
+  --proben-keep-conf 0.50 \
+  --proben-ir-box-weight 0.5 \
+  --proben-scale-ratio-min 0.4 \
+  --proben-scale-ratio-max 2.5 \
+  --proben-box-mode score_only \
+  --save-proben-diagnostics \
+  --max-frames 0 \
+  --progress-interval 100
+```
+
+BoT-SORT RGB + IR ProbEn-lite + lost-track reacquire：
+
+```bash
+conda run -n ship_detect python tools/evaluation/export_dual_modal_mot_results.py \
+  --visible-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_W/<visible_video> \
+  --infrared-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_T/<infrared_video> \
+  --tracker botsort \
+  --fusion rgb_ir_proben_lost_reacquire \
+  --run-name botsort_rgb_ir_proben_lost_reacquire_n3 \
+  --seq-name <seq> \
+  --output-root results/rgb_ir_support_ablation \
+  --calib /home/hyj/Anti_Drone_Project/IR_RGB_match/outputs/minimal_alignment/alignment_report.json \
+  --config /home/hyj/Anti_Drone_Project/IR_RGB_match/config/alignment_config.yaml \
+  --rgb-high-conf 0.50 \
+  --rgb-low-conf 0.30 \
+  --ir-conf 0.45 \
+  --proben-match-iou 0.15 \
+  --proben-match-dist-factor 1.5 \
+  --proben-keep-conf 0.50 \
+  --proben-box-mode score_only \
+  --save-proben-diagnostics \
+  --ir-reacquire-enable \
+  --ir-reacquire-confirm-frames 3 \
+  --ir-reacquire-max-age 30 \
+  --ir-reacquire-iou 0.05 \
+  --ir-reacquire-dist-factor 2.5 \
+  --ir-reacquire-max-per-frame 2 \
+  --ir-reacquire-min-conf 0.45 \
+  --ir-reacquire-diagnostics \
+  --max-frames 0 \
+  --progress-interval 100
+```
+
+BoT-SORT RGB + IR presence ROI redetect：
+
+```bash
+conda run -n ship_detect python tools/evaluation/export_dual_modal_mot_results.py \
+  --visible-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_W/<visible_video> \
+  --infrared-input /home/hyj/Anti_Drone_Project/MOT_DJI_20250711140455_0002_T/<infrared_video> \
+  --tracker botsort \
+  --fusion rgb_ir_presence_roi_redetect \
+  --run-name botsort_rgb_ir_presence_roi_redetect \
+  --seq-name <seq> \
+  --output-root results/rgb_ir_support_ablation \
+  --calib /home/hyj/Anti_Drone_Project/IR_RGB_match/outputs/minimal_alignment/alignment_report.json \
+  --config /home/hyj/Anti_Drone_Project/IR_RGB_match/config/alignment_config.yaml \
+  --rgb-high-conf 0.50 \
+  --rgb-low-conf 0.30 \
+  --ir-presence-enable \
+  --ir-presence-z-thresh 2.0 \
+  --ir-presence-min-hot-area-ratio 0.01 \
+  --ir-presence-conf-boost 0.10 \
+  --ir-presence-max-track-age 8 \
+  --ir-presence-roi-pad 1.8 \
+  --ir-presence-rgb-roi-low-conf 0.20 \
+  --ir-presence-diagnostics \
+  --max-frames 0 \
+  --progress-interval 100
+```
+
+导出两组 MOT txt 后再执行 TrackEval，必须显式指定 `--sequences <seq>`，避免 GT root 下存在多个序列时要求每个 tracker 都有对应结果：
+
+```bash
+conda run -n ship_detect python tools/evaluation/motchallenge_eval.py \
+  --gt-root <gt_root> \
+  --trackers-root results/rgb_ir_support_ablation \
+  --output-root results/rgb_ir_support_eval \
+  --trackers botsort_rgb botsort_rgb_ir_support botsort_rgb_ir_proben_score_only \
+  --sequences <seq>
+```
+
+检测层 det.txt 可用 `tools/evaluation/evaluate_detection_results.py` 做独立评估，脚本按帧对 MOT-style detection row 和 GT 做 IoU 贪心匹配，输出 Precision、Recall、FP、FN、FP/frame、small-object recall 和 mean confidence：
+
+```bash
+conda run -n ship_detect python tools/evaluation/evaluate_detection_results.py \
+  --gt-file <gt_root>/<seq>/gt/gt.txt \
+  --det-file botsort_rgb_ir_proben_score_only=results/rgb_ir_support_ablation/<run>/trackers/botsort_rgb_ir_proben_score_only/detections/<seq>.txt \
+  --det-file botsort_rgb_ir_proben_savg=results/rgb_ir_support_ablation/<run>/trackers/botsort_rgb_ir_proben_savg/detections/<seq>.txt \
+  --output-csv results/rgb_ir_support_ablation/<run>/detection_eval_summary.csv
+```
+
+2026-06-17 第二阶段正式 run：`results/rgb_ir_support_ablation/reacquire_formal_20260617_115555`。对同一序列 `DJI_20250711140455_0002_W`，`botsort_rgb_ir_proben_lost_reacquire_n3` 相比 `botsort_rgb_ir_proben_score_only` 的 TrackEval 结果为 HOTA `63.40001` vs `63.28296`、MOTA `76.16933` vs `76.11012`、IDF1 `87.96532` vs `87.91735`、IDSW 均为 `0`、FN `436` vs `442`、FP `369` vs `365`。检测层结果为 Recall `0.870634` vs `0.869153`、FN `437` vs `442`、FP `382` vs `377`。当前建议把 `--ir-reacquire-confirm-frames 3` 作为第二阶段默认候选，继续扩大到多序列验证。
+
+2026-06-18 IR presence ROI redetect 正式 run：`results/rgb_ir_support_ablation/presence_formal_20260618_153304`。对同一序列 `DJI_20250711140455_0002_W`，`botsort_rgb_ir_presence_roi_redetect` 的 TrackEval 结果为 HOTA `63.23080`、MOTA `75.72528`、IDF1 `87.73923`、IDSW `4`、FN `442`、FP `374`；检测层结果为 Recall `0.869153`、FN `442`、FP `385`。本轮参数下 ROI 重检实际 emitted `0`，低分 RGB + IR presence 验证进入 tracker `59` 个，但没有增加检测 TP，反而引入 IDSW；因此该配置不优于 `botsort_rgb_ir_proben_lost_reacquire_n3`，不建议作为当前默认。
+
+2026-06-20 UAV/USV 分段仿射正式 run：`results/rgb_ir_support_ablation/uav_usv_20250916100639_0001_till1700_piecewise_20260620_152316`。数据使用 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集/DJI_20250916100639_0001_V.MP4` 前 `1700` 帧及其可见光 GT，IR 使用 `/home/hyj/Anti_Drone_Project/MOT_UAV_USV_DJI_20250916100639_0001_T_till1700/DJI_20250916100639_0001_T.MP4`，对齐文件来自 `/home/hyj/Anti_Drone_Project/IR_RGB_match/outputs/uav_usv_20250916100639_0001_till1700_ids123_piecewise_alignment/alignment_report.json` 和 `ir_to_rgb_mapped_mot_piecewise_affine.txt`，分段为 `early_0001_1200` 与 `late_1201_1700`。正式输出包含 `gt/`、`trackers/`、`trackeval/motchallenge_summary.csv`、`detection_eval_summary.csv` 和 `visualizations/`。
+
+TrackEval 汇总：
+
+| tracker | HOTA | DetA | AssA | MOTA | IDF1 | IDSW | FP | FN | IDTP | IDFP | IDFN |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `botsort_rgb_ir_proben_score_only` | 84.14673 | 77.15879 | 91.76823 | 77.11111 | 86.19866 | 4 | 9 | 1120 | 3788 | 51 | 1162 |
+| `botsort_rgb_ir_proben_lost_reacquire_n3` | 84.12296 | 77.39333 | 91.44229 | 77.69697 | 86.53672 | 4 | 12 | 1088 | 3818 | 56 | 1132 |
+| `botsort_rgb_ir_presence_roi_redetect` | 85.75419 | 81.65128 | 90.13034 | 83.59596 | 88.46857 | 1 | 108 | 703 | 4116 | 239 | 834 |
+
+检测层汇总：
+
+| tracker | detections | TP | FP | FN | precision | recall | F1 | FP/frame | small recall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `score_only` | 3855 | 3841 | 14 | 1109 | 0.996368 | 0.775960 | 0.872459 | 0.008235 | 0.643939 |
+| `lost_reacquire_n3` | 3890 | 3873 | 17 | 1077 | 0.995630 | 0.782424 | 0.876244 | 0.010000 | 0.643939 |
+| `presence_roi_redetect` | 4366 | 4252 | 114 | 698 | 0.973889 | 0.858990 | 0.912838 | 0.067059 | 0.958333 |
+
+速度与阶段耗时：
+
+| tracker | frames | total sec | FPS | read/decode | detection | alignment | fusion | low/ROI redetect | tracker | visualization | write/export |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `botsort_rgb_ir_proben_score_only` | 1700 | 635.853617 | 2.673571 | 129.148351 | 362.263799 | 0.360362 | 1.470476 | 0.000000 | 142.394560 | 0.000000 | 0.183371 |
+| `botsort_rgb_ir_proben_lost_reacquire_n3` | 1700 | 642.195859 | 2.647167 | 125.621446 | 371.203914 | 0.325721 | 1.495641 | 0.000000 | 143.376058 | 0.000000 | 0.172754 |
+| `botsort_rgb_ir_presence_roi_redetect` | 1700 | 495.234950 | 3.432714 | 119.432354 | 181.757330 | 0.000000 | 62.357286 | 61.506582 | 131.504400 | 0.000000 | 0.179514 |
+
+诊断计数：ProbEn score-only 与 lost-reacquire 均有 RGB/IR 匹配 `2177`、IR-only 未输出 `269`、低分 RGB 由 IR 提升 `60`。lost-reacquire 额外创建 IR 候选 `59`、连续确认 `35`、送入 tracker `35`。presence ROI redetect 检查 track `4891` 次、RGB presence verified `3650` 次、低分 RGB presence promoted `570` 个、ROI redetect emitted `1` 个。三路可视化 MP4 均写入 `visualizations/`，尺寸 `1920x1080`，帧数 `1700`。本序列上 `rgb_ir_presence_roi_redetect` 的 FN 和 IDSW 最低、HOTA/MOTA/IDF1 最高，但 FP 明显增加；`lost_reacquire_n3` 相比 score-only 只小幅降低 FN，整体收益有限。
+
+同日补跑 RGB-only baseline：`results/rgb_ir_support_ablation/uav_usv_20250916100639_0001_till1700_rgb_only_20260620_164647`。`botsort_rgb` TrackEval 为 HOTA `83.95283`、DetA `76.42673`、AssA `92.22008`、MOTA `76.38384`、IDF1 `85.37088`、IDSW `5`、FP `0`、FN `1164`、IDTP `3729`、IDFP `57`、IDFN `1221`；检测层为 Precision `1.000000`、Recall `0.766667`、F1 `0.867925`、FP `0`、FN `1155`、small recall `0.643939`。速度统计为 `1700` 帧、总耗时 `314.040068s`、FPS `5.413322`，阶段耗时为读取/解码 `60.422148s`、检测 `165.582357s`、alignment `0.000000s`、fusion `0.021146s`、low/ROI `0.000000s`、tracker `87.916007s`、visualization `0.000000s`、write/export `0.135090s`；可视化 MP4 为 `visualizations/botsort_rgb.mp4`，`1920x1080`、`1700` 帧。相对该 RGB-only baseline，`rgb_ir_presence_roi_redetect` 将 TrackEval FN 从 `1164` 降至 `703`、IDSW 从 `5` 降至 `1`，MOTA 提升 `+7.21212`、IDF1 提升 `+3.09769`，但 FP 从 `0` 增至 `108`；`rgb_ir_proben_lost_reacquire_n3` 将 FN 降至 `1088`、IDSW 降至 `4`，收益较小；`rgb_ir_proben_score_only` 将 FN 降至 `1120`、IDSW 降至 `4`，收益也有限。当前建议把 `rgb_ir_presence_roi_redetect` 作为主线继续控 FP，把 `rgb_ir_proben_lost_reacquire_n3` 保留为稳健低风险 baseline。
+
 ### 10.5 `tools/evaluation/motchallenge_eval.py`
 
 调用 vendored TrackEval 计算正式 MOTChallenge 风格指标：HOTA、DetA、AssA、MOTA、IDF1。若当前 TrackEval 结果未暴露 DetA / AssA，summary 中对应值写为 `N/A`。脚本会自动把仓库根目录加入 `sys.path`，可从仓库根直接执行。输入必须包含真实跨帧身份标注，GT 目录结构为 `<gt-root>/<seq>/seqinfo.ini` 和 `<gt-root>/<seq>/gt/gt.txt`。
@@ -508,21 +700,23 @@ conda run -n ship_detect python tools/evaluation/render_tracking_video.py --inpu
 conda run -n ship_detect python tools/evaluation/render_msdc_diagnostics_video.py --input "D:\path\to\video.mp4" --diagnostics-jsonl "results\...\trackers\Ours-full\diagnostics\seq\msdc_tracks.jsonl" --output "results\...\visualizations\seq_from_diagnostics.mp4"
 ```
 
-### 10.9 `tools/dataset/extract_tracking_frames.py`
+### 10.9 Dataset tools migration
 
-批量抽帧脚本，递归扫描 `_V`/`_T` 视频，复用 ONNX 检测与可配置跟踪器（默认 `botsort`），按位移、目标自身姿态角、面积变化和图像相似度导出训练帧、空标签文件与清单 CSV。
+批量抽帧、数据集质检、YOLO 标签可视化和代表帧过滤工具已迁移到独立项目：
 
-示例：
-```powershell
-conda run -n ship_detect python tools/dataset/extract_tracking_frames.py
-conda run -n ship_detect python tools/dataset/extract_tracking_frames.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --output-root "D:\Desktop\烟台项目数据\原始数据集\external_frames" --resume
+```text
+/home/hyj/Anti_Drone_Project/Marine-Frame-Extraction
 ```
 
-### 10.10 `tools/validation/test_image_tracking_api.py`
+本仓库不再维护 `tools/dataset/*.py` 可执行入口，避免离线数据集构建逻辑和检测跟踪主链路混在一起。新项目入口示例：
 
-验证 `detect_targets(..., enable_tracking=True)` 的跨帧跟踪行为、延迟和回归项。
+```powershell
+cd /home/hyj/Anti_Drone_Project/Marine-Frame-Extraction
+conda run -n ship_detect python -m frame_extraction.dataset.extract_tracking_frames --help
+conda run -n ship_detect python -m frame_extraction.dataset.video_dataset_classify --help
+```
 
-### 10.11 `tools/validation/tracker_effect_test.py`
+### 10.10 `tools/validation/tracker_effect_test.py`
 
 对同一组 RGB / IR 视频执行一次检测，并将同一帧检测结果同时喂给多个跟踪器，输出带 `track_id` 的标注视频和逐帧框数据，用于人工对比跟踪效果。
 
@@ -557,7 +751,7 @@ conda run -n ship_detect python tools/validation/tracker_effect_test.py --modali
 
 `--resume` 会读取每个 tracker 目录下已有 `frames.jsonl` 的行数，并只从下一帧开始追加 `frames.jsonl` / `tracks.csv`。由于 MP4 容器不能可靠原地追加，续跑时不会覆盖已有 `annotated.mp4`，而是写入新的 `annotated_part_<起始帧>.mp4`；脚本仍会从视频开头重放已处理帧来恢复各 tracker 的内部状态，但不会重复写出这些帧的数据。
 
-### 10.12 `tools/validation/video_detect_only.py`
+### 10.11 `tools/validation/video_detect_only.py`
 
 对本地视频逐帧执行当前 ONNX 检测模型，只绘制检测框与类别置信度，不初始化跟踪器、不输出 `track_id`。适合快速检查检测模型在外部视频上的召回和误检情况。
 
@@ -578,7 +772,7 @@ conda run -n ship_detect python tools/validation/video_detect_only.py --file-typ
 - `<视频名>_analysis.md`：单视频检测覆盖率、类别、置信度和框面积统计
 - `detection_analysis.md`：批量汇总报告
 
-### 10.13 `tools/validation/msdc_low_conf_debug.py`
+### 10.12 `tools/validation/msdc_low_conf_debug.py`
 
 MS-DC-ELT Task 1 低阈值检测调试脚本。该脚本不初始化跟踪器、不修改 `video_main.py` 主链路；它对每帧/每张图执行一次默认高阈值检测和一次低阈值检测，计算 `high_boxes`、`low_boxes`、`low_only_boxes` 数量，并把低阈值框与高阈值框的 IoU 重叠过滤统计写入独立输出目录。
 
@@ -599,7 +793,7 @@ conda run -n ship_detect python tools/validation/msdc_low_conf_debug.py --image-
 - `low_det_stats.jsonl`：每行包含 `frame_idx` / `frame_index`、`file_type`、`num_high`、`num_low`、`num_low_only`、`low_conf_thresh`、`low_high_overlap_count`、`low_high_overlap_ratio`
 - `summary.json`：汇总处理帧数、总检测框数、low-only 总数、平均每帧统计和处理速度
 
-### 10.14 `tools/validation/msdc_motion_seed_debug.py`
+### 10.13 `tools/validation/msdc_motion_seed_debug.py`
 
 MS-DC-ELT Task 2 运动种子调试脚本。该脚本只运行 `MotionSeedGenerator`，从相邻帧中提取 class-agnostic motion boxes，并写出逐帧统计；不会初始化 lifecycle tracker，也不会把 motion boxes 送入 OC-SORT / BoT-SORT。
 
@@ -617,7 +811,7 @@ conda run -n ship_detect python tools/validation/msdc_motion_seed_debug.py --inp
 
 当前第一版使用现有 `GMC` 对上一帧做全局仿射补偿；如果 GMC 估计失败会退化为单位变换，海浪、云影、热噪声和大面积背景变化仍可能产生误候选，需要通过后续生命周期证据逻辑做多帧抑制。
 
-### 10.15 `target_module/image_detect_module/utils/msdc_types.py`
+### 10.14 `target_module/image_detect_module/utils/msdc_types.py`
 
 MS-DC-ELT Task 3 核心数据结构模块。当前只定义可序列化类型和转换函数，不接入 `video_main.py`，不修改 OC-SORT / BoT-SORT，也不实现 evidence 更新或 lifecycle tracker。
 
@@ -779,7 +973,7 @@ conda run -n ship_detect python video_main.py --input "D:\path\to\short.mp4" --t
 
 MS-DC-ELT Task 7 active-only 模板锁定模块。第一版使用 OpenCV `matchTemplate` 在 active track 预测框附近做局部搜索，不引入 Siamese / ReID 等大型依赖。
 
-formal v2 默认不启用 TemplateLock。该模块保留用于消融和后续重写，启用时需同时打开 `MSDC_USE_TEMPLATE` 和 `MSDC_TEMPLATE_ENABLE`。
+当前正式默认变体不启用 TemplateLock。该模块保留用于消融和后续重写，启用时需同时打开 `MSDC_USE_TEMPLATE` 和 `MSDC_TEMPLATE_ENABLE`。
 
 规则：
 
@@ -919,7 +1113,7 @@ MS-DC-ELT 诊断文件：
 - `MSDC_REACQUIRE_CENTER_DIST`
 - `MSDC_REACQUIRE_MAX_CENTER_DIST`
 
-### MS-DC-ELT v2 experiment variants
+### MS-DC-ELT v2/v3 experiment variants
 
 - `v2_template_off`: TemplateLock off, dual high/low detection retained for template-only isolation.
 - `v2_shared_det`: TemplateLock off, shared low-threshold inference split into high/low boxes.
@@ -930,6 +1124,7 @@ MS-DC-ELT 诊断文件：
 - `v2_candidate_topk`: `MSDC_LOW_OBS_TOPK=32`、`MSDC_LOW_OBS_MIN_CONF=0.25`，限制进入 lifecycle 关联的低阈值候选池。
 - `v2_candidate_topk_roi_max1`: 同时启用 `v2_candidate_topk` 和 `v2_roi_max1`，测试组合速度上限。
 - `v2_candidate_topk_no_roi`: 同时启用 `v2_candidate_topk` 并关闭 ROI 重检，用于验证最终候选默认配置。
+- `v3_candidate_topk_no_roi_no_motion`: MS-DC-ELT v3 正式默认主实验变体；共享 high/low 检测、关闭 ROI 重检、关闭 template、`MSDC_USE_MOTION=0`、`MSDC_DEBUG_EVENTS=0`，并启用 confidence TopK + per-track nearest + gate 候选池。
 - `v2_speed_diag_off`: 关闭 MS-DC-ELT debug JSONL，用于纯算法速度对照。
 - 历史分支 `v2_output_age5_size8` / `v2_output_age8_size8`、`v2_candidate_low3_window6`、`v2_candidate_real2_age8`、`v2_reacquire_interval1` 保留为复现实验入口，但当前不推荐进入 formal 主矩阵。
 
@@ -1018,36 +1213,19 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 # 正式完整实验必须显式加 --run-formal
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id "<run-id>"
 
-# formal v2 速度/ROI 诊断矩阵；--duration-seconds 120 表示每个视频只评测前 2 分钟
-conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v2_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_low_clean v2_no_roi_redetect v2_roi_interval10 v2_roi_interval15 v2_roi_max1 v2_candidate_topk v2_candidate_topk_roi_max1 v2_candidate_topk_no_roi v2_speed_diag_off
+# formal v3 速度/ROI 诊断矩阵；--duration-seconds 120 表示每个视频只评测前 2 分钟
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal --run-id msdc_v3_<timestamp> --duration-seconds 120 --render-class-source none --ablation-variants v2_low_clean v2_no_roi_redetect v2_roi_interval10 v2_roi_interval15 v2_roi_max1 v2_candidate_topk v2_candidate_topk_roi_max1 v2_candidate_topk_no_roi v3_candidate_topk_no_roi_no_motion v2_speed_diag_off
 
 # 查看或校验最近一次正式实验输出路径
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --print-latest
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --check-latest
 ```
 
-该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`；相对 `--output-root` 会按仓库根目录解析，避免从不同 cwd 启动时写到不同位置。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；formal v2 的 main comparison 会用 `ocsort`、`botsort` 和 `msdc_elt` 的 `v2_low_clean` 变体，确保主结果默认 TemplateLock off 且共享 low/high 推理。正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果的绝对路径。`--ablation-variants` 可指定本次 ablation 只运行选定变体；`--duration-seconds` 可将 main/ablation 的每个视频限制到前 N 秒，默认 0 表示完整视频；`--render-class-source none` 会跳过渲染阶段的二次检测并把可视化类别写为 `target`，适合 CPU fallback 环境；未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
+该 runner 使用默认数据集 `/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集` 与 `/home/hyj/Anti_Drone_Project/USV_MOT标注数据集`，默认输出根目录为 `results/msdc_paper_phase1`；相对 `--output-root` 会按仓库根目录解析，避免从不同 cwd 启动时写到不同位置。正式 run 的目录约定为 `<output-root>/<run-id>/main/main_full`、`ablation/ablation_full`、`speed/speed_<frames>` 和 `summary/`；formal v3 的 main comparison 会用 `ocsort`、`botsort` 和 `msdc_elt` 的 `v3_candidate_topk_no_roi_no_motion` 变体，确保主结果默认 TemplateLock off、共享 low/high 推理、关闭 ROI 重检且 `MSDC_USE_MOTION=0`。正式命令完成后会调用 `msdc_experiment_summary.py`，并写入 `<output-root>/latest_run.json`，记录 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、最终报告和 docs 结果的绝对路径。`--ablation-variants` 可指定本次 ablation 只运行选定变体；`--duration-seconds` 可将 main/ablation 的每个视频限制到前 N 秒，默认 0 表示完整视频；`--render-class-source none` 会跳过渲染阶段的二次检测并把可视化类别写为 `target`，适合 CPU fallback 环境；未传 `--run-formal` 且未传 `--smoke` 时只打印计划命令，不执行检测、跟踪、渲染或汇总。
 
 结果表模板：
 
 - `docs/MSDC_EXPERIMENT_RESULT_TEMPLATE.md`
-
-### 10.22 `tools/experiments/run_compare_ir_models.py`
-
-用于比较两版红外模型：
-
-- `A_S_F_ir_FFCA.onnx`
-- `A_S_F_ir_FFCA_v2.onnx`
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/experiments/run_compare_ir_models.py
-```
-
-输出示例：
-
-- `results/ir_cmp_<视频标签>_<模型标记>.mp4`
 
 ---
 
@@ -1067,11 +1245,7 @@ pytest -q
 
 仓库中还包含以下测试或验证入口：
 
-- `test/test_extract_tracking_frames.py`
-- `test/test_video_dataset_classify.py`
-- `tools/validation/test_image_tracking_api.py`
 - `output_rtsp_video/test_output_rtsp_video.py`
-- `tools/experiments/run_all_tests.py`
 
 说明：
 
@@ -1088,7 +1262,7 @@ pytest -q
 - `video_main.py`：视频检测与跟踪入口
 - `visualization.py`：可视化绘制
 - `tools/README.md`：离线工具目录说明
-- `tools/dataset/`：数据集整理、抽帧、批量分析和 YOLO 标签可视化工具
+- `tools/dataset/`：抽帧和数据集工具迁移说明，实际入口位于 `/home/hyj/Anti_Drone_Project/Marine-Frame-Extraction`
 - `tools/validation/`：人工验证、调试和本地效果检查脚本
 - `tools/experiments/`：跟踪器、模型和帧率实验编排脚本
 - `target_module/`：检测核心模块与模型
@@ -1099,103 +1273,9 @@ pytest -q
 
 ---
 
-## 12.5 Dataset Batch Classification
+## 12.5 Dataset tools migration
 
-新增 `tools/dataset/video_dataset_classify.py` 作为目录级离线批处理入口，用于对 `_V` / `_T` 视频做全量解码、时间窗场景分类、目标统计、双模态校准和报表导出。
-
-### Command
-
-```powershell
-conda run -n ship_detect python tools/dataset/video_dataset_classify.py
-conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频"
-conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume
-conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume --workers 2
-```
-
-### Key Config
-
-配置位于 `target_module/image_detect_module/config.py`，新增：
-
-- `DATASET_INPUT_ROOT`
-- `DATASET_OUTPUT_ROOT`
-- `DATASET_MAX_WORKERS`
-- `DATASET_WINDOW_SECONDS`
-- `DATASET_MIN_FRAMES_PER_WINDOW`
-- `DATASET_LOW_FPS_WINDOW_MAX_SECONDS`
-- `DATASET_SCENE_SKY_THRESHOLD`
-- `DATASET_SCENE_SHORELINE_LOW_THRESHOLD`
-- `DATASET_SCENE_SHORELINE_HIGH_THRESHOLD`
-- `DATASET_T_SCENE_DOMINANT_RATIO_MIN`
-- `DATASET_T_SCENE_MIN_INTENSITY_VARIANCE`
-- `DATASET_T_SCENE_MIN_HORIZON_CONFIDENCE`
-- `DATASET_T_SCALE_DEFAULT`
-- `DATASET_T_CALIB_MIN_OVERLAP_COUNT`
-- `DATASET_ALIGNMENT_MIN_OVERLAP_RATIO`
-- `DATASET_USABLE_WINDOW_RATIO_THRESHOLD`
-- `DATASET_MAX_CONSECUTIVE_UNUSABLE_WINDOWS`
-
-### Scene Rules
-
-- 场景类别固定为 `pure_sea`、`pure_sky`、`nearshore_sea`、`sea_sky`、`nearshore_sea_sky`、`shoreline_mixed`
-- 场景优先级固定为 `shoreline_mixed > nearshore_sea_sky > nearshore_sea > sea_sky > pure_sea > pure_sky`
-- `_V` 使用颜色、亮度、边缘、地平线等可见光启发式特征
-- `_T` 使用亮度分层、局部对比、边界复杂度、水平分界稳定性和纹理粗糙度等红外适配特征，不使用颜色/饱和度作为主特征
-- `_T` 低置信度显式触发条件：
-  - `max(sea_ratio, sky_ratio, shoreline_land_ratio) < DATASET_T_SCENE_DOMINANT_RATIO_MIN`
-  - `frame_intensity_variance < DATASET_T_SCENE_MIN_INTENSITY_VARIANCE`
-  - `horizon_confidence < DATASET_T_SCENE_MIN_HORIZON_CONFIDENCE` 且 `shoreline_land_ratio` 落在近岸区间
-- 若 `paired` 单元中 `_T` 低置信度且存在满足重叠条件的 `_V` 同窗结果，则 `primary_scene` 使用 `_V` 结果并将 `scene_source` 标记为 `paired_visible_proxy`
-
-### Usable Rules
-
-- 时间窗级 `usable=false` 条件：
-  - `frame_count < 4`
-  - `scene_classification_failed=true`
-  - `detector_not_run=true`
-  - `decode_error=true`
-- 视频级只有同时满足以下条件才为 `usable=true`
-  - `usable_window_ratio >= DATASET_USABLE_WINDOW_RATIO_THRESHOLD`
-  - `max_consecutive_unusable_windows <= DATASET_MAX_CONSECUTIVE_UNUSABLE_WINDOWS`
-
-### Outputs
-
-默认输出到 `results/video_dataset_analysis/<run_id>/`，包含：
-
-- `precheck_by_date.csv`
-- `window_results.csv`
-- `video_results.csv`
-- `report_all_units.csv`
-- `report_paired_only.csv`
-- `gap_report.csv`
-- `run_summary.json`
-
-`window_results.csv` 固定列：
-
-- `unit_id`
-- `date_batch`
-- `modality`
-- `pair_status`
-- `window_start`
-- `window_end`
-- `frame_count`
-- `low_fps_window`
-- `duration_from_metadata`
-- `decode_error`
-- `primary_scene`
-- `sea_ratio`
-- `sky_ratio`
-- `shoreline_land_ratio`
-- `scene_classification_failed`
-- `scene_classification_low_confidence`
-- `scene_source`
-- `target_presence`
-- `target_count`
-- `track_count`
-- `bbox_area_ratio_stats`
-- `scale_bin_counts`
-- `small_target_count`
-- `detector_not_run`
-- `usable`
+离线抽帧和数据集分析已迁移到 `/home/hyj/Anti_Drone_Project/Marine-Frame-Extraction`。本仓库不再保留 `tools/dataset/*.py` 入口；新项目维护自己的配置、检测封装、轻量 tracker、测试和模型副本。
 
 ## 13. Changelog
 
@@ -1204,6 +1284,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 - `perf`: MS-DC-ELT ROI 重检默认改为 lost 优先，active ROI 默认关闭，并新增 lost age 上限、失败 cooldown、ROI 调用耗时和 skipped reason debug，降低 ROI 重检对 tracker update 的持续占用
 - `feat`: MS-DC-ELT lifecycle 新增 `MSDC_LOW_OBS_TOPK` / `MSDC_LOW_OBS_MIN_CONF`，可在低阈值候选进入关联前做候选池预算消融；TemplateLock 关闭时不再调用模板匹配和模板 debug 同步
 - `docs`: formal v2 消融矩阵更新为 `v2_no_roi_redetect`、`v2_roi_interval10/15`、`v2_roi_max1`、`v2_candidate_topk`、`v2_candidate_topk_roi_max1`、`v2_candidate_topk_no_roi` 和 `v2_speed_diag_off`，不再推荐输出门控、激进 candidate 和 interval1 进入主矩阵
+- `perf`: MS-DC-ELT v3 正式主实验默认切换为 `v3_candidate_topk_no_roi_no_motion`，主 runner 和 speed benchmark 均明确关闭 motion seed / ROI / debug，并保留 shared high-low 检测与 track-aware candidate pool
 
 ### 2026-06-11
 
@@ -1293,7 +1374,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 ### 2026-03-30
 
 - `feat`: 增加 `tracker.py`、`kalman_bbox.py`、`gmc.py`，形成多算法跟踪基础能力
-- `feat`: 增加 `tools/validation/video_test_tracking.py`、`tools/experiments/run_all_tests.py`
+- `feat`: 增加 `tools/validation/video_test_tracking.py`
 - `refactor`: 调整配置与可视化逻辑，强化低帧率场景下的跟踪验证能力
 
 ### 2026-03-27

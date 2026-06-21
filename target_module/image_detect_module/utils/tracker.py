@@ -141,19 +141,28 @@ class OCSortTracker:
         self.frame_count = 0
 
     def update(self, dets: np.ndarray, confs: np.ndarray,
-               cls_ids: np.ndarray) -> list[tuple]:
+               cls_ids: np.ndarray,
+               allow_new_track: np.ndarray | None = None) -> list[tuple]:
         """
         Parameters
         ----------
         dets     : (N, 4) [x1, y1, x2, y2]
         confs    : (N,) confidence
         cls_ids  : (N,) class_id
+        allow_new_track : (N,) bool, optional
+            Whether each detection is allowed to initialize a new track.
 
         Returns
         -------
         list of (x1, y1, x2, y2, track_id, cls_id, conf)
         """
         self.frame_count += 1
+        if allow_new_track is None:
+            allow_new_track = np.ones(len(dets), dtype=bool)
+        else:
+            allow_new_track = np.asarray(allow_new_track, dtype=bool)
+            if len(allow_new_track) != len(dets):
+                raise ValueError("allow_new_track length must match dets length")
 
         # ── 1. 预测所有现有轨迹的下一帧位置 ──────────────────────────────
         predicted_bboxes = np.zeros((len(self.trackers), 4))
@@ -177,9 +186,10 @@ class OCSortTracker:
             return []
 
         if len(self.trackers) == 0:
-            # 无现有轨迹，全部初始化
-            results = []
+            # 无现有轨迹，仅允许 allow_new_track=True 的检测初始化
             for i in range(len(dets)):
+                if not bool(allow_new_track[i]):
+                    continue
                 trk = KalmanBoxTracker(dets[i], int(cls_ids[i]), float(confs[i]))
                 self.trackers.append(trk)
             # 仅返回 min_hits 满足的
@@ -231,6 +241,8 @@ class OCSortTracker:
 
         # ── 5. 为未匹配的检测创建新轨迹 ──────────────────────────────────
         for d_idx in unmatched_dets:
+            if not bool(allow_new_track[int(d_idx)]):
+                continue
             trk = KalmanBoxTracker(dets[d_idx], int(cls_ids[d_idx]), float(confs[d_idx]))
             self.trackers.append(trk)
 
@@ -545,9 +557,10 @@ class MultiObjectTracker:
             dets = np.empty((0, 4))
             confs = np.empty(0)
             cls_ids = np.empty(0, dtype=int)
+            allow_new_track = np.empty(0, dtype=bool)
         else:
             h, w = frame_shape[:2]
-            dets_list, confs_list, cls_list = [], [], []
+            dets_list, confs_list, cls_list, allow_new_track_list = [], [], [], []
             for d in detections:
                 x1, y1 = float(d["x"]), float(d["y"])
                 x2, y2 = x1 + float(d["w"]), y1 + float(d["h"])
@@ -557,16 +570,19 @@ class MultiObjectTracker:
                     dets_list.append([x1, y1, x2, y2])
                     confs_list.append(float(d.get("confidence", 0.0)))
                     cls_list.append(int(self._CLASS_TO_ID.get(d.get("class", "USV"), 0)))
+                    allow_new_track_list.append(bool(d.get("allow_new_track", True)))
             if not dets_list:
                 dets = np.empty((0, 4))
                 confs = np.empty(0)
                 cls_ids = np.empty(0, dtype=int)
+                allow_new_track = np.empty(0, dtype=bool)
             else:
                 dets = np.array(dets_list, dtype=np.float64)
                 confs = np.array(confs_list, dtype=np.float64)
                 cls_ids = np.array(cls_list, dtype=int)
+                allow_new_track = np.array(allow_new_track_list, dtype=bool)
 
-        tracked = self._ocsort.update(dets, confs, cls_ids)
+        tracked = self._ocsort.update(dets, confs, cls_ids, allow_new_track=allow_new_track)
 
         results = []
         for item in tracked:

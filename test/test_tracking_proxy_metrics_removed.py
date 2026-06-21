@@ -19,8 +19,6 @@ def test_tracking_proxy_metric_references_are_removed_from_public_tools():
     checked_files = [
         ROOT / "README.md",
         ROOT / "tools" / "README.md",
-        ROOT / "tools" / "experiments" / "run_all_tests.py",
-        ROOT / "tools" / "experiments" / "run_compare_ir_models.py",
         ROOT / "tools" / "validation" / "video_test_tracking.py",
     ]
     forbidden_terms = [

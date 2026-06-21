@@ -9,6 +9,8 @@ if str(_ROOT) not in sys.path:
 
 from tools.evaluation.detection_replay_benchmark import (
     DETECTION_REPLAY_TRACKERS,
+    _restore_config,
+    _set_msdc_high_replay_config,
     load_detection_cache,
     tracker_output_name,
     write_detection_cache,
@@ -57,6 +59,29 @@ def test_tracker_output_name_marks_replay_mode():
     assert tracker_output_name("ocsort") == "ocsort_replay"
     assert tracker_output_name("msdc_elt") == "msdc_elt_high_replay"
     assert DETECTION_REPLAY_TRACKERS == ["botsort", "ocsort", "msdc_elt"]
+
+
+def test_msdc_high_replay_config_disables_motion_and_restores(monkeypatch):
+    from target_module.image_detect_module.config import Config
+
+    monkeypatch.setattr(Config, "MSDC_USE_LOW_DET", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_USE_MOTION", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_USE_TEMPLATE", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_TEMPLATE_ENABLE", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_USE_ROI_REDETECT", True, raising=False)
+
+    old_values = _set_msdc_high_replay_config()
+
+    assert Config.MSDC_USE_LOW_DET is False
+    assert Config.MSDC_USE_MOTION is False
+    assert Config.MSDC_USE_TEMPLATE is False
+    assert Config.MSDC_TEMPLATE_ENABLE is False
+    assert Config.MSDC_USE_ROI_REDETECT is False
+
+    _restore_config(old_values)
+
+    assert Config.MSDC_USE_LOW_DET is True
+    assert Config.MSDC_USE_MOTION is True
 
 
 def test_write_replay_summary_writes_trackeval_fields(tmp_path):

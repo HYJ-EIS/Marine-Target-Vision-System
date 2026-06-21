@@ -58,7 +58,7 @@ Found additional choice lists beyond `video_main.py`.
 - `tools/validation/tracker_effect_test.py:41-48` defines `TRACKER_CHOICES`.
 - `tools/validation/tracker_effect_test.py:147-153` exposes `--trackers`.
 - `tools/validation/video_test_tracking.py:62-68` exposes `--tracker`.
-- `tools/dataset/extract_tracking_frames.py:147` also has tracker choices, but dataset extraction is not required for the first MS-DC-ELT path and should not be changed until the video/evaluation path is stable.
+- Dataset extraction tracker choices have moved to `/home/hyj/Anti_Drone_Project/Marine-Frame-Extraction` and are not part of the MS-DC-ELT video/evaluation path in this repository.
 
 Planning conclusion: minimum implementation changes `video_main.py` first, then `export_mot_results.py` and validation tools when Task 9 starts.
 

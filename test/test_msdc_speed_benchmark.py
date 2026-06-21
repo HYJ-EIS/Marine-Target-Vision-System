@@ -159,6 +159,99 @@ def test_run_speed_benchmark_restores_debug_events_after_exception(tmp_path, mon
     assert Config.MSDC_DEBUG_EVENTS is True
 
 
+def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, monkeypatch):
+    from target_module.image_detect_module.config import Config
+
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"not a real video")
+    seen_config = []
+
+    def fake_run_tracker_benchmark(**kwargs):
+        seen_config.append(
+            {
+                "motion": Config.MSDC_USE_MOTION,
+                "roi": Config.MSDC_USE_ROI_REDETECT,
+                "template": Config.MSDC_USE_TEMPLATE,
+                "template_enable": Config.MSDC_TEMPLATE_ENABLE,
+                "share": Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET,
+                "debug": Config.MSDC_DEBUG_EVENTS,
+                "topk": Config.MSDC_LOW_OBS_TOPK,
+                "min_conf": Config.MSDC_LOW_OBS_MIN_CONF,
+            }
+        )
+        return {
+            "run_id": kwargs["run_id"],
+            "commit_hash": kwargs["commit_hash"],
+            "video_path": str(kwargs["input_video"]),
+            "seq_name": kwargs["seq_name"],
+            "tracker": kwargs["tracker_type"],
+            "method": "fake",
+            "resolution": "0x0",
+            "requested_frames": 0,
+            "processed_frames": 0,
+            "total_time_s": "0.000000",
+            "mean_fps": "0.000000",
+            "mean_latency_ms": "0.000000",
+            "p50_latency_ms": "0.000000",
+            "p95_latency_ms": "0.000000",
+            "peak_memory_mb": "N/A",
+            "detector_calls_total": 0,
+            "detector_calls_high_det": 0,
+            "detector_calls_low_det": 0,
+            "detector_calls_tracker_update": 0,
+            "detector_calls_roi_redetect": 0,
+            "mean_read_ms": "0.000000",
+            "mean_high_det_ms": "0.000000",
+            "mean_low_det_ms": "0.000000",
+            "mean_roi_redetect_ms": "0.000000",
+            "mean_tracker_ms": "0.000000",
+            "mean_render_ms": "0.000000",
+            "mean_write_ms": "0.000000",
+        }
+
+    monkeypatch.setattr(benchmark, "_resolve_benchmark_input", lambda args: (video, "seq", "visible"))
+    monkeypatch.setattr(benchmark, "_run_tracker_benchmark", fake_run_tracker_benchmark)
+    monkeypatch.setattr(Config, "MSDC_USE_MOTION", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_USE_ROI_REDETECT", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_USE_TEMPLATE", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_TEMPLATE_ENABLE", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", False, raising=False)
+    monkeypatch.setattr(Config, "MSDC_DEBUG_EVENTS", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_LOW_OBS_TOPK", 0, raising=False)
+    monkeypatch.setattr(Config, "MSDC_LOW_OBS_MIN_CONF", 0.0, raising=False)
+
+    args = argparse.Namespace(
+        output_root=str(tmp_path / "out"),
+        run_id="formal-v3",
+        commit_hash="abc123",
+        frames=0,
+        trackers=["msdc_elt"],
+        progress_interval=0,
+    )
+    benchmark.run_speed_benchmark(args)
+
+    assert seen_config == [
+        {
+            "motion": False,
+            "roi": False,
+            "template": False,
+            "template_enable": False,
+            "share": True,
+            "debug": False,
+            "topk": 32,
+            "min_conf": 0.25,
+        }
+    ]
+    assert Config.MSDC_USE_MOTION is True
+    assert Config.MSDC_USE_ROI_REDETECT is True
+    assert Config.MSDC_USE_TEMPLATE is True
+    assert Config.MSDC_TEMPLATE_ENABLE is True
+    assert Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET is False
+    assert Config.MSDC_DEBUG_EVENTS is True
+    assert Config.MSDC_LOW_OBS_TOPK == 0
+    assert Config.MSDC_LOW_OBS_MIN_CONF == 0.0
+
+
 def test_tracker_benchmark_releases_unopened_capture(tmp_path, monkeypatch):
     import cv2
     import target_module.image_detect_module.target_detection as td

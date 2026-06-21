@@ -53,7 +53,12 @@ def split_msdc_high_from_low_boxes(low_boxes: list[dict], file_type: str) -> lis
 
 
 def resolve_msdc_high_low_boxes(detector, frame, file_type: str) -> tuple[list[dict], list[dict]]:
-    """Return high and low boxes using the configured MS-DC detector strategy."""
+    """Return high and low boxes using the configured MS-DC detector strategy.
+
+    The formal v3 variant uses one low-threshold full-frame detector call and
+    splits high-confidence boxes from that result, so detector calls stay
+    comparable across tracker-only experiments.
+    """
     if bool(getattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", False)) and bool(
         getattr(Config, "MSDC_USE_LOW_DET", True)
     ):

@@ -1,9 +1,11 @@
 """
 MS-DC-ELT-lite tracker coordinator.
 
-This class wires high-threshold detections, low-only detections, motion seeds,
-active-only template observations, low-frequency lost reacquire, removed-ID
-guard diagnostics, and EvidenceStateUpdater together.
+This class wires high-threshold detections, low-only detections, optional motion
+seeds, active-only template observations, low-frequency lost reacquire,
+removed-ID guard diagnostics, and EvidenceStateUpdater together. The formal v3
+variant keeps motion seed disabled and relies on the bounded low-det candidate
+pool for re-capture candidates.
 """
 
 from __future__ import annotations

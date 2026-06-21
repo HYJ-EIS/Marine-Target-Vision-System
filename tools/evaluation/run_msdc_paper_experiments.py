@@ -17,9 +17,13 @@ from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from tools.experiments.run_msdc_ablation import FORMAL_MSDC_VARIANT  # noqa: E402
 
 MAIN_TRACKERS = ["ocsort", "botsort", "msdc_elt"]
-MAIN_MSDC_VARIANT = "v2_low_clean"
+MAIN_MSDC_VARIANT = FORMAL_MSDC_VARIANT
 ABLATION_VARIANTS = [
     "Ours-full",
     "Ours-lite-no-motion",
@@ -34,6 +38,7 @@ ABLATION_VARIANTS = [
     "v2_candidate_topk",
     "v2_candidate_topk_roi_max1",
     "v2_candidate_topk_no_roi",
+    FORMAL_MSDC_VARIANT,
     "v2_speed_diag_off",
 ]
 DEFAULT_DATASET_ROOTS = [

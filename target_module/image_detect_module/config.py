@@ -200,11 +200,11 @@ class Config:
     MSDC_ASSOC_IOU_THRESH = 0.2
     MSDC_ASSOC_CENTER_DIST = 80.0
     MSDC_OBS_MERGE_IOU_THRESH = 0.5
-    MSDC_MAX_ACTIVE_TRACKS = _env_int("MSDC_MAX_ACTIVE_TRACKS", 64)
-    MSDC_MAX_LOST_TRACKS = _env_int("MSDC_MAX_LOST_TRACKS", 32)
-    MSDC_MAX_CANDIDATES = _env_int("MSDC_MAX_CANDIDATES", 32)
-    MSDC_MAX_LOW_CANDIDATES = _env_int("MSDC_MAX_LOW_CANDIDATES", 24)
-    MSDC_MAX_TOTAL_TRACKS = _env_int("MSDC_MAX_TOTAL_TRACKS", 128)
+    MSDC_MAX_ACTIVE_TRACKS = _env_int("MSDC_MAX_ACTIVE_TRACKS", 128)
+    MSDC_MAX_LOST_TRACKS = _env_int("MSDC_MAX_LOST_TRACKS", 64)
+    MSDC_MAX_CANDIDATES = _env_int("MSDC_MAX_CANDIDATES", 64)
+    MSDC_MAX_LOW_CANDIDATES = _env_int("MSDC_MAX_LOW_CANDIDATES", 48)
+    MSDC_MAX_TOTAL_TRACKS = _env_int("MSDC_MAX_TOTAL_TRACKS", 256)
     MSDC_SOURCE_HISTORY_SIZE = 16
     # 新 observation 若仍落在 active track 近邻内，不再生成额外 candidate
     MSDC_SPAWN_SUPPRESS_ENABLE = _env_bool("MSDC_SPAWN_SUPPRESS_ENABLE", True)
@@ -222,7 +222,7 @@ class Config:
     MSDC_OUTPUT_MIN_BOX_SIZE = _env_int("MSDC_OUTPUT_MIN_BOX_SIZE", 12)
     # MS-DC-ELT Task 7: active-only TemplateLock 配置
     # MS-DC-ELT ROI 低阈值重检：仅在 msdc_elt 分支使用，不影响 baseline tracker。
-    # 默认采用 v2_candidate_topk_no_roi，关闭 ROI 重检以避免额外 detector 调用。
+    # 默认采用 v3_candidate_topk_no_roi_no_motion，关闭 ROI 重检以避免额外 detector 调用。
     MSDC_USE_ROI_REDETECT = _env_bool("MSDC_USE_ROI_REDETECT", False)
     MSDC_ROI_REDETECT_LOW_CONF = _env_float("MSDC_ROI_REDETECT_LOW_CONF", 0.12)
     MSDC_ROI_REDETECT_ACTIVE_ENABLE = _env_bool("MSDC_ROI_REDETECT_ACTIVE_ENABLE", False)
@@ -238,7 +238,7 @@ class Config:
     MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE = _env_int("MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE", 30)
     MSDC_ROI_REDETECT_COOLDOWN_FRAMES = _env_int("MSDC_ROI_REDETECT_COOLDOWN_FRAMES", 3)
 
-    # 低阈值候选进入 lifecycle 关联前的预算；默认采用 v2_candidate_topk_no_roi。
+    # 低阈值候选进入 lifecycle 关联前的预算；默认采用 v3_candidate_topk_no_roi_no_motion。
     MSDC_LOW_OBS_TOPK = _env_int("MSDC_LOW_OBS_TOPK", 32)
     MSDC_LOW_OBS_GLOBAL_TOPK = _env_int("MSDC_LOW_OBS_GLOBAL_TOPK", MSDC_LOW_OBS_TOPK)
     MSDC_LOW_OBS_PER_TRACK_NEAREST = _env_int("MSDC_LOW_OBS_PER_TRACK_NEAREST", 1)

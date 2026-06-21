@@ -13,30 +13,29 @@ conda run -n ship_detect python <script> ...
 
 ## dataset
 
-`tools/dataset/` 放数据集整理工具，面向“生成、清理、检查训练数据”的离线流程。
+离线抽帧、数据集质检、YOLO 标签可视化和代表帧过滤工具已迁移到独立项目：
 
-- `ensure_classes_txt.py`：给 YOLO 标签目录补齐 `classes.txt`
-- `extract_tracking_frames.py`：从 `_V` / `_T` 视频抽代表帧并导出 YOLO 标签
-- `video_dataset_classify.py`：按时间窗分析原始视频数据质量、场景和目标分布
-- `visualize_yolo_labels.py`：将 YOLO 标签画回图片供人工检查
-- `filter_existing_frames.py`：对已抽帧 LabelMe 数据做代表帧压缩
+```text
+/home/hyj/Anti_Drone_Project/Marine-Frame-Extraction
+```
 
-详细用法见 `tools/dataset/README.md`。
+本仓库的 `tools/dataset/` 只保留迁移说明，不再维护可执行 Python 入口。
 
 ## validation
 
 `tools/validation/` 放人工验证和调试脚本。它们通常依赖本地视频、模型文件或输出目录，适合手动运行，不作为 pytest 单元测试。
 
 - `video_test_tracking.py`：本地视频检测与跟踪验证
-- `test_image_tracking_api.py`：`detect_targets(..., enable_tracking=True)` 行为验证
-- `debug_bbox_offset.py`：检测框偏移诊断
+- `tracker_effect_test.py`：多 tracker 同帧输入效果对比
+- `video_detect_only.py`：本地视频纯检测可视化与统计
+- `msdc_low_conf_debug.py`：MS-DC-ELT 低阈值检测诊断
+- `msdc_motion_seed_debug.py`：MS-DC-ELT 运动种子诊断
 
 ## experiments
 
 `tools/experiments/` 放实验编排和对比脚本，产物通常写入 `results/`。
 
-- `run_all_tests.py`：固定测试视频批量跑追踪验证
-- `run_compare_ir_models.py`：两版红外 ONNX 模型对比
+- `run_msdc_ablation.py`：MS-DC-ELT 消融变体定义与命令编排
 
 ## evaluation
 
@@ -53,8 +52,7 @@ conda run -n ship_detect python <script> ...
 
 自动化单元测试保留在仓库根目录的 `test/` 下。当前主要是：
 
-- `test/test_extract_tracking_frames.py`
-- `test/test_video_dataset_classify.py`
+- `test/test_tracking_proxy_metrics_removed.py`
 
 运行：
 
