@@ -2,7 +2,6 @@ import json
 import sys
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 
@@ -16,8 +15,6 @@ from target_module.image_detect_module.utils.msdc_types import EvidenceTrack, Tr
 
 
 class LifecycleTestConfig(Config):
-    MSDC_MOTION_ENABLE = False
-    MSDC_TEMPLATE_ENABLE = False
     MSDC_DEBUG_EVENTS = True
     MSDC_OUTPUT_CANDIDATES = False
     MSDC_ACTIVE_MISSING_PATIENCE = 1
@@ -42,31 +39,10 @@ class LowCandidateLifecycleConfig(CandidateOutputConfig):
     MSDC_LOW_CONFIRM_MIN_AVG_SCORE = 0.22
 
 
-class TemplateLifecycleConfig(LifecycleTestConfig):
-    MSDC_USE_TEMPLATE = True
-    MSDC_TEMPLATE_ENABLE = True
-    MSDC_TEMPLATE_UPDATE_THRESH = 0.7
-    MSDC_TEMPLATE_SEARCH_SCALE = 3.0
-    MSDC_TEMPLATE_MIN_SIZE = 8
-
-
 class ReacquireLifecycleConfig(LifecycleTestConfig):
     MSDC_LOST_MAX_AGE = 10
     MSDC_REACQUIRE_INTERVAL = 5
     MSDC_REACQUIRE_SCORE = 1.0
-
-
-class ROILifecycleConfig(ReacquireLifecycleConfig):
-    MSDC_USE_ROI_REDETECT = True
-    MSDC_ROI_REDETECT_LOW_CONF = 0.12
-    MSDC_ROI_REDETECT_ACTIVE_INTERVAL = 1000
-    MSDC_ROI_REDETECT_LOST_INTERVAL = 5
-    MSDC_ROI_REDETECT_SEARCH_SCALE = 2.0
-    MSDC_ROI_REDETECT_UPSCALE = 1.0
-    MSDC_ROI_REDETECT_MIN_CROP_SIZE = 16
-    MSDC_ROI_REDETECT_MAX_TRACKS = 4
-    MSDC_ROI_REDETECT_EXISTING_IOU = 0.5
-    MSDC_ROI_REACQUIRE_CENTER_DIST = 600.0
 
 
 class LowObservationBudgetConfig(LifecycleTestConfig):
@@ -109,37 +85,8 @@ class DebugDisabledConfig(LifecycleTestConfig):
     MSDC_DEBUG_EVENTS = False
 
 
-class MotionLifecycleConfig(LifecycleTestConfig):
-    MSDC_USE_MOTION = True
-
-
-class DummyROIProcessor:
-    def __init__(self, boxes):
-        self.boxes = boxes
-        self.calls = []
-
-    def process_frame(self, frame, file_type, conf_override=None):
-        self.calls.append((frame.shape, file_type, conf_override))
-        return {"boxes": list(self.boxes)}
-
-
 def _frame():
     return np.zeros((64, 64, 3), dtype=np.uint8)
-
-
-def _pattern_patch(size=12):
-    patch = np.zeros((size, size, 3), dtype=np.uint8)
-    for y in range(size):
-        for x in range(size):
-            patch[y, x] = ((x * 17 + y * 3) % 255, (x * 5 + y * 23) % 255, (x * 11 + y * 7) % 255)
-    cv2.circle(patch, (size // 2, size // 2), 3, (255, 255, 255), -1)
-    return patch
-
-
-def _frame_with_patch(x=10, y=10, size=12):
-    frame = np.zeros((64, 64, 3), dtype=np.uint8)
-    frame[y:y + size, x:x + size] = _pattern_patch(size)
-    return frame
 
 
 def _box(confidence=0.9, x=10, y=10, w=10, h=10, cls="UAV"):
@@ -199,7 +146,6 @@ def test_lifecycle_tracker_confirms_active_and_writes_debug_jsonl(tmp_path):
     assert frames[-1]["num_high"] == 1
     assert frames[-1]["num_low"] == 1
     assert frames[-1]["num_low_only"] == 0
-    assert frames[-1]["num_motion"] == 0
     assert frames[-1]["active_track_count"] == 1
 
     pool_stats = _jsonl(tmp_path / "candidate_pool_stats.jsonl")
@@ -429,80 +375,14 @@ def test_lifecycle_tracker_records_internal_timing_when_debug_disabled(tmp_path)
     timing = tracker.last_timing_debug
     expected_keys = {
         "low_filter_s",
-        "roi_redetect_s",
-        "motion_s",
         "observation_build_s",
-        "template_match_s",
         "evidence_update_s",
-        "template_sync_s",
         "output_s",
         "debug_s",
         "total_update_s",
     }
     assert expected_keys <= set(timing)
     assert timing["total_update_s"] >= 0.0
-
-
-def test_lifecycle_tracker_skips_template_matcher_when_template_disabled(tmp_path):
-    class FailingTemplateLock:
-        def match_active_tracks(self, *args, **kwargs):
-            raise AssertionError("active template matcher should be skipped")
-
-        def match_lost_tracks(self, *args, **kwargs):
-            raise AssertionError("lost template matcher should be skipped")
-
-        def reset(self):
-            pass
-
-    tracker = MSDCLifecycleTracker(config=LifecycleTestConfig, debug_dir=tmp_path)
-    tracker.template_lock = FailingTemplateLock()
-
-    tracker.update(
-        frame=_frame(),
-        frame_idx=0,
-        file_type="visible",
-        high_boxes=[_box()],
-        low_boxes=[],
-    )
-
-    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
-    assert frames[-1]["num_template"] == 0
-
-
-def test_lifecycle_tracker_calls_motion_seed_generator(tmp_path):
-    class DummyMotionSeed:
-        def __init__(self):
-            self.calls = []
-
-        def update(self, frame, frame_idx=None):
-            self.calls.append((frame.shape, frame_idx))
-            return [{
-                "x": 30,
-                "y": 30,
-                "w": 8,
-                "h": 8,
-                "score": 0.5,
-                "source": "motion",
-                "frame_idx": frame_idx,
-            }], {"frame_idx": frame_idx, "num_motion_boxes": 1}
-
-    tracker = MSDCLifecycleTracker(config=MotionLifecycleConfig, debug_dir=tmp_path)
-    dummy = DummyMotionSeed()
-    tracker.motion_seed = dummy
-
-    tracker.update(
-        frame=_frame(),
-        frame_idx=4,
-        file_type="visible",
-        high_boxes=[],
-        low_boxes=[],
-    )
-
-    assert dummy.calls == [(_frame().shape, 4)]
-    assert tracker.tracks == []
-    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
-    assert frames[-1]["num_motion"] == 1
-    assert frames[-1]["num_observations"] == 1
 
 
 def test_empty_inputs_do_not_crash_and_active_can_enter_lost(tmp_path):
@@ -545,29 +425,6 @@ def test_lifecycle_tracker_reacquires_lost_track_and_writes_debug(tmp_path):
 
     frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
     assert frames[-1]["reacquire_debug"]["attempted"] is True
-    assert frames[-1]["reacquire_debug"]["num_matches"] == 1
-
-
-def test_lifecycle_tracker_uses_roi_redetect_for_lost_reacquire(tmp_path):
-    processor = DummyROIProcessor([
-        {"x": 6, "y": 5, "w": 10, "h": 10, "confidence": 0.9, "class": "UAV"},
-    ])
-    tracker = MSDCLifecycleTracker(config=ROILifecycleConfig, debug_dir=tmp_path, processor=processor)
-    for frame_idx in range(4):
-        tracker.update(_frame(), frame_idx, "visible", high_boxes=[_box()], low_boxes=[])
-
-    tracker.update(_frame(), 4, "visible", high_boxes=[], low_boxes=[])
-    tracker.update(_frame(), 5, "visible", high_boxes=[], low_boxes=[])
-    assert tracker.tracks[0].state.value == "lost"
-
-    outputs = tracker.update(_frame(), 10, "visible", high_boxes=[], low_boxes=[])
-
-    assert outputs
-    assert outputs[0]["track_id"] == 1
-    assert outputs[0]["lifecycle_state"] == "active"
-    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
-    assert frames[-1]["num_roi_low"] == 1
-    assert frames[-1]["roi_redetect_debug"]["num_roi_boxes"] == 1
     assert frames[-1]["reacquire_debug"]["num_matches"] == 1
 
 
@@ -622,64 +479,6 @@ def test_low_only_filter_keeps_non_overlapping_low_boxes(tmp_path):
     assert frames[-1]["num_low"] == 2
     assert frames[-1]["num_low_only"] == 1
     assert len(tracker.tracks) == 1
-
-
-def test_lifecycle_tracker_template_lock_is_active_only_and_writes_debug(tmp_path):
-    tracker = MSDCLifecycleTracker(config=TemplateLifecycleConfig, debug_dir=tmp_path)
-
-    # First frame creates a candidate; candidate tracks must not receive templates.
-    tracker.update(
-        frame=_frame_with_patch(x=10, y=10),
-        frame_idx=0,
-        file_type="visible",
-        high_boxes=[_box(x=10, y=10, w=12, h=12)],
-        low_boxes=[],
-    )
-    assert tracker.tracks[0].state.value == "candidate"
-    assert tracker.tracks[0].template is None
-    assert tracker.template_lock.template_count == 0
-
-    # Repeated high evidence confirms active and initializes the template.
-    tracker.update(
-        frame=_frame_with_patch(x=10, y=10),
-        frame_idx=1,
-        file_type="visible",
-        high_boxes=[_box(x=10, y=10, w=12, h=12)],
-        low_boxes=[],
-    )
-    tracker.update(
-        frame=_frame_with_patch(x=10, y=10),
-        frame_idx=2,
-        file_type="visible",
-        high_boxes=[_box(x=10, y=10, w=12, h=12)],
-        low_boxes=[],
-    )
-    tracker.update(
-        frame=_frame_with_patch(x=10, y=10),
-        frame_idx=3,
-        file_type="visible",
-        high_boxes=[_box(x=10, y=10, w=12, h=12)],
-        low_boxes=[],
-    )
-    assert tracker.tracks[0].state.value == "active"
-    assert tracker.tracks[0].template["initialized"] is True
-    assert tracker.template_lock.template_count == 1
-
-    # With no detector boxes, the active template can add auxiliary evidence.
-    outputs = tracker.update(
-        frame=_frame_with_patch(x=13, y=12),
-        frame_idx=4,
-        file_type="visible",
-        high_boxes=[],
-        low_boxes=[],
-    )
-
-    assert outputs
-    frames = _jsonl(tmp_path / "msdc_tracks.jsonl")
-    assert frames[-1]["num_template"] == 1
-    assert frames[-1]["template_score"] >= TemplateLifecycleConfig.MSDC_TEMPLATE_UPDATE_THRESH
-    assert frames[-1]["template_updated"] is False
-    assert frames[-1]["template_match_box"] is not None
 
 
 def test_lifecycle_tracker_output_nms_suppresses_overlapping_active_boxes(tmp_path):

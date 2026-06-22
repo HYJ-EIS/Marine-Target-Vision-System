@@ -74,10 +74,8 @@ def test_evidence_track_debug_dict_is_json_serializable():
         last_seen=12,
         last_real_det_frame=11,
         real_det_hits=3,
-        template_only_streak=2,
-        motion_only_streak=1,
         last_real_det_box=[9, 19, 29, 49],
-        source_history=["high_det", "motion"],
+        source_history=["high_det", "low_det"],
         class_id=2,
         class_name="UAV",
     )
@@ -92,11 +90,8 @@ def test_evidence_track_debug_dict_is_json_serializable():
     assert payload["evidence_score"] == 0.875
     assert payload["last_real_det_frame"] == 11
     assert payload["real_det_hits"] == 3
-    assert payload["template_only_streak"] == 2
-    assert payload["motion_only_streak"] == 1
     assert payload["last_real_det_box"] == [9.0, 19.0, 29.0, 49.0]
-    assert payload["source_history"] == ["high_det", "motion"]
-    assert payload["template"] is None
+    assert payload["source_history"] == ["high_det", "low_det"]
     assert payload["retired_signature"] is None
     assert json.loads(json.dumps(payload, ensure_ascii=False)) == payload
 
@@ -198,7 +193,7 @@ def test_track_states_are_constrained_to_expected_values():
 
     obs = Observation(
         box=[0, 0, 1, 1],
-        source="motion",
+        source="low_det",
         score=0.1,
         reliability=0.2,
         modality="visible",

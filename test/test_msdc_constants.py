@@ -76,7 +76,6 @@ def test_speed_fields_include_required_phase_timing_columns():
     assert "mean_read_ms" in SPEED_FIELDS
     assert "mean_high_det_ms" in SPEED_FIELDS
     assert "mean_low_det_ms" in SPEED_FIELDS
-    assert "mean_roi_redetect_ms" in SPEED_FIELDS
     assert "mean_tracker_ms" in SPEED_FIELDS
     assert "mean_msdc_total_update_ms" in SPEED_FIELDS
     assert "mean_render_ms" in SPEED_FIELDS

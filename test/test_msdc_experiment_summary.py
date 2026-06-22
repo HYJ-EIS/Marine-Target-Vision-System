@@ -32,7 +32,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def _write_summary(path: Path) -> None:
     _write_csv(path, [
         {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
-        {"tracker": "Ours-full", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
+        {"tracker": "v3_candidate_topk_no_roi_no_motion", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
 
@@ -70,7 +70,7 @@ def test_main_results_maps_trackers_to_method_labels(tmp_path):
     _write_csv(summary, [
         {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
         {"tracker": "botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
-        {"tracker": "Ours-full", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
+        {"tracker": "msdc_elt", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
     out = tmp_path / "main_results.csv"
@@ -84,7 +84,7 @@ def test_main_results_maps_trackers_to_method_labels(tmp_path):
     assert [row["method"] for row in rows] == [
         METHOD_LABELS["ocsort"],
         METHOD_LABELS["botsort"],
-        METHOD_LABELS["Ours-full"],
+        METHOD_LABELS["msdc_elt"],
     ]
     assert out.read_text(encoding="utf-8-sig").splitlines()[0].startswith("run_name,method,tracker")
 
@@ -111,8 +111,8 @@ def test_main_results_include_v3_candidate_topk_no_roi_no_motion_as_msdc_v3(tmp_
 def test_ablation_results_keeps_variant_names(tmp_path):
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [
-        {"tracker": "Ours-full", "HOTA": "60", "DetA": "61", "AssA": "62", "MOTA": "63", "IDF1": "64", "IDSW": "1", "FP": "2", "FN": "3", "IDTP": "4", "IDFP": "5", "IDFN": "6"},
-        {"tracker": "Ours-no-template", "HOTA": "50", "DetA": "51", "AssA": "52", "MOTA": "53", "IDF1": "54", "IDSW": "9", "FP": "8", "FN": "7", "IDTP": "6", "IDFP": "5", "IDFN": "4"},
+        {"tracker": "Ours-no-reacquire", "HOTA": "60", "DetA": "61", "AssA": "62", "MOTA": "63", "IDF1": "64", "IDSW": "1", "FP": "2", "FN": "3", "IDTP": "4", "IDFP": "5", "IDFN": "6"},
+        {"tracker": "v2_candidate_topk", "HOTA": "50", "DetA": "51", "AssA": "52", "MOTA": "53", "IDF1": "54", "IDSW": "9", "FP": "8", "FN": "7", "IDTP": "6", "IDFP": "5", "IDFN": "4"},
     ])
 
     rows = write_ablation_results(
@@ -122,16 +122,12 @@ def test_ablation_results_keeps_variant_names(tmp_path):
         benchmark_root=tmp_path,
     )
 
-    assert rows[0]["variant"] == "Ours-full"
-    assert rows[1]["variant"] == "Ours-no-template"
+    assert rows[0]["variant"] == "Ours-no-reacquire"
+    assert rows[1]["variant"] == "v2_candidate_topk"
 
 
-def test_ablation_results_reports_roi_redetect_switch_for_known_variants(tmp_path):
+def test_ablation_results_reports_retained_switches_for_known_variants(tmp_path):
     variants = [
-        "Ours-full",
-        "Ours-lite-no-motion",
-        "Ours-lite-no-low-det",
-        "Ours-no-template",
         "Ours-no-reacquire",
         "Ours-no-removed-guard",
     ]
@@ -148,21 +144,17 @@ def test_ablation_results_reports_roi_redetect_switch_for_known_variants(tmp_pat
         benchmark_root=tmp_path,
     )
 
-    assert "MSDC_USE_ROI_REDETECT" in rows[0]
-    assert {row["variant"]: row["MSDC_USE_ROI_REDETECT"] for row in rows} == {
-        variant: "True" for variant in variants
-    }
+    by_variant = {row["variant"]: row for row in rows}
+    assert by_variant["Ours-no-reacquire"]["MSDC_USE_REACQUIRE"] == "False"
+    assert by_variant["Ours-no-removed-guard"]["MSDC_REUSE_GUARD_ENABLE"] == "False"
 
 
 def test_ablation_results_reports_new_v2_speed_ablation_switches(tmp_path):
     variants = [
-        "v2_no_roi_redetect",
-        "v2_roi_interval10",
-        "v2_roi_interval15",
-        "v2_roi_max1",
+        "v2_output_age5_size8",
+        "v2_candidate_low3_window6",
+        "v2_candidate_real2_age8",
         "v2_candidate_topk",
-        "v2_candidate_topk_roi_max1",
-        "v2_candidate_topk_no_roi",
         "v3_candidate_topk_no_roi_no_motion",
         "v2_speed_diag_off",
     ]
@@ -180,18 +172,11 @@ def test_ablation_results_reports_new_v2_speed_ablation_switches(tmp_path):
     )
     by_variant = {row["variant"]: row for row in rows}
 
-    assert by_variant["v2_no_roi_redetect"]["MSDC_USE_ROI_REDETECT"] == "False"
-    assert by_variant["v2_roi_interval10"]["MSDC_ROI_REDETECT_ACTIVE_INTERVAL"] == "10"
-    assert by_variant["v2_roi_interval15"]["MSDC_ROI_REDETECT_ACTIVE_INTERVAL"] == "15"
-    assert by_variant["v2_roi_max1"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "1"
+    assert by_variant["v2_output_age5_size8"]["MSDC_OUTPUT_MAX_REAL_DET_AGE"] == "5"
+    assert by_variant["v2_candidate_low3_window6"]["MSDC_LOW_CONFIRM_MIN_HITS"] == "3"
+    assert by_variant["v2_candidate_real2_age8"]["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
     assert by_variant["v2_candidate_topk"]["MSDC_LOW_OBS_TOPK"] == "32"
-    assert by_variant["v2_candidate_topk_roi_max1"]["MSDC_LOW_OBS_TOPK"] == "32"
-    assert by_variant["v2_candidate_topk_roi_max1"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "1"
-    assert by_variant["v2_candidate_topk_no_roi"]["MSDC_LOW_OBS_TOPK"] == "32"
-    assert by_variant["v2_candidate_topk_no_roi"]["MSDC_USE_ROI_REDETECT"] == "False"
     assert by_variant["v3_candidate_topk_no_roi_no_motion"]["MSDC_LOW_OBS_TOPK"] == "32"
-    assert by_variant["v3_candidate_topk_no_roi_no_motion"]["MSDC_USE_ROI_REDETECT"] == "False"
-    assert by_variant["v3_candidate_topk_no_roi_no_motion"]["MSDC_USE_MOTION"] == "False"
     assert by_variant["v2_speed_diag_off"]["MSDC_DEBUG_EVENTS"] == "False"
 
 
@@ -264,8 +249,6 @@ def test_cli_normalizes_speed_csv_missing_columns_to_stable_schema(tmp_path, mon
         "run_id": "r1",
         "tracker": "ocsort",
         "mean_fps": "12.5",
-        "detector_calls_roi_redetect": "3",
-        "mean_roi_redetect_ms": "4.5",
         "mean_render_ms": "0",
         "mean_write_ms": "0",
     }])
@@ -282,8 +265,6 @@ def test_cli_normalizes_speed_csv_missing_columns_to_stable_schema(tmp_path, mon
     assert rows[0]["mean_fps"] == "12.5"
     assert rows[0]["commit_hash"] == "N/A"
     assert rows[0]["p95_latency_ms"] == "N/A"
-    assert rows[0]["detector_calls_roi_redetect"] == "3"
-    assert rows[0]["mean_roi_redetect_ms"] == "4.5"
     assert rows[0]["mean_render_ms"] == "0"
     assert rows[0]["mean_write_ms"] == "0"
     assert rows[0]["status"] == "ok"
@@ -322,12 +303,8 @@ def test_v2_ablation_switches_are_reported():
     from tools.evaluation.msdc_experiment_summary import _ablation_switches
 
     switches = _ablation_switches("v2_candidate_real2_age8")
-    assert switches["MSDC_USE_LOW_DET"] == "True"
     assert switches["MSDC_USE_REACQUIRE"] == "True"
-    assert switches["MSDC_USE_ROI_REDETECT"] == "True"
     assert switches["MSDC_REUSE_GUARD_ENABLE"] == "True"
-    assert switches["MSDC_USE_TEMPLATE"] == "False"
-    assert switches["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "True"
     assert switches["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
     assert switches["MSDC_CANDIDATE_MAX_AGE"] == "8"
 
@@ -336,15 +313,9 @@ def test_v2_ablation_switches_report_all_changed_fields():
     from tools.evaluation.msdc_experiment_summary import ABLATION_FIELDS, _ablation_switches
 
     for field in [
-        "MSDC_ROI_REDETECT_LOST_INTERVAL",
-        "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI",
         "MSDC_REACQUIRE_MAX_CENTER_DIST",
     ]:
         assert field in ABLATION_FIELDS
-
-    roi_switches = _ablation_switches("v2_roi_budget_active8_max2")
-    assert roi_switches["MSDC_ROI_REDETECT_LOST_INTERVAL"] == "3"
-    assert roi_switches["MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI"] == "1"
 
     reacquire_switches = _ablation_switches("v2_reacquire_interval5_center240")
     assert reacquire_switches["MSDC_REACQUIRE_CENTER_DIST"] == "240"

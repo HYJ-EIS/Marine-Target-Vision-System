@@ -17,7 +17,7 @@ DATASET_EXPORT_TRACKER_CHOICES = ("botsort", "ocsort", "msdc_elt")
 
 FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
 MAIN_MSDC_TRACKER = FORMAL_MSDC_VARIANT
-SUMMARY_MAIN_TRACKERS = {"ocsort", "botsort", "Ours-full", "msdc_elt", MAIN_MSDC_TRACKER}
+SUMMARY_MAIN_TRACKERS = {"ocsort", "botsort", "msdc_elt", MAIN_MSDC_TRACKER}
 
 METRIC_FIELDS = (
     "HOTA",
@@ -53,19 +53,13 @@ SPEED_FIELDS = (
     "detector_calls_high_det",
     "detector_calls_low_det",
     "detector_calls_tracker_update",
-    "detector_calls_roi_redetect",
     "mean_read_ms",
     "mean_high_det_ms",
     "mean_low_det_ms",
-    "mean_roi_redetect_ms",
     "mean_tracker_ms",
     "mean_msdc_low_filter_ms",
-    "mean_msdc_roi_redetect_internal_ms",
-    "mean_msdc_motion_ms",
     "mean_msdc_observation_build_ms",
-    "mean_msdc_template_match_ms",
     "mean_msdc_evidence_update_ms",
-    "mean_msdc_template_sync_ms",
     "mean_msdc_output_ms",
     "mean_msdc_debug_ms",
     "mean_msdc_total_update_ms",
@@ -77,8 +71,6 @@ SPEED_OUTPUT_FIELDS = (*SPEED_FIELDS, "status", "failure")
 METHOD_LABELS = {
     "ocsort": "FFCA-YOLO + OC-SORT",
     "botsort": "FFCA-YOLO + BoT-SORT",
-    "Ours-full": "FFCA-YOLO + MS-DC-ELT",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
-    "v2_low_clean": "FFCA-YOLO + MS-DC-ELT v2",
     FORMAL_MSDC_VARIANT: "FFCA-YOLO + MS-DC-ELT v3",
 }

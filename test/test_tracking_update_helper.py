@@ -52,7 +52,6 @@ def test_runtime_helper_is_the_only_tracking_update_entrypoint():
         assert "update_tracking_for_frame as _update_tracking_for_frame" not in text
 
     for relative_path in [
-        Path("tools/evaluation/render_tracking_video.py"),
         Path("tools/evaluation/msdc_speed_benchmark.py"),
     ]:
         text = (_ROOT / relative_path).read_text(encoding="utf-8")

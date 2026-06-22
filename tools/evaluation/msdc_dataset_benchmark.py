@@ -28,7 +28,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES  # noqa: E402
+from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES, FORMAL_MSDC_VARIANT  # noqa: E402
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS  # noqa: E402
 
 
@@ -381,7 +381,7 @@ def compute_per_gt_stage_coverage(
     gt_rows = _load_mot_rows(gt_file)
     stage_rows = _load_stage_rows(stage_observations)
     gt_ids = sorted({obj_id for rows in gt_rows.values() for obj_id, _, _ in rows})
-    stages = ["high_det", "low_det", "low_only", "roi_low_det", "output"]
+    stages = ["high_det", "low_det", "low_only", "output"]
     output_ids: dict[int, set[int]] = {gt_id: set() for gt_id in gt_ids}
     matched_by_stage: dict[int, dict[str, set[int]]] = {
         gt_id: {stage: set() for stage in stages}
@@ -409,9 +409,9 @@ def compute_per_gt_stage_coverage(
             if any(obj_id == gt_id for obj_id, _, _ in rows)
         }
         gt_frame_count = len(gt_frames)
-        any_after_roi = set()
+        any_after_stage = set()
         for stage in stages:
-            any_after_roi.update(matched_by_stage[gt_id][stage])
+            any_after_stage.update(matched_by_stage[gt_id][stage])
         row = {
             "gt_id": int(gt_id),
             "gt_frame_count": int(gt_frame_count),
@@ -425,7 +425,7 @@ def compute_per_gt_stage_coverage(
             row[f"{stage}_coverage"] = round(count / gt_frame_count, 4) if gt_frame_count else 0.0
         row["output_predicted_id_count"] = int(len(output_ids[gt_id]))
         row["output_predicted_ids"] = ";".join(str(obj_id) for obj_id in sorted(output_ids[gt_id]))
-        row["missing_after_roi_segments"] = _segments(gt_frames - any_after_roi)
+        row["missing_after_stage_segments"] = _segments(gt_frames - any_after_stage)
         diagnostics.append(row)
     return diagnostics
 
@@ -449,16 +449,14 @@ def write_stage_coverage_csv(
         "high_det_frame_count",
         "low_det_frame_count",
         "low_only_frame_count",
-        "roi_low_det_frame_count",
         "output_frame_count",
         "high_det_coverage",
         "low_det_coverage",
         "low_only_coverage",
-        "roi_low_det_coverage",
         "output_coverage",
         "output_predicted_id_count",
         "output_predicted_ids",
-        "missing_after_roi_segments",
+        "missing_after_stage_segments",
     ]
     with csv_path.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)
@@ -735,7 +733,7 @@ def parse_args() -> argparse.Namespace:
         default=list(DATASET_EXPORT_TRACKER_CHOICES),
         choices=DATASET_EXPORT_TRACKER_CHOICES,
     )
-    parser.add_argument("--variants", nargs="+", default=["Ours-full"], choices=list(ABLATION_VARIANTS))
+    parser.add_argument("--variants", nargs="+", default=[FORMAL_MSDC_VARIANT], choices=list(ABLATION_VARIANTS))
     parser.add_argument("--max-frames", type=int, default=0, help="Smoke/debug only; 0 means full video")
     parser.add_argument("--duration-seconds", type=float, default=0.0, help="Run the first N seconds; 0 disables")
     parser.add_argument("--progress-interval", type=int, default=0)

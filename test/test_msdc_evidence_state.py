@@ -34,11 +34,6 @@ class FastLifecycleConfig(Config):
 class ReacquireLifecycleConfig(Config):
     MSDC_LOST_MAX_AGE = 10
     MSDC_REACQUIRE_INTERVAL = 5
-    MSDC_REACQUIRE_SCORE = 1.5
-
-
-class ROIReacquireLifecycleConfig(ReacquireLifecycleConfig):
-    MSDC_ROI_REACQUIRE_CENTER_DIST = 600.0
     MSDC_REACQUIRE_SCORE = 1.0
 
 
@@ -95,13 +90,6 @@ class LowCandidateInheritClassDriftConfig(LowCandidateInheritConfig):
     MSDC_LOW_INHERIT_SCORE = 0.4
     MSDC_LOW_INHERIT_CENTER_DIST = 60.0
     MSDC_LOW_INHERIT_CLASS_MATCH = True
-
-
-class SupportedMissingConfig(Config):
-    MSDC_ACTIVE_MISSING_PATIENCE = 1
-    MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = 4
-    MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = 8
-    MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = 0.2
 
 
 class ReacquireScaleGateConfig(Config):
@@ -257,21 +245,6 @@ def test_update_tracks_enforces_state_pool_hard_caps():
     assert states_by_gid[2] == TrackState.ACTIVE
     assert states_by_gid[5] == TrackState.LOST
     assert states_by_gid[10] == TrackState.LOW_CANDIDATE
-
-
-def test_motion_only_candidate_does_not_confirm_active():
-    updater = EvidenceStateUpdater(Config)
-    tracks = []
-
-    for frame_idx in range(3):
-        tracks, events = updater.update_tracks(
-            tracks,
-            [_obs(frame_idx, source="motion", score=1.0, box=[10, 10, 20, 20], class_name="unknown")],
-            frame_idx=frame_idx,
-        )
-
-    assert tracks == []
-    assert "CONFIRM_ACTIVE" not in [event.event_type for event in events]
 
 
 def test_low_confidence_observation_does_not_spawn_candidate():
@@ -526,74 +499,6 @@ def test_unstable_low_candidate_does_not_confirm_active():
     assert "CONFIRM_LOW_ACTIVE" not in [event.event_type for event in events]
 
 
-def test_template_only_match_does_not_refresh_active_track():
-    updater = EvidenceStateUpdater(Config)
-    track = EvidenceTrack(
-        gid=1,
-        public_id=1,
-        state=TrackState.ACTIVE,
-        box=[10, 10, 30, 30],
-        velocity=[2.0, 0.0],
-        evidence_score=3.0,
-        hits=4,
-        misses=0,
-        age=4,
-        last_seen=4,
-        last_real_det_frame=4,
-        real_det_hits=4,
-        class_id=2,
-        class_name="UAV",
-    )
-
-    tracks, events = updater.update_tracks(
-        [track],
-        [_obs(5, source="template", score=0.95, box=[12, 10, 32, 30])],
-        frame_idx=5,
-    )
-
-    assert tracks[0].state == TrackState.ACTIVE
-    assert tracks[0].box == [10, 10, 30, 30]
-    assert tracks[0].last_seen == 4
-    assert tracks[0].last_real_det_frame == 4
-    assert tracks[0].misses == 1
-    assert tracks[0].template_only_streak == 1
-    assert events == []
-
-
-def test_roi_low_detection_refreshes_active_as_real_detection():
-    updater = EvidenceStateUpdater(Config)
-    track = EvidenceTrack(
-        gid=1,
-        public_id=1,
-        state=TrackState.ACTIVE,
-        box=[10, 10, 30, 30],
-        velocity=[0.0, 0.0],
-        evidence_score=3.0,
-        hits=4,
-        misses=0,
-        age=4,
-        last_seen=4,
-        last_real_det_frame=4,
-        real_det_hits=4,
-        class_id=2,
-        class_name="UAV",
-    )
-
-    tracks, events = updater.update_tracks(
-        [track],
-        [_obs(5, source="roi_low_det", score=0.8, box=[11, 10, 31, 30])],
-        frame_idx=5,
-    )
-
-    assert tracks[0].state == TrackState.ACTIVE
-    assert tracks[0].last_seen == 5
-    assert tracks[0].last_real_det_frame == 5
-    assert tracks[0].real_det_hits == 5
-    assert tracks[0].misses == 0
-    assert "roi_low_det" in tracks[0].source_history
-    assert events == []
-
-
 def test_low_detection_supports_active_without_refreshing_primary_box():
     updater = EvidenceStateUpdater(Config)
     track = EvidenceTrack(
@@ -632,19 +537,6 @@ def test_low_detection_supports_active_without_refreshing_primary_box():
     assert events == []
 
 
-def test_roi_low_unmatched_observation_does_not_spawn_new_candidate():
-    updater = EvidenceStateUpdater(Config)
-
-    tracks, events = updater.update_tracks(
-        [],
-        [_obs(0, source="roi_low_det", score=0.9, box=[10, 10, 20, 20])],
-        frame_idx=0,
-    )
-
-    assert tracks == []
-    assert events == []
-
-
 def test_low_only_observation_near_active_uses_wider_spawn_suppression():
     updater = EvidenceStateUpdater(LowSpawnSuppressConfig)
     active = EvidenceTrack(
@@ -673,79 +565,6 @@ def test_low_only_observation_near_active_uses_wider_spawn_suppression():
     assert len([track for track in tracks if track.state == TrackState.LOW_CANDIDATE]) == 0
     assert [event.event_type for event in events] == []
     assert updater.last_spawn_suppression_debug["num_suppressed_spawn_groups"] == 1
-
-
-def test_auxiliary_support_extends_active_missing_only_with_recent_low_history():
-    updater = EvidenceStateUpdater(SupportedMissingConfig)
-    track = EvidenceTrack(
-        gid=1,
-        public_id=1,
-        state=TrackState.ACTIVE,
-        box=[10, 10, 30, 30],
-        velocity=[1.0, 0.0],
-        evidence_score=3.0,
-        hits=4,
-        misses=0,
-        age=4,
-        last_seen=4,
-        last_real_det_frame=4,
-        real_det_hits=4,
-        low_det_history=_low_history(4, [[10, 10, 30, 30]], score=0.4),
-        source_history=["high_det", "low_det"],
-        class_id=2,
-        class_name="UAV",
-    )
-
-    tracks, events = updater.update_tracks(
-        [track],
-        [_obs(5, source="motion", score=0.6, box=[11, 10, 31, 30], class_name="unknown")],
-        frame_idx=5,
-    )
-    tracks, events = updater.update_tracks(
-        tracks,
-        [_obs(6, source="template", score=0.7, box=[12, 10, 32, 30])],
-        frame_idx=6,
-    )
-
-    assert tracks[0].state == TrackState.ACTIVE
-    assert tracks[0].misses == 2
-    assert "ACTIVE_TO_LOST" not in [event.event_type for event in events]
-    assert tracks[0].box == [10, 10, 30, 30]
-
-
-def test_auxiliary_support_without_recent_low_history_still_enters_lost():
-    updater = EvidenceStateUpdater(SupportedMissingConfig)
-    track = EvidenceTrack(
-        gid=1,
-        public_id=1,
-        state=TrackState.ACTIVE,
-        box=[10, 10, 30, 30],
-        velocity=[1.0, 0.0],
-        evidence_score=3.0,
-        hits=4,
-        misses=0,
-        age=4,
-        last_seen=4,
-        last_real_det_frame=4,
-        real_det_hits=4,
-        source_history=["high_det"],
-        class_id=2,
-        class_name="UAV",
-    )
-
-    tracks, _ = updater.update_tracks(
-        [track],
-        [_obs(5, source="motion", score=0.6, box=[11, 10, 31, 30], class_name="unknown")],
-        frame_idx=5,
-    )
-    tracks, events = updater.update_tracks(
-        tracks,
-        [_obs(6, source="template", score=0.7, box=[12, 10, 32, 30])],
-        frame_idx=6,
-    )
-
-    assert tracks[0].state == TrackState.LOST
-    assert [event.event_type for event in events] == ["ACTIVE_TO_LOST"]
 
 
 def test_one_frame_candidate_is_pruned_without_repeated_evidence():
@@ -792,7 +611,7 @@ def test_unmatched_active_moves_to_lost_then_removed():
     assert tracks[0].retired_signature["last_box"] == [30.0, 30.0, 50.0, 50.0]
 
 
-def test_lost_track_reacquires_only_on_interval_with_low_and_motion():
+def test_lost_track_reacquires_only_on_interval_with_low_detection():
     updater = EvidenceStateUpdater(ReacquireLifecycleConfig)
     tracks = [
         EvidenceTrack(
@@ -811,10 +630,7 @@ def test_lost_track_reacquires_only_on_interval_with_low_and_motion():
 
     tracks, events = updater.update_tracks(
         tracks,
-        [
-            _obs(6, source="low_det", score=1.0, box=[101, 101, 121, 121]),
-            _obs(6, source="motion", score=1.0, box=[101, 101, 121, 121], class_name="unknown"),
-        ],
+        [_obs(6, source="low_det", score=1.0, box=[101, 101, 121, 121])],
         frame_idx=6,
     )
 
@@ -824,10 +640,7 @@ def test_lost_track_reacquires_only_on_interval_with_low_and_motion():
 
     tracks, events = updater.update_tracks(
         tracks,
-        [
-            _obs(10, source="low_det", score=1.0, box=[102, 101, 122, 121]),
-            _obs(10, source="motion", score=1.0, box=[102, 101, 122, 121], class_name="unknown"),
-        ],
+        [_obs(10, source="low_det", score=1.0, box=[102, 101, 122, 121])],
         frame_idx=10,
     )
 
@@ -837,39 +650,6 @@ def test_lost_track_reacquires_only_on_interval_with_low_and_motion():
     assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
     assert updater.last_reacquire_debug["attempted"] is True
     assert updater.last_reacquire_debug["num_matches"] == 1
-
-
-def test_lost_track_reacquires_from_same_gid_roi_low_detection_with_wide_gate():
-    updater = EvidenceStateUpdater(ROIReacquireLifecycleConfig)
-    tracks = [
-        EvidenceTrack(
-            gid=7,
-            public_id=3,
-            state=TrackState.LOST,
-            box=[100, 100, 120, 120],
-            velocity=[0.0, 0.0],
-            evidence_score=1.0,
-            hits=4,
-            misses=2,
-            age=8,
-            last_seen=4,
-            last_real_det_frame=4,
-            real_det_hits=4,
-            class_id=2,
-            class_name="UAV",
-        )
-    ]
-    obs = _obs(10, source="roi_low_det", score=0.9, box=[420, 100, 440, 120])
-    obs.raw["roi_track_gid"] = 7
-
-    tracks, events = updater.update_tracks(tracks, [obs], frame_idx=10)
-
-    assert tracks[0].state == TrackState.ACTIVE
-    assert tracks[0].public_id == 3
-    assert tracks[0].last_real_det_frame == 10
-    assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
-    assert updater.last_reacquire_debug["num_matches"] == 1
-
 
 def test_reacquire_center_gate_expands_for_large_tracks():
     updater = EvidenceStateUpdater(ReacquireScaleGateConfig)
@@ -899,36 +679,6 @@ def test_reacquire_center_gate_expands_for_large_tracks():
     assert tracks[0].state == TrackState.ACTIVE
     assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
     assert updater.last_reacquire_debug["matches"][0]["center_threshold"] == 240.0
-
-
-def test_template_only_observation_cannot_reacquire_lost_track():
-    updater = EvidenceStateUpdater(ReacquireScaleGateConfig)
-    lost = EvidenceTrack(
-        gid=1,
-        public_id=1,
-        state=TrackState.LOST,
-        box=[100, 100, 120, 120],
-        velocity=[0.0, 0.0],
-        evidence_score=1.0,
-        hits=8,
-        misses=3,
-        age=20,
-        last_seen=10,
-        last_real_det_frame=10,
-        real_det_hits=8,
-        class_id=2,
-        class_name="UAV",
-    )
-
-    tracks, events = updater.update_tracks(
-        [lost],
-        [_obs(11, source="template", score=1.0, box=[100, 100, 120, 120])],
-        frame_idx=11,
-    )
-
-    assert tracks[0].state == TrackState.LOST
-    assert events == []
-    assert updater.last_reacquire_debug["num_matches"] == 0
 
 
 def test_scale_expanded_lost_gate_suppresses_low_spawn_on_skipped_reacquire_frame():
@@ -1034,15 +784,15 @@ def test_overlapping_observations_are_merged_into_one_candidate():
         [],
         [
             _obs(0, source="high_det", score=0.8, box=[10, 10, 20, 20]),
-            _obs(0, source="motion", score=0.5, box=[11, 11, 21, 21], class_name="unknown"),
+            _obs(0, source="low_det", score=0.5, box=[11, 11, 21, 21]),
         ],
         frame_idx=0,
     )
 
     assert len(tracks) == 1
     assert tracks[0].state == TrackState.CANDIDATE
-    assert tracks[0].source_history == ["high_det", "motion"]
-    assert tracks[0].evidence_score == 1.34
+    assert tracks[0].source_history == ["high_det", "low_det"]
+    assert tracks[0].evidence_score == 1.54
     assert [event.event_type for event in events] == ["NEW_CANDIDATE"]
 
 

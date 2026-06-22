@@ -1,8 +1,7 @@
 """
 MS-DC-ELT-lite tracker coordinator.
 
-This class wires high-threshold detections, low-only detections, motion seeds,
-active-only template observations, low-frequency lost reacquire, removed-ID
+This class wires high-threshold detections, low-only detections, removed-ID
 guard diagnostics, and EvidenceStateUpdater together.
 """
 
@@ -18,7 +17,6 @@ import numpy as np
 
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.utils.evidence_state import EvidenceStateUpdater
-from target_module.image_detect_module.utils.motion_seed import MotionSeedGenerator
 from target_module.image_detect_module.utils.msdc_types import (
     EvidenceTrack,
     Observation,
@@ -30,8 +28,6 @@ from target_module.image_detect_module.utils.msdc_types import (
     xywh_to_xyxy,
     xyxy_to_project_box,
 )
-from target_module.image_detect_module.utils.roi_redetect import ROIRedetector
-from target_module.image_detect_module.utils.template_lock import TemplateLock
 
 
 class MSDCLifecycleTracker:
@@ -39,23 +35,17 @@ class MSDCLifecycleTracker:
         self.config = config or Config
         self.file_type = file_type
         self.tracks: list[EvidenceTrack] = []
-        self.motion_seed = MotionSeedGenerator(self.config)
-        self.roi_redetector = ROIRedetector(self.config, processor=processor)
         self.evidence_updater = EvidenceStateUpdater(self.config)
-        self.template_lock = TemplateLock(self.config)
         self.output_candidates = bool(getattr(self.config, "MSDC_OUTPUT_CANDIDATES", False))
         self.debug_events = bool(getattr(self.config, "MSDC_DEBUG_EVENTS", False))
         self.debug_dir = self._resolve_debug_dir(debug_dir)
         self.last_events = []
         self.last_debug_info: dict[str, Any] = {}
-        self.last_motion_debug: dict[str, Any] = {}
-        self.last_template_debug: dict[str, Any] = self._empty_template_debug()
         self.last_reacquire_debug: dict[str, Any] = {}
         self.last_low_inherit_debug: dict[str, Any] = {}
         self.last_removed_guard_debug: dict[str, Any] = {}
         self.last_spawn_suppression_debug: dict[str, Any] = {}
         self.last_output_nms_debug: dict[str, Any] = self._empty_output_nms_debug()
-        self.last_roi_redetect_debug: dict[str, Any] = {}
         self.last_low_observation_budget_debug: dict[str, Any] = self._empty_low_observation_budget_debug()
         self.last_timing_debug: dict[str, float] = self._empty_timing_debug()
 
@@ -89,40 +79,10 @@ class MSDCLifecycleTracker:
         low_filter_s = time.perf_counter() - step_start
 
         step_start = time.perf_counter()
-        roi_low_boxes, roi_debug = self.roi_redetector.update(
-            frame=frame,
-            tracks=self.tracks,
-            frame_idx=idx,
-            file_type=modality,
-            existing_boxes=high_boxes + low_boxes,
-        )
-        self.last_roi_redetect_debug = dict(roi_debug or {})
-        roi_redetect_s = time.perf_counter() - step_start
-
-        step_start = time.perf_counter()
-        if bool(getattr(self.config, "MSDC_USE_MOTION", True)):
-            motion_boxes, motion_debug = self.motion_seed.update(frame, frame_idx=idx)
-        else:
-            motion_boxes, motion_debug = [], {"frame_idx": idx, "num_motion_boxes": 0, "disabled": True}
-        self.last_motion_debug = dict(motion_debug or {})
-        motion_s = time.perf_counter() - step_start
-
-        step_start = time.perf_counter()
         observations = []
         observations.extend(self._boxes_to_observations(high_boxes, "high_det", idx, modality))
         observations.extend(self._boxes_to_observations(low_only_boxes, "low_det", idx, modality))
-        observations.extend(self._boxes_to_observations(roi_low_boxes, "roi_low_det", idx, modality))
-        observations.extend(self._boxes_to_observations(motion_boxes, "motion", idx, modality))
         observation_build_s = time.perf_counter() - step_start
-
-        step_start = time.perf_counter()
-        template_observations = []
-        if self._template_enabled():
-            template_observations = self.template_lock.match_active_tracks(self.tracks, frame, idx, modality=modality)
-            if self.evidence_updater.should_reacquire_frame(idx):
-                template_observations.extend(self.template_lock.match_lost_tracks(self.tracks, frame, idx, modality=modality))
-        observations.extend(template_observations)
-        template_match_s = time.perf_counter() - step_start
 
         step_start = time.perf_counter()
         self.tracks, events = self.evidence_updater.update_tracks(self.tracks, observations, idx)
@@ -130,7 +90,6 @@ class MSDCLifecycleTracker:
         evidence_update_s = time.perf_counter() - step_start
 
         step_start = time.perf_counter()
-        self.last_template_debug = self._sync_active_templates(frame, template_observations, idx)
         self.last_reacquire_debug = dict(getattr(self.evidence_updater, "last_reacquire_debug", {}) or {})
         self.last_low_inherit_debug = dict(getattr(self.evidence_updater, "last_low_inherit_debug", {}) or {})
         self.last_removed_guard_debug = dict(getattr(self.evidence_updater, "last_removed_guard_debug", {}) or {})
@@ -139,7 +98,6 @@ class MSDCLifecycleTracker:
             "last_spawn_suppression_debug",
             {},
         ) or {})
-        template_sync_s = time.perf_counter() - step_start
 
         step_start = time.perf_counter()
         output_boxes = self._tracks_to_output_boxes(self.tracks, frame_idx=idx)
@@ -153,9 +111,6 @@ class MSDCLifecycleTracker:
                 high_boxes=high_boxes,
                 low_boxes=low_boxes,
                 low_only_boxes=low_only_boxes,
-                roi_low_boxes=roi_low_boxes,
-                motion_boxes=motion_boxes,
-                template_observations=template_observations,
                 observations=observations,
                 output_boxes=output_boxes,
             )
@@ -167,21 +122,14 @@ class MSDCLifecycleTracker:
                 high_boxes=high_boxes,
                 low_boxes=low_boxes,
                 low_only_boxes=low_only_boxes,
-                roi_low_boxes=roi_low_boxes,
-                motion_boxes=motion_boxes,
-                template_observations=template_observations,
                 observations=observations,
                 output_boxes=output_boxes,
             )
         debug_s = time.perf_counter() - step_start
         self.last_timing_debug = {
             "low_filter_s": float(low_filter_s),
-            "roi_redetect_s": float(roi_redetect_s),
-            "motion_s": float(motion_s),
             "observation_build_s": float(observation_build_s),
-            "template_match_s": float(template_match_s),
             "evidence_update_s": float(evidence_update_s),
-            "template_sync_s": float(template_sync_s),
             "output_s": float(output_s),
             "debug_s": float(debug_s),
             "total_update_s": float(time.perf_counter() - update_start),
@@ -190,20 +138,14 @@ class MSDCLifecycleTracker:
 
     def reset(self) -> None:
         self.tracks = []
-        self.motion_seed.reset()
-        self.roi_redetector.reset()
         self.evidence_updater = EvidenceStateUpdater(self.config)
-        self.template_lock.reset()
         self.last_events = []
         self.last_debug_info = {}
-        self.last_motion_debug = {}
-        self.last_template_debug = self._empty_template_debug()
         self.last_reacquire_debug = {}
         self.last_low_inherit_debug = {}
         self.last_removed_guard_debug = {}
         self.last_spawn_suppression_debug = {}
         self.last_output_nms_debug = self._empty_output_nms_debug()
-        self.last_roi_redetect_debug = {}
         self.last_low_observation_budget_debug = self._empty_low_observation_budget_debug()
         self.last_timing_debug = self._empty_timing_debug()
 
@@ -211,12 +153,8 @@ class MSDCLifecycleTracker:
     def _empty_timing_debug() -> dict[str, float]:
         return {
             "low_filter_s": 0.0,
-            "roi_redetect_s": 0.0,
-            "motion_s": 0.0,
             "observation_build_s": 0.0,
-            "template_match_s": 0.0,
             "evidence_update_s": 0.0,
-            "template_sync_s": 0.0,
             "output_s": 0.0,
             "debug_s": 0.0,
             "total_update_s": 0.0,
@@ -580,11 +518,6 @@ class MSDCLifecycleTracker:
             box[[1, 3]] += float(velocity[1])
         return box
 
-    def _template_enabled(self) -> bool:
-        return bool(getattr(self.config, "MSDC_USE_TEMPLATE", False)) and bool(
-            getattr(self.config, "MSDC_TEMPLATE_ENABLE", False)
-        )
-
     @staticmethod
     def _empty_low_observation_budget_debug() -> dict:
         return {
@@ -670,9 +603,6 @@ class MSDCLifecycleTracker:
         high_boxes: list[dict],
         low_boxes: list[dict],
         low_only_boxes: list[dict],
-        roi_low_boxes: list[dict],
-        motion_boxes: list[dict],
-        template_observations: list[Observation],
         observations: list[Observation],
         output_boxes: list[dict],
     ) -> dict:
@@ -688,9 +618,6 @@ class MSDCLifecycleTracker:
             "num_high": int(len(high_boxes)),
             "num_low": int(len(low_boxes)),
             "num_low_only": int(len(low_only_boxes)),
-            "num_roi_low": int(len(roi_low_boxes)),
-            "num_motion": int(len(motion_boxes)),
-            "num_template": int(len(template_observations)),
             "num_observations": int(len(observations)),
             "num_events": int(len(self.last_events)),
             "active_track_count": int(active_count),
@@ -699,13 +626,7 @@ class MSDCLifecycleTracker:
             "lost_track_count": int(lost_count),
             "removed_track_count": int(removed_count),
             "output_box_count": int(len(output_boxes)),
-            "motion_debug": self.last_motion_debug,
-            "roi_redetect_debug": self._compact_roi_redetect_debug(self.last_roi_redetect_debug),
             "low_observation_budget_debug": dict(self.last_low_observation_budget_debug),
-            "template_score": self.last_template_debug["template_score"],
-            "template_updated": self.last_template_debug["template_updated"],
-            "template_match_box": self.last_template_debug["template_match_box"],
-            "template_debug": self._compact_template_debug(self.last_template_debug),
             "reacquire_debug": self._compact_reacquire_debug(self.last_reacquire_debug),
             "low_inherit_debug": self._compact_low_inherit_debug(self.last_low_inherit_debug),
             "removed_guard_debug": self._compact_removed_guard_debug(self.last_removed_guard_debug),
@@ -716,7 +637,6 @@ class MSDCLifecycleTracker:
             "_high_boxes": high_boxes,
             "_low_boxes": low_boxes,
             "_low_only_boxes": low_only_boxes,
-            "_roi_low_boxes": roi_low_boxes,
         }
 
     def _minimal_frame_debug_info(
@@ -726,9 +646,6 @@ class MSDCLifecycleTracker:
         high_boxes: list[dict],
         low_boxes: list[dict],
         low_only_boxes: list[dict],
-        roi_low_boxes: list[dict],
-        motion_boxes: list[dict],
-        template_observations: list[Observation],
         observations: list[Observation],
         output_boxes: list[dict],
     ) -> dict:
@@ -743,9 +660,6 @@ class MSDCLifecycleTracker:
             "num_high": int(len(high_boxes)),
             "num_low": int(len(low_boxes)),
             "num_low_only": int(len(low_only_boxes)),
-            "num_roi_low": int(len(roi_low_boxes)),
-            "num_motion": int(len(motion_boxes)),
-            "num_template": int(len(template_observations)),
             "num_observations": int(len(observations)),
             "num_events": int(len(self.last_events)),
             "active_track_count": int(active_count),
@@ -767,9 +681,6 @@ class MSDCLifecycleTracker:
             payload = event_to_dict(event)
             payload["state"] = payload.get("to_state")
             payload["transition_reason"] = payload.get("reason")
-            payload["template_score"] = frame_info.get("template_score")
-            payload["template_updated"] = frame_info.get("template_updated", False)
-            payload["template_match_box"] = frame_info.get("template_match_box")
             payload["reacquire_debug"] = self._compact_reacquire_debug(frame_info.get("reacquire_debug", {}), include_details=False)
             payload["low_inherit_debug"] = self._compact_low_inherit_debug(frame_info.get("low_inherit_debug", {}), include_details=False)
             payload["removed_guard_debug"] = self._compact_removed_guard_debug(frame_info.get("removed_guard_debug", {}), include_details=False)
@@ -809,9 +720,6 @@ class MSDCLifecycleTracker:
             "max_low_candidate_evidence_score": max(low_candidate_scores) if low_candidate_scores else 0.0,
             "num_observations": int(frame_info.get("num_observations", 0)),
             "num_low_only": int(frame_info.get("num_low_only", 0)),
-            "num_roi_low": int(frame_info.get("num_roi_low", 0)),
-            "num_motion": int(frame_info.get("num_motion", 0)),
-            "num_template": int(frame_info.get("num_template", 0)),
             "reacquire_attempted": bool(frame_info.get("reacquire_debug", {}).get("attempted", False)),
             "low_inherit_matches": int(frame_info.get("low_inherit_debug", {}).get("num_matches", 0)),
             "low_inherit_active_conflicts": int(frame_info.get("low_inherit_debug", {}).get("num_active_conflicts", 0)),
@@ -844,11 +752,6 @@ class MSDCLifecycleTracker:
             if len(snapshot) >= limit:
                 break
         return snapshot
-
-    def _compact_template_debug(self, debug: dict | None) -> dict:
-        payload = dict(debug or {})
-        payload["matches"] = self._limit_debug_list(payload.get("matches", []))
-        return payload
 
     def _compact_reacquire_debug(self, debug: dict | None, include_details: bool = True) -> dict:
         payload = dict(debug or {})
@@ -894,21 +797,12 @@ class MSDCLifecycleTracker:
             payload.pop("suppressed", None)
         return payload
 
-    def _compact_roi_redetect_debug(self, debug: dict | None, include_details: bool = True) -> dict:
-        payload = dict(debug or {})
-        if include_details:
-            payload["rois"] = self._limit_debug_list(payload.get("rois", []))
-        else:
-            payload.pop("rois", None)
-        return payload
-
     def _stage_observations(self, frame_info: dict) -> dict:
         boxes = []
         for stage, source_boxes in (
             ("high_det", frame_info.get("_high_boxes", [])),
             ("low_det", frame_info.get("_low_boxes", [])),
             ("low_only", frame_info.get("_low_only_boxes", [])),
-            ("roi_low_det", frame_info.get("_roi_low_boxes", [])),
             ("output", frame_info.get("output_boxes", [])),
         ):
             for box in source_boxes:
@@ -934,8 +828,6 @@ class MSDCLifecycleTracker:
             payload["track_id"] = int(box["track_id"])
         if "gid" in box:
             payload["gid"] = int(box["gid"])
-        if "roi_track_gid" in box:
-            payload["roi_track_gid"] = int(box["roi_track_gid"])
         return payload
 
     def _limit_debug_list(self, items: Any) -> list:
@@ -958,62 +850,9 @@ class MSDCLifecycleTracker:
         default = getattr(
             self.config,
             "MSDC_LIFECYCLE_DEBUG_OUTPUT_DIR",
-            getattr(self.config, "MSDC_MOTION_DEBUG_OUTPUT_DIR", None),
+            None,
         )
         return Path(default) if default else None
-
-    def _sync_active_templates(self, frame: np.ndarray, template_observations: list[Observation], frame_idx: int) -> dict:
-        if not self._template_enabled():
-            return self._empty_template_debug()
-        updated = False
-        track_by_gid = {int(track.gid): track for track in self.tracks}
-        for observation in template_observations:
-            gid = observation.raw.get("gid") if isinstance(observation.raw, dict) else None
-            if gid is None:
-                continue
-            track = track_by_gid.get(int(gid))
-            if track is None or self._track_state(track) != TrackState.ACTIVE:
-                continue
-            if self.template_lock.update_template(track, frame, observation):
-                updated = True
-
-        for track in self.tracks:
-            if self._track_state(track) != TrackState.ACTIVE:
-                continue
-            if track.template is None:
-                if int(getattr(track, "last_real_det_frame", -1)) != int(frame_idx):
-                    continue
-                if self.template_lock.init_template(track, frame):
-                    updated = True
-
-        return self._template_debug_summary(updated)
-
-    def _template_debug_summary(self, updated: bool) -> dict:
-        matches = list(self.template_lock.last_debug)
-        best = None
-        if matches:
-            best = max(matches, key=lambda item: float(item.get("template_score", 0.0)))
-        return {
-            "enabled": bool(getattr(self.config, "MSDC_TEMPLATE_ENABLE", True)),
-            "template_count": int(self.template_lock.template_count),
-            "num_template_matches": int(len(matches)),
-            "template_score": None if best is None else best.get("template_score"),
-            "template_updated": bool(updated or any(bool(item.get("template_updated", False)) for item in matches)),
-            "template_match_box": None if best is None else best.get("template_match_box"),
-            "matches": matches,
-        }
-
-    @staticmethod
-    def _empty_template_debug() -> dict:
-        return {
-            "enabled": False,
-            "template_count": 0,
-            "num_template_matches": 0,
-            "template_score": None,
-            "template_updated": False,
-            "template_match_box": None,
-            "matches": [],
-        }
 
     @staticmethod
     def _empty_output_nms_debug() -> dict:

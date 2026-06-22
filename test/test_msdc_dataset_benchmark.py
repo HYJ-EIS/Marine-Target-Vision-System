@@ -43,7 +43,7 @@ def test_metadata_and_failure_records_are_written(tmp_path):
         dataset_roots=[tmp_path / "dataset_a", tmp_path / "dataset_b"],
         output_root=tmp_path / "out",
         trackers=["ocsort", "botsort", "msdc_elt"],
-        variants=["Ours-full"],
+        variants=["v3_candidate_topk_no_roi_no_motion"],
         max_frames=0,
         duration_seconds=0.0,
         render=True,
@@ -246,8 +246,8 @@ def test_write_motchallenge_gt_sequence_can_clip_gt_to_max_frames(tmp_path):
 def test_build_render_command_uses_effective_export_max_frames(tmp_path):
     cmd = _build_render_command(
         input_video=tmp_path / "video.mp4",
-        tracker_file=tmp_path / "trackers" / "Ours-full" / "data" / "seq.txt",
-        output_file=tmp_path / "visualizations" / "seq" / "Ours-full.mp4",
+        tracker_file=tmp_path / "trackers" / "v3_candidate_topk_no_roi_no_motion" / "data" / "seq.txt",
+        output_file=tmp_path / "visualizations" / "seq" / "v3_candidate_topk_no_roi_no_motion.mp4",
         max_frames=1798,
         progress_interval=300,
     )
@@ -262,8 +262,8 @@ def test_build_render_command_uses_effective_export_max_frames(tmp_path):
 def test_build_render_command_accepts_class_source_none(tmp_path):
     cmd = _build_render_command(
         input_video=tmp_path / "video.mp4",
-        tracker_file=tmp_path / "trackers" / "Ours-full" / "data" / "seq.txt",
-        output_file=tmp_path / "visualizations" / "seq" / "Ours-full.mp4",
+        tracker_file=tmp_path / "trackers" / "v3_candidate_topk_no_roi_no_motion" / "data" / "seq.txt",
+        output_file=tmp_path / "visualizations" / "seq" / "v3_candidate_topk_no_roi_no_motion.mp4",
         max_frames=1798,
         progress_interval=300,
         class_source="none",
@@ -352,7 +352,7 @@ def test_compute_per_gt_stage_coverage_reports_detection_stage_gaps(tmp_path):
     stage_file.write_text(
         "\n".join([
             '{"frame_idx": 0, "boxes": [{"stage": "high_det", "x": 10, "y": 10, "w": 10, "h": 10}]}',
-            '{"frame_idx": 1, "boxes": [{"stage": "roi_low_det", "x": 11, "y": 10, "w": 10, "h": 10}, {"stage": "output", "track_id": 4, "x": 11, "y": 10, "w": 10, "h": 10}]}',
+            '{"frame_idx": 1, "boxes": [{"stage": "low_det", "x": 11, "y": 10, "w": 10, "h": 10}, {"stage": "output", "track_id": 4, "x": 11, "y": 10, "w": 10, "h": 10}]}',
             '{"frame_idx": 2, "boxes": []}',
             "",
         ]),
@@ -366,18 +366,16 @@ def test_compute_per_gt_stage_coverage_reports_detection_stage_gaps(tmp_path):
             "gt_id": 3,
             "gt_frame_count": 3,
             "high_det_frame_count": 1,
-            "low_det_frame_count": 0,
+            "low_det_frame_count": 1,
             "low_only_frame_count": 0,
-            "roi_low_det_frame_count": 1,
             "output_frame_count": 1,
             "high_det_coverage": 0.3333,
-            "low_det_coverage": 0.0,
+            "low_det_coverage": 0.3333,
             "low_only_coverage": 0.0,
-            "roi_low_det_coverage": 0.3333,
             "output_coverage": 0.3333,
             "output_predicted_id_count": 1,
             "output_predicted_ids": "4",
-            "missing_after_roi_segments": "3-3",
+            "missing_after_stage_segments": "3-3",
         }
     ]
 

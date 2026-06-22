@@ -27,10 +27,7 @@ from target_module.image_detect_module.utils.msdc_types import (
 _SOURCE_PRIORITY = {
     "high_det": 0,
     "low_det": 1,
-    "roi_low_det": 2,
-    "motion": 3,
-    "template": 4,
-    "reacquire": 5,
+    "reacquire": 2,
 }
 
 
@@ -173,8 +170,7 @@ class EvidenceStateUpdater:
         """
         Update evidence tracks with current observations.
 
-        The first version supports high_det, low_det, and motion observations,
-        while template/reacquire sources are accepted as reserved evidence terms.
+        The current runtime supports high_det, low_det, and reacquire evidence.
         """
         tracks = list(tracks or [])
         observations = list(observations or [])
@@ -228,10 +224,7 @@ class EvidenceStateUpdater:
             if _as_state(track.state) == TrackState.REMOVED:
                 continue
             positive_score = self._evidence_increment(groups[group_idx])
-            if self._group_has_real_detection(groups[group_idx]):
-                self._apply_matched_observation(track, groups[group_idx], frame_idx, positive_score)
-            else:
-                self._apply_auxiliary_observation(track, groups[group_idx], positive_score)
+            self._apply_matched_observation(track, groups[group_idx], frame_idx, positive_score)
 
         lost_indices = [
             idx
@@ -271,8 +264,14 @@ class EvidenceStateUpdater:
 
     def merge_observations(self, observations: list[Observation]) -> list[_ObservationGroup]:
         groups: list[_ObservationGroup] = []
+        supported_sources = self._real_detection_sources()
+        supported_observations = [
+            obs
+            for obs in observations
+            if str(obs.source) in supported_sources
+        ]
         sorted_observations = sorted(
-            observations,
+            supported_observations,
             key=lambda obs: (_SOURCE_PRIORITY.get(str(obs.source), 99), int(obs.frame_idx)),
         )
 
@@ -590,8 +589,8 @@ class EvidenceStateUpdater:
                 return None
 
         group = self._candidate_to_group(low_candidate)
-        motion_consistency = self._motion_consistency(lost, group)
-        if motion_consistency < float(self._cfg("MSDC_LOW_INHERIT_MOTION_MIN", 0.15)):
+        velocity_consistency = self._velocity_consistency(lost, group)
+        if velocity_consistency < float(self._cfg("MSDC_LOW_INHERIT_VELOCITY_MIN", 0.15)):
             return None
 
         center_score = max(0.0, 1.0 - center_dist / max(center_thresh, 1e-6))
@@ -600,7 +599,7 @@ class EvidenceStateUpdater:
         score = (
             float(self._cfg("MSDC_LOW_INHERIT_WEIGHT_IOU", 0.35)) * iou_score
             + float(self._cfg("MSDC_LOW_INHERIT_WEIGHT_CENTER", 0.25)) * center_score
-            + float(self._cfg("MSDC_LOW_INHERIT_WEIGHT_MOTION", 0.20)) * motion_consistency
+            + float(self._cfg("MSDC_LOW_INHERIT_WEIGHT_VELOCITY", 0.20)) * velocity_consistency
             + float(self._cfg("MSDC_LOW_INHERIT_WEIGHT_LOW_SCORE", 0.15)) * low_avg_score
             + float(self._cfg("MSDC_LOW_INHERIT_WEIGHT_RECENCY", 0.05)) * recency_score
         )
@@ -617,7 +616,7 @@ class EvidenceStateUpdater:
             "iou": float(round(iou_score, 4)),
             "center_distance": float(round(center_dist, 4)),
             "center_threshold": float(round(center_thresh, 4)),
-            "motion_consistency": float(round(motion_consistency, 4)),
+            "velocity_consistency": float(round(velocity_consistency, 4)),
             "low_avg_score": float(round(low_avg_score, 4)),
             "lost_age": int(lost_age),
             "low_candidate_box": [float(v) for v in _box_array(low_candidate.box).tolist()],
@@ -932,7 +931,7 @@ class EvidenceStateUpdater:
 
     @staticmethod
     def _real_detection_sources() -> set[str]:
-        return {"high_det", "low_det", "roi_low_det", "reacquire"}
+        return {"high_det", "low_det", "reacquire"}
 
     def _group_has_real_detection(self, group: _ObservationGroup) -> bool:
         return any(source in group.source_scores for source in self._real_detection_sources())
@@ -956,7 +955,7 @@ class EvidenceStateUpdater:
         return float(group.source_scores.get("low_det", 0.0)) >= float(self._cfg("MSDC_LOW_SPAWN_MIN_CONF", 0.30))
 
     def _low_history_from_group(self, group: _ObservationGroup, frame_idx: int) -> list[dict]:
-        score = max(float(group.source_scores.get("low_det", 0.0)), float(group.source_scores.get("roi_low_det", 0.0)))
+        score = float(group.source_scores.get("low_det", 0.0))
         if score <= 0.0:
             return []
         box = group.box
@@ -1009,12 +1008,6 @@ class EvidenceStateUpdater:
         source_scores = dict(group.source_scores)
         if not any(source in source_scores for source in self._real_detection_sources()):
             return None
-        if "roi_low_det" in source_scores and not self._group_has_min_size(
-            group,
-            float(self._cfg("MSDC_ROI_REDETECT_MIN_BOX_SIZE", self._cfg("MSDC_OUTPUT_MIN_BOX_SIZE", 12))),
-        ):
-            return None
-        same_gid_roi = self._group_has_roi_from_track(group, track)
 
         pred_box = self._predict_box(track).reshape(1, 4)
         group_box = group.box.reshape(1, 4)
@@ -1022,33 +1015,17 @@ class EvidenceStateUpdater:
         center_dist = float(_center_distance_batch(pred_box, group_box)[0, 0])
         iou_thresh = float(self._cfg("MSDC_REACQUIRE_IOU_THRESH", 0.05))
         center_thresh = self._reacquire_center_threshold(track)
-        if same_gid_roi:
-            center_thresh = max(center_thresh, float(self._cfg("MSDC_ROI_REACQUIRE_CENTER_DIST", 600.0)))
-            iou_thresh = 0.0
         if iou_score < iou_thresh and center_dist > center_thresh:
             return None
 
         base_score = self._evidence_increment(group)
-        motion_consistency = self._motion_consistency(track, group)
-        motion_bonus = (
-            float(self._cfg("MSDC_REACQUIRE_MOTION_CONSISTENCY_WEIGHT", 0.2))
-            * float(source_scores.get("motion", 0.0))
-            * motion_consistency
-        )
-        score = self._rounded_score(base_score + motion_bonus)
-        if same_gid_roi:
-            score = max(score, float(self._cfg("MSDC_REACQUIRE_SCORE", 1.5)))
+        score = self._rounded_score(base_score)
         debug = {
             "frame_idx": int(frame_idx),
             "gid": int(track.gid),
             "reacquire_score": float(score),
             "base_score": float(base_score),
             "low_det_score": float(source_scores.get("low_det", 0.0)),
-            "roi_low_det_score": float(source_scores.get("roi_low_det", 0.0)),
-            "motion_score": float(source_scores.get("motion", 0.0)),
-            "template_score": float(source_scores.get("template", 0.0)),
-            "motion_consistency": float(round(motion_consistency, 4)),
-            "same_gid_roi": bool(same_gid_roi),
             "iou": float(round(iou_score, 4)),
             "center_distance": float(round(center_dist, 4)),
             "center_threshold": float(round(center_thresh, 4)),
@@ -1056,19 +1033,6 @@ class EvidenceStateUpdater:
             "sources": list(group.source_history),
         }
         return score, debug
-
-    @staticmethod
-    def _group_has_roi_from_track(group: _ObservationGroup, track: EvidenceTrack) -> bool:
-        for observation in group.observations:
-            if str(observation.source) != "roi_low_det":
-                continue
-            raw = observation.raw if isinstance(observation.raw, dict) else {}
-            try:
-                if int(raw.get("roi_track_gid", -1)) == int(track.gid):
-                    return True
-            except (TypeError, ValueError):
-                continue
-        return False
 
     def _find_observation_group(self, groups: list[_ObservationGroup], box: np.ndarray) -> int | None:
         if not groups:
@@ -1107,7 +1071,7 @@ class EvidenceStateUpdater:
             return group
         raise TypeError(f"Unsupported candidate type for removed guard: {type(candidate)!r}")
 
-    def _motion_consistency(self, track: EvidenceTrack, group: _ObservationGroup) -> float:
+    def _velocity_consistency(self, track: EvidenceTrack, group: _ObservationGroup) -> float:
         velocity = np.asarray(track.velocity, dtype=np.float64).reshape(-1)
         if velocity.size < 2:
             return 0.0
@@ -1132,7 +1096,6 @@ class EvidenceStateUpdater:
             "last_seen": int(track.last_seen),
             "removed_frame_idx": int(frame_idx),
             "last_velocity": [float(v) for v in np.asarray(track.velocity, dtype=np.float64).reshape(-1)[:2].tolist()],
-            "template": track.template if isinstance(track.template, dict) else None,
             "class_id": int(track.class_id),
             "class_name": str(track.class_name),
         }
@@ -1426,8 +1389,6 @@ class EvidenceStateUpdater:
         track.last_seen = int(frame_idx)
         track.last_real_det_frame = int(frame_idx)
         track.real_det_hits = int(track.real_det_hits) + 1
-        track.template_only_streak = 0
-        track.motion_only_streak = 0
         track.last_real_det_box = new_box.copy()
         self._append_low_det_history(track, group, frame_idx)
         self._append_source_history(track, group.source_history)
@@ -1439,30 +1400,7 @@ class EvidenceStateUpdater:
         if _as_state(track.state) != TrackState.ACTIVE:
             return True
         sources = set(group.source_scores)
-        return bool(sources & {"high_det", "roi_low_det", "reacquire"})
-
-    def _apply_auxiliary_observation(
-        self,
-        track: EvidenceTrack,
-        group: _ObservationGroup,
-        positive_score: float,
-    ) -> None:
-        track.evidence_score = self._rounded_score(
-            float(self._cfg("MSDC_EVIDENCE_ALPHA", 0.85)) * float(track.evidence_score) + positive_score
-        )
-        sources = set(group.source_scores)
-        if sources and sources <= {"template"}:
-            track.template_only_streak = int(track.template_only_streak) + 1
-            track.motion_only_streak = 0
-        elif sources and sources <= {"motion"}:
-            track.motion_only_streak = int(track.motion_only_streak) + 1
-            track.template_only_streak = 0
-        else:
-            if "template" in sources:
-                track.template_only_streak = int(track.template_only_streak) + 1
-            if "motion" in sources:
-                track.motion_only_streak = int(track.motion_only_streak) + 1
-        self._append_source_history(track, group.source_history)
+        return bool(sources & {"high_det", "reacquire"})
 
     def _apply_negative_evidence(self, track: EvidenceTrack) -> None:
         track.misses = int(track.misses) + 1
@@ -1626,8 +1564,6 @@ class EvidenceStateUpdater:
             "last_seen": int(track.last_seen),
             "last_real_det_frame": int(track.last_real_det_frame),
             "real_det_hits": int(track.real_det_hits),
-            "template_only_streak": int(track.template_only_streak),
-            "motion_only_streak": int(track.motion_only_streak),
             "source_history": list(track.source_history),
         }
         if track.retired_signature is not None:
@@ -1656,9 +1592,6 @@ class EvidenceStateUpdater:
         mapping = {
             "high_det": "MSDC_WEIGHT_HIGH",
             "low_det": "MSDC_WEIGHT_LOW",
-            "roi_low_det": "MSDC_WEIGHT_ROI_LOW",
-            "motion": "MSDC_WEIGHT_MOTION",
-            "template": "MSDC_WEIGHT_TEMPLATE",
             "reacquire": "MSDC_WEIGHT_REACQUIRE",
         }
         return float(self._cfg(mapping.get(source, "MSDC_WEIGHT_LOW"), 1.0))
@@ -1707,40 +1640,12 @@ class EvidenceStateUpdater:
             return False
         if not self._low_history_area_stable(history):
             return False
-        if not self._low_history_motion_stable(history):
+        if not self._low_history_center_step_stable(history):
             return False
         return True
 
     def _active_missing_patience(self, track: EvidenceTrack, frame_idx: int) -> int:
-        base_patience = int(self._cfg("MSDC_ACTIVE_MISSING_PATIENCE", 2))
-        supported_patience = int(self._cfg("MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE", base_patience))
-        if supported_patience <= base_patience:
-            return base_patience
-        if not self._active_has_auxiliary_support(track):
-            return base_patience
-        if not self._active_has_recent_low_support(track, frame_idx):
-            return base_patience
-        return supported_patience
-
-    def _active_has_auxiliary_support(self, track: EvidenceTrack) -> bool:
-        if int(getattr(track, "template_only_streak", 0)) <= 0 and int(getattr(track, "motion_only_streak", 0)) <= 0:
-            return False
-        history = [str(source) for source in list(getattr(track, "source_history", []) or [])]
-        return any(source in {"template", "motion"} for source in history[-4:])
-
-    def _active_has_recent_low_support(self, track: EvidenceTrack, frame_idx: int) -> bool:
-        window = int(self._cfg("MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW", 8))
-        if window <= 0:
-            return False
-        for item in list(getattr(track, "low_det_history", []) or []):
-            try:
-                age = int(frame_idx) - int(item.get("frame_idx", frame_idx))
-                score = float(item.get("score", 0.0))
-            except (TypeError, ValueError):
-                continue
-            if 0 <= age <= window and score >= float(self._cfg("MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE", 0.2)):
-                return True
-        return False
+        return int(self._cfg("MSDC_ACTIVE_MISSING_PATIENCE", 2))
 
     @staticmethod
     def _group_has_min_size(group: _ObservationGroup, min_size: float) -> bool:
@@ -1756,7 +1661,7 @@ class EvidenceStateUpdater:
         ratio = max(areas) / max(min(areas), 1e-9)
         return bool(ratio <= float(self._cfg("MSDC_LOW_CONFIRM_MAX_AREA_CHANGE", 1.8)))
 
-    def _low_history_motion_stable(self, history: list[dict]) -> bool:
+    def _low_history_center_step_stable(self, history: list[dict]) -> bool:
         if len(history) < 4:
             return True
         centers = []
@@ -1775,8 +1680,6 @@ class EvidenceStateUpdater:
 
     def _candidate_has_required_detection(self, track: EvidenceTrack) -> bool:
         if not bool(self._cfg("MSDC_CONFIRM_REQUIRE_DET", True)):
-            return True
-        if bool(self._cfg("MSDC_CONFIRM_ALLOW_MOTION_ONLY", False)):
             return True
         min_hits = int(self._cfg(
             "MSDC_CONFIRM_MIN_REAL_DET_HITS",

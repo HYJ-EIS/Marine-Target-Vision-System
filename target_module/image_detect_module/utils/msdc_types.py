@@ -148,12 +148,9 @@ class EvidenceTrack:
     last_seen: int = -1
     last_real_det_frame: int = -1
     real_det_hits: int = 0
-    template_only_streak: int = 0
-    motion_only_streak: int = 0
     last_real_det_box: Any = None
     low_det_history: list[dict] = field(default_factory=list)
     source_history: list[str] = field(default_factory=list)
-    template: Any = None
     retired_signature: Any = None
     class_id: int = -1
     class_name: str = "unknown"
@@ -227,12 +224,9 @@ def track_to_dict(track: EvidenceTrack) -> dict:
         "last_seen": int(track.last_seen),
         "last_real_det_frame": int(track.last_real_det_frame),
         "real_det_hits": int(track.real_det_hits),
-        "template_only_streak": int(track.template_only_streak),
-        "motion_only_streak": int(track.motion_only_streak),
         "last_real_det_box": None if track.last_real_det_box is None else _box_list(track.last_real_det_box),
         "low_det_history": _json_safe(track.low_det_history),
         "source_history": [str(source) for source in track.source_history],
-        "template": _json_safe(track.template),
         "retired_signature": _json_safe(track.retired_signature),
         "class_id": int(track.class_id),
         "class_name": str(track.class_name),

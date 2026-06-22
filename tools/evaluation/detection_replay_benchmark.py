@@ -121,21 +121,9 @@ def dump_video_detections(
     return write_detection_cache(output_cache, rows)
 
 
-def _set_msdc_high_replay_config() -> dict[str, object]:
-    keys = [
-        "MSDC_USE_LOW_DET",
-        "MSDC_USE_MOTION",
-        "MSDC_USE_TEMPLATE",
-        "MSDC_TEMPLATE_ENABLE",
-        "MSDC_USE_ROI_REDETECT",
-        "MSDC_DEBUG_EVENTS",
-    ]
+def _set_msdc_replay_config() -> dict[str, object]:
+    keys = ["MSDC_DEBUG_EVENTS"]
     old_values = {key: getattr(Config, key) for key in keys if hasattr(Config, key)}
-    Config.MSDC_USE_LOW_DET = False
-    Config.MSDC_USE_MOTION = False
-    Config.MSDC_USE_TEMPLATE = False
-    Config.MSDC_TEMPLATE_ENABLE = False
-    Config.MSDC_USE_ROI_REDETECT = False
     Config.MSDC_DEBUG_EVENTS = True
     return old_values
 
@@ -175,7 +163,7 @@ def replay_tracker_from_cache(
         if tracker_type == "msdc_elt":
             from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
 
-            old_config = _set_msdc_high_replay_config()
+            old_config = _set_msdc_replay_config()
             tracker = None
             diagnostics_dir = Path(output_root) / tracker_name / "diagnostics" / seq_name
             lifecycle_tracker = MSDCLifecycleTracker(

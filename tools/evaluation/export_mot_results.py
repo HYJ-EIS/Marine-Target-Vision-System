@@ -29,7 +29,6 @@ from target_module.image_detect_module.constants import TRACKER_CHOICES
 from target_module.image_detect_module.utils.file_utils import get_file_type
 from target_module.image_detect_module.utils.msdc_detection import (
     resolve_msdc_high_low_boxes,
-    run_msdc_high_threshold_detection as _run_msdc_high_threshold_detection,
     split_msdc_high_from_low_boxes as _split_msdc_high_from_low_boxes,
 )
 from target_module.image_detect_module.utils.tracking_update import (

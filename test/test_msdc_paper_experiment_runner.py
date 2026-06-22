@@ -52,7 +52,7 @@ def test_formal_commands_accept_duration_limit():
         commit_hash="abcdef0",
         progress_interval=500,
         run=True,
-        variants=["v2_template_off"],
+        variants=["v2_candidate_topk"],
         duration_seconds=120.0,
         render_class_source="none",
     )
@@ -73,22 +73,17 @@ def test_ablation_command_includes_required_variants():
         progress_interval=500,
         run=True,
     )
-    assert "Ours-full" in cmd
-    assert "Ours-lite-no-motion" in cmd
-    assert "Ours-lite-no-low-det" in cmd
-    assert "Ours-no-template" in cmd
     assert "Ours-no-reacquire" in cmd
     assert "Ours-no-removed-guard" in cmd
+    assert "v2_candidate_topk" in cmd
+    assert "v3_candidate_topk_no_roi_no_motion" in cmd
 
 
 def test_ablation_command_accepts_selected_variants():
     args = runner.parse_args([
         "--ablation-variants",
-        "v2_no_roi_redetect",
-        "v2_roi_max1",
+        "v2_output_age5_size8",
         "v2_candidate_topk",
-        "v2_candidate_topk_roi_max1",
-        "v2_candidate_topk_no_roi",
         "v3_candidate_topk_no_roi_no_motion",
         "v2_speed_diag_off",
     ])
@@ -102,14 +97,10 @@ def test_ablation_command_accepts_selected_variants():
         variants=list(args.ablation_variants),
     )
     joined = " ".join(cmd)
-    assert "v2_no_roi_redetect" in joined
-    assert "v2_roi_max1" in joined
+    assert "v2_output_age5_size8" in joined
     assert "v2_candidate_topk" in joined
-    assert "v2_candidate_topk_roi_max1" in joined
-    assert "v2_candidate_topk_no_roi" in joined
     assert "v3_candidate_topk_no_roi_no_motion" in joined
     assert "v2_speed_diag_off" in joined
-    assert "Ours-full" not in joined
 
 
 def test_speed_command_records_fixed_frame_count():
@@ -285,39 +276,27 @@ def test_v2_ablation_variants_are_available():
     from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, _variant_env
 
     expected = {
-        "v2_template_off",
-        "v2_shared_det",
-        "v2_low_clean",
         "v2_output_age5_size8",
         "v2_output_age8_size8",
         "v2_output_age12_size8",
         "v2_candidate_low3_window6",
         "v2_candidate_low4_window8",
         "v2_candidate_real2_age8",
-        "v2_roi_budget_active8_max2",
-        "v2_roi_budget_active10_max2",
+        "v2_candidate_topk",
         "v2_reacquire_interval1",
         "v2_reacquire_interval2",
         "v2_reacquire_interval5_center240",
         "v3_candidate_topk_no_roi_no_motion",
     }
     assert expected <= set(ABLATION_VARIANTS)
-    assert ABLATION_VARIANTS["v2_template_off"]["MSDC_USE_TEMPLATE"] == "0"
-    assert ABLATION_VARIANTS["v2_shared_det"]["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "1"
-    assert ABLATION_VARIANTS["v2_roi_budget_active8_max2"]["MSDC_ROI_REDETECT_MAX_TRACKS"] == "2"
 
     env = _variant_env("v2_candidate_real2_age8")
-    assert env["MSDC_USE_LOW_DET"] == "1"
     assert env["MSDC_USE_REACQUIRE"] == "1"
-    assert env["MSDC_USE_ROI_REDETECT"] == "1"
     assert env["MSDC_REUSE_GUARD_ENABLE"] == "1"
     assert env["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
     assert env["MSDC_CANDIDATE_MAX_AGE"] == "8"
 
     formal_env = _variant_env("v3_candidate_topk_no_roi_no_motion")
-    assert formal_env["MSDC_USE_MOTION"] == "0"
-    assert formal_env["MSDC_USE_ROI_REDETECT"] == "0"
-    assert formal_env["MSDC_EXPORT_SHARE_LOW_HIGH_DET"] == "1"
     assert formal_env["MSDC_LOW_OBS_TOPK"] == "32"
     assert formal_env["MSDC_LOW_OBS_GLOBAL_TOPK"] == "32"
     assert formal_env["MSDC_LOW_OBS_MIN_CONF"] == "0.25"
@@ -327,13 +306,10 @@ def test_v2_ablation_variants_are_available():
 def test_v2_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):
     from tools.experiments.run_msdc_ablation import _execution_env, _variant_env
 
-    monkeypatch.setenv("MSDC_USE_LOW_DET", "0")
     monkeypatch.setenv("MSDC_CONFIRM_REQUIRE_HIGH_DET", "0")
     monkeypatch.setenv("UNRELATED_FLAG", "keep")
 
     env = _execution_env("v3_candidate_topk_no_roi_no_motion", _variant_env("v3_candidate_topk_no_roi_no_motion"))
 
-    assert env["MSDC_USE_LOW_DET"] == "1"
-    assert env["MSDC_USE_MOTION"] == "0"
     assert "MSDC_CONFIRM_REQUIRE_HIGH_DET" not in env
     assert env["UNRELATED_FLAG"] == "keep"

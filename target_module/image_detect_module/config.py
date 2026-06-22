@@ -82,40 +82,9 @@ class Config:
     # 低阈值检测调试输出根目录
     MSDC_DEBUG_LOW_DET_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "msdc_debug")
 
-    # MS-DC-ELT Task 2: 运动种子生成配置；独立 debug 使用，不接入 baseline tracker
-    MSDC_MOTION_ENABLE = True
-    # 是否使用现有 GMC 估计上一帧到当前帧的全局仿射补偿
-    MSDC_MOTION_USE_GMC = True
-    # 帧差阈值 percentile，越高越保守
-    MSDC_MOTION_DIFF_PERCENTILE = 97
-    # 运动连通域最小面积占整帧比例
-    MSDC_MOTION_MIN_AREA_RATIO = 1e-6
-    # 运动连通域最大面积占整帧比例
-    MSDC_MOTION_MAX_AREA_RATIO = 0.02
-    # 每帧最多输出 motion boxes 数量
-    MSDC_MOTION_MAX_BOXES = _env_int("MSDC_MOTION_MAX_BOXES", 32)
-    # 海面/浪花导致运动连通域爆炸时，motion 仅保留少量高分候选作为辅助证据
-    MSDC_MOTION_CLUTTER_COMPONENT_THRESH = _env_int("MSDC_MOTION_CLUTTER_COMPONENT_THRESH", 512)
-    MSDC_MOTION_CLUTTER_MAX_BOXES = _env_int("MSDC_MOTION_CLUTTER_MAX_BOXES", 12)
-    MSDC_MOTION_MIN_BOX_SIZE = _env_int("MSDC_MOTION_MIN_BOX_SIZE", 4)
-    # 是否输出运动种子 debug mask
-    MSDC_MOTION_DEBUG = False
-    # 运动种子 debug 默认输出根目录
-    MSDC_MOTION_DEBUG_OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "msdc_debug")
-    # 运动种子形态学核大小
-    MSDC_MOTION_MORPH_KERNEL = 3
-    # 运动种子最大长宽比，过滤细长噪声
-    MSDC_MOTION_MAX_ASPECT_RATIO = 8.0
-
     # MS-DC-ELT Task 4: evidence state 配置；默认不接入 baseline 跟踪链路
     MSDC_ENABLE = False
-    # MS-DC-ELT Task 9: 消融实验开关；可通过同名环境变量覆盖
-    MSDC_USE_LOW_DET = _env_bool("MSDC_USE_LOW_DET", True)
-    MSDC_USE_MOTION = _env_bool("MSDC_USE_MOTION", False)
-    MSDC_USE_TEMPLATE = _env_bool("MSDC_USE_TEMPLATE", False)
     MSDC_USE_REACQUIRE = _env_bool("MSDC_USE_REACQUIRE", True)
-    # 评测导出可选加速：msdc_elt 路径用一次低阈值检测结果切分 high/low，baseline 不使用
-    MSDC_EXPORT_SHARE_LOW_HIGH_DET = _env_bool("MSDC_EXPORT_SHARE_LOW_HIGH_DET", True)
     # 是否把 candidate 轨迹也输出给调用方；默认只输出 active，避免影响可视化语义
     MSDC_OUTPUT_CANDIDATES = False
     # 是否写 lifecycle debug JSONL；默认关闭以避免正式运行时 JSON 序列化拖慢 tracker
@@ -131,21 +100,17 @@ class Config:
     # 不同 observation source 的固定证据权重
     MSDC_WEIGHT_HIGH = 1.3
     MSDC_WEIGHT_LOW = 1.0
-    MSDC_WEIGHT_MOTION = 0.6
-    MSDC_WEIGHT_TEMPLATE = 0.4
     MSDC_WEIGHT_REACQUIRE = 1.0
-    MSDC_WEIGHT_ROI_LOW = _env_float("MSDC_WEIGHT_ROI_LOW", 1.0)
     # 每个未匹配帧的负证据惩罚 w_neg
     MSDC_NEGATIVE_WEIGHT = 0.5
     # candidate 确认为 active 的证据阈值和最小命中次数
     MSDC_CONFIRM_SCORE = _env_float("MSDC_CONFIRM_SCORE", 2.5)
     MSDC_CONFIRM_MIN_HITS = _env_int("MSDC_CONFIRM_MIN_HITS", 4)
-    # 候选确认必须有检测证据，避免 motion-only/template-only 噪声直接激活
+    # 候选确认必须有检测证据，避免无检测证据噪声直接激活
     MSDC_CONFIRM_REQUIRE_DET = _env_bool("MSDC_CONFIRM_REQUIRE_DET", True)
     MSDC_CONFIRM_MIN_DET_HITS = _env_int("MSDC_CONFIRM_MIN_DET_HITS", 4)
     MSDC_CONFIRM_MIN_REAL_DET_HITS = _env_int("MSDC_CONFIRM_MIN_REAL_DET_HITS", 4)
     MSDC_CONFIRM_REQUIRE_HIGH_DET = _env_bool("MSDC_CONFIRM_REQUIRE_HIGH_DET", True)
-    MSDC_CONFIRM_ALLOW_MOTION_ONLY = _env_bool("MSDC_CONFIRM_ALLOW_MOTION_ONLY", False)
     # 低阈值检测只有达到该置信度才允许生成新 candidate
     MSDC_LOW_SPAWN_MIN_CONF = _env_float("MSDC_LOW_SPAWN_MIN_CONF", 0.30)
     MSDC_LOW_CANDIDATE_ENABLE = _env_bool("MSDC_LOW_CANDIDATE_ENABLE", True)
@@ -163,13 +128,13 @@ class Config:
     MSDC_LOW_INHERIT_MAX_LOST_AGE = _env_int("MSDC_LOW_INHERIT_MAX_LOST_AGE", 120)
     MSDC_LOW_INHERIT_USE_HISTORY_VELOCITY = _env_bool("MSDC_LOW_INHERIT_USE_HISTORY_VELOCITY", True)
     MSDC_LOW_INHERIT_MAX_PREDICT_AGE = _env_int("MSDC_LOW_INHERIT_MAX_PREDICT_AGE", 120)
-    MSDC_LOW_INHERIT_MOTION_MIN = _env_float("MSDC_LOW_INHERIT_MOTION_MIN", 0.15)
+    MSDC_LOW_INHERIT_VELOCITY_MIN = _env_float("MSDC_LOW_INHERIT_VELOCITY_MIN", 0.15)
     MSDC_LOW_INHERIT_CLASS_MATCH = _env_bool("MSDC_LOW_INHERIT_CLASS_MATCH", True)
     MSDC_LOW_INHERIT_CLASS_MISMATCH_CENTER_DIST = _env_float("MSDC_LOW_INHERIT_CLASS_MISMATCH_CENTER_DIST", 80.0)
     MSDC_LOW_INHERIT_CLASS_MISMATCH_PENALTY = _env_float("MSDC_LOW_INHERIT_CLASS_MISMATCH_PENALTY", 0.0)
     MSDC_LOW_INHERIT_WEIGHT_IOU = _env_float("MSDC_LOW_INHERIT_WEIGHT_IOU", 0.35)
     MSDC_LOW_INHERIT_WEIGHT_CENTER = _env_float("MSDC_LOW_INHERIT_WEIGHT_CENTER", 0.25)
-    MSDC_LOW_INHERIT_WEIGHT_MOTION = _env_float("MSDC_LOW_INHERIT_WEIGHT_MOTION", 0.20)
+    MSDC_LOW_INHERIT_WEIGHT_VELOCITY = _env_float("MSDC_LOW_INHERIT_WEIGHT_VELOCITY", 0.20)
     MSDC_LOW_INHERIT_WEIGHT_LOW_SCORE = _env_float("MSDC_LOW_INHERIT_WEIGHT_LOW_SCORE", 0.15)
     MSDC_LOW_INHERIT_WEIGHT_RECENCY = _env_float("MSDC_LOW_INHERIT_WEIGHT_RECENCY", 0.05)
     # candidate 剪枝阈值和最大生命周期
@@ -177,10 +142,6 @@ class Config:
     MSDC_CANDIDATE_MAX_AGE = _env_int("MSDC_CANDIDATE_MAX_AGE", 5)
     # active/lost 生命周期超时和低频重捕参数
     MSDC_ACTIVE_MISSING_PATIENCE = 2
-    # active 目标若近期有 low/roi-low 真实证据，且当前仍有 template/motion 辅助支持，允许短时间保留 active 状态以等待下一次低阈值重捕
-    MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE = _env_int("MSDC_ACTIVE_SUPPORTED_MISSING_PATIENCE", 6)
-    MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW = _env_int("MSDC_ACTIVE_SUPPORT_RECENT_REAL_WINDOW", 8)
-    MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE = _env_float("MSDC_ACTIVE_SUPPORT_MIN_AUX_SCORE", 0.2)
     MSDC_LOST_MAX_AGE = _env_int("MSDC_LOST_MAX_AGE", 40)
     MSDC_REACQUIRE_INTERVAL = _env_int("MSDC_REACQUIRE_INTERVAL", 5)
     MSDC_REACQUIRE_SCORE = _env_float("MSDC_REACQUIRE_SCORE", 1.5)
@@ -188,8 +149,6 @@ class Config:
     MSDC_REACQUIRE_CENTER_DIST = _env_float("MSDC_REACQUIRE_CENTER_DIST", 160.0)
     MSDC_REACQUIRE_CENTER_SCALE_FACTOR = _env_float("MSDC_REACQUIRE_CENTER_SCALE_FACTOR", 4.0)
     MSDC_REACQUIRE_MAX_CENTER_DIST = _env_float("MSDC_REACQUIRE_MAX_CENTER_DIST", 240.0)
-    MSDC_REACQUIRE_MOTION_CONSISTENCY_WEIGHT = 0.2
-    MSDC_ROI_REACQUIRE_CENTER_DIST = _env_float("MSDC_ROI_REACQUIRE_CENTER_DIST", 600.0)
     # removed guard 默认保留短期签名，防止新候选直接继承旧 ID 语义
     MSDC_REMOVED_GUARD_FRAMES = _env_int("MSDC_REMOVED_GUARD_FRAMES", 80)
     MSDC_removed_GUARD_FRAMES = MSDC_REMOVED_GUARD_FRAMES
@@ -220,25 +179,8 @@ class Config:
     MSDC_OUTPUT_NMS_CONTAINMENT_RATIO = _env_float("MSDC_OUTPUT_NMS_CONTAINMENT_RATIO", 0.50)
     MSDC_OUTPUT_MAX_REAL_DET_AGE = _env_int("MSDC_OUTPUT_MAX_REAL_DET_AGE", 3)
     MSDC_OUTPUT_MIN_BOX_SIZE = _env_int("MSDC_OUTPUT_MIN_BOX_SIZE", 12)
-    # MS-DC-ELT Task 7: active-only TemplateLock 配置
-    # MS-DC-ELT ROI 低阈值重检：仅在 msdc_elt 分支使用，不影响 baseline tracker。
-    # 默认采用 v2_candidate_topk_no_roi，关闭 ROI 重检以避免额外 detector 调用。
-    MSDC_USE_ROI_REDETECT = _env_bool("MSDC_USE_ROI_REDETECT", False)
-    MSDC_ROI_REDETECT_LOW_CONF = _env_float("MSDC_ROI_REDETECT_LOW_CONF", 0.12)
-    MSDC_ROI_REDETECT_ACTIVE_ENABLE = _env_bool("MSDC_ROI_REDETECT_ACTIVE_ENABLE", False)
-    MSDC_ROI_REDETECT_ACTIVE_INTERVAL = _env_int("MSDC_ROI_REDETECT_ACTIVE_INTERVAL", 8)
-    MSDC_ROI_REDETECT_LOST_INTERVAL = _env_int("MSDC_ROI_REDETECT_LOST_INTERVAL", 3)
-    MSDC_ROI_REDETECT_MAX_TRACKS = _env_int("MSDC_ROI_REDETECT_MAX_TRACKS", 2)
-    MSDC_ROI_REDETECT_SEARCH_SCALE = _env_float("MSDC_ROI_REDETECT_SEARCH_SCALE", 4.0)
-    MSDC_ROI_REDETECT_UPSCALE = _env_float("MSDC_ROI_REDETECT_UPSCALE", 2.0)
-    MSDC_ROI_REDETECT_MIN_CROP_SIZE = _env_int("MSDC_ROI_REDETECT_MIN_CROP_SIZE", 64)
-    MSDC_ROI_REDETECT_EXISTING_IOU = _env_float("MSDC_ROI_REDETECT_EXISTING_IOU", 0.5)
-    MSDC_ROI_REDETECT_MIN_BOX_SIZE = _env_int("MSDC_ROI_REDETECT_MIN_BOX_SIZE", 8)
-    MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI = _env_int("MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI", 1)
-    MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE = _env_int("MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE", 30)
-    MSDC_ROI_REDETECT_COOLDOWN_FRAMES = _env_int("MSDC_ROI_REDETECT_COOLDOWN_FRAMES", 3)
 
-    # 低阈值候选进入 lifecycle 关联前的预算；默认采用 v2_candidate_topk_no_roi。
+    # 低阈值候选进入 lifecycle 关联前的预算；当前正式 v3 默认启用 Top-K。
     MSDC_LOW_OBS_TOPK = _env_int("MSDC_LOW_OBS_TOPK", 32)
     MSDC_LOW_OBS_GLOBAL_TOPK = _env_int("MSDC_LOW_OBS_GLOBAL_TOPK", MSDC_LOW_OBS_TOPK)
     MSDC_LOW_OBS_PER_TRACK_NEAREST = _env_int("MSDC_LOW_OBS_PER_TRACK_NEAREST", 1)
@@ -249,17 +191,6 @@ class Config:
     MSDC_LOW_OBS_TRACK_PROXIMITY_IOU = _env_float("MSDC_LOW_OBS_TRACK_PROXIMITY_IOU", 0.01)
     MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST = _env_float("MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST", MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST)
     MSDC_LOW_OBS_MOTION_GATE_IOU = _env_float("MSDC_LOW_OBS_MOTION_GATE_IOU", MSDC_LOW_OBS_TRACK_PROXIMITY_IOU)
-
-    # MS-DC-ELT Task 7: active-only TemplateLock 配置
-    MSDC_TEMPLATE_ENABLE = _env_bool("MSDC_TEMPLATE_ENABLE", False)
-    MSDC_TEMPLATE_AUX_ONLY = _env_bool("MSDC_TEMPLATE_AUX_ONLY", True)
-    MSDC_TEMPLATE_UPDATE_REQUIRE_REAL_DET = _env_bool("MSDC_TEMPLATE_UPDATE_REQUIRE_REAL_DET", True)
-    MSDC_MAX_ACTIVE_TEMPLATES = 8
-    MSDC_TEMPLATE_UPDATE_THRESH = 0.75
-    MSDC_TEMPLATE_SEARCH_SCALE = 2.5
-    MSDC_TEMPLATE_MIN_SIZE = 8
-    # 低纹理模板不初始化，避免空海面/纯黑块被 NCC 锁死
-    MSDC_TEMPLATE_MIN_STD = 1.0
 
     # 全局运动补偿算法类型，主要供 BoT-SORT 使用
     GMC_METHOD = "sparse_flow"

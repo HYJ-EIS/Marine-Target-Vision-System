@@ -14,37 +14,10 @@ def test_default_onnx_model_paths_exist_on_current_platform():
     assert Path(Config.ONNX_INFRARED_MODEL_PATH).is_file()
 
 
-def test_msdc_v2_formal_defaults_avoid_template_and_duplicate_full_frame_detection():
-    assert Config.MSDC_USE_MOTION is False
-    assert Config.MSDC_USE_TEMPLATE is False
-    assert Config.MSDC_TEMPLATE_ENABLE is False
-    assert Config.MSDC_EXPORT_SHARE_LOW_HIGH_DET is True
+def test_msdc_v3_formal_defaults_use_candidate_topk_profile():
     assert Config.MSDC_DEBUG_EVENTS is False
-
-
-def test_msdc_v2_roi_budget_defaults_are_low_frequency(monkeypatch):
-    import importlib
-    import target_module.image_detect_module.config as config_module
-
-    roi_env_names = [
-        "MSDC_ROI_REDETECT_ACTIVE_INTERVAL",
-        "MSDC_ROI_REDETECT_LOST_INTERVAL",
-        "MSDC_ROI_REDETECT_MAX_TRACKS",
-        "MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI",
-    ]
-
-    try:
-        with monkeypatch.context() as env:
-            for name in roi_env_names:
-                env.delenv(name, raising=False)
-
-            reloaded = importlib.reload(config_module)
-            assert reloaded.Config.MSDC_ROI_REDETECT_MAX_TRACKS == 2
-            assert reloaded.Config.MSDC_ROI_REDETECT_ACTIVE_INTERVAL == 8
-            assert reloaded.Config.MSDC_ROI_REDETECT_LOST_INTERVAL == 3
-            assert reloaded.Config.MSDC_ROI_REDETECT_MAX_BOXES_PER_ROI == 1
-    finally:
-        importlib.reload(config_module)
+    assert Config.MSDC_LOW_OBS_TOPK == 32
+    assert Config.MSDC_LOW_OBS_MIN_CONF == 0.25
 
 
 def test_msdc_v2_tuning_knobs_are_environment_backed(monkeypatch):
@@ -96,14 +69,11 @@ def test_msdc_v2_tuning_knobs_are_environment_backed(monkeypatch):
         importlib.reload(config_module)
 
 
-def test_msdc_roi_and_low_observation_budget_knobs_are_environment_backed(monkeypatch):
+def test_msdc_low_observation_budget_knobs_are_environment_backed(monkeypatch):
     import importlib
     import target_module.image_detect_module.config as config_module
 
     env_names = [
-        "MSDC_ROI_REDETECT_ACTIVE_ENABLE",
-        "MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE",
-        "MSDC_ROI_REDETECT_COOLDOWN_FRAMES",
         "MSDC_LOW_OBS_TOPK",
         "MSDC_LOW_OBS_MIN_CONF",
     ]
@@ -112,16 +82,10 @@ def test_msdc_roi_and_low_observation_budget_knobs_are_environment_backed(monkey
         with monkeypatch.context() as override_env:
             for name in env_names:
                 override_env.delenv(name, raising=False)
-            override_env.setenv("MSDC_ROI_REDETECT_ACTIVE_ENABLE", "1")
-            override_env.setenv("MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE", "45")
-            override_env.setenv("MSDC_ROI_REDETECT_COOLDOWN_FRAMES", "7")
             override_env.setenv("MSDC_LOW_OBS_TOPK", "16")
             override_env.setenv("MSDC_LOW_OBS_MIN_CONF", "0.28")
 
             reloaded = importlib.reload(config_module)
-            assert reloaded.Config.MSDC_ROI_REDETECT_ACTIVE_ENABLE is True
-            assert reloaded.Config.MSDC_ROI_REDETECT_LOST_MAX_REAL_AGE == 45
-            assert reloaded.Config.MSDC_ROI_REDETECT_COOLDOWN_FRAMES == 7
             assert reloaded.Config.MSDC_LOW_OBS_TOPK == 16
             assert reloaded.Config.MSDC_LOW_OBS_MIN_CONF == 0.28
     finally:
