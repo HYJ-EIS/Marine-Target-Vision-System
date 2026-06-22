@@ -20,9 +20,12 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from tools.experiments.run_msdc_ablation import FORMAL_MSDC_VARIANT  # noqa: E402
+from target_module.image_detect_module.constants import (  # noqa: E402
+    FORMAL_MSDC_VARIANT,
+    PAPER_TRACKER_CHOICES,
+)
 
-MAIN_TRACKERS = ["ocsort", "botsort", "msdc_elt"]
+MAIN_TRACKERS = list(PAPER_TRACKER_CHOICES)
 MAIN_MSDC_VARIANT = FORMAL_MSDC_VARIANT
 ABLATION_VARIANTS = [
     "Ours-full",

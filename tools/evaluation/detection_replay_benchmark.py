@@ -18,6 +18,7 @@ if str(_ROOT) not in sys.path:
 
 import target_module.image_detect_module.target_detection as td
 from target_module.image_detect_module.config import Config
+from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
 from target_module.image_detect_module.utils.file_utils import get_file_type
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from tools.evaluation.export_mot_results import format_mot_result_line
@@ -30,7 +31,6 @@ from tools.evaluation.msdc_dataset_benchmark import (
     write_stage_coverage_csv,
 )
 
-DETECTION_REPLAY_TRACKERS = ["botsort", "ocsort", "msdc_elt"]
 SUMMARY_FIELDS = ["tracker", "HOTA", "DetA", "AssA", "MOTA", "IDF1", "IDSW", "FP", "FN", "IDTP", "IDFP", "IDFN"]
 
 
@@ -157,7 +157,7 @@ def replay_tracker_from_cache(
     max_frames: int,
     progress_interval: int = 0,
 ) -> Path:
-    if tracker_type not in DETECTION_REPLAY_TRACKERS:
+    if tracker_type not in DATASET_EXPORT_TRACKER_CHOICES:
         raise ValueError(f"Unsupported replay tracker: {tracker_type}")
 
     input_video = Path(input_video)
@@ -291,7 +291,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-root", default="results/detection_replay_benchmark")
     parser.add_argument("--run-id", default="")
     parser.add_argument("--max-frames", type=int, default=300)
-    parser.add_argument("--trackers", nargs="+", choices=DETECTION_REPLAY_TRACKERS, default=DETECTION_REPLAY_TRACKERS)
+    parser.add_argument(
+        "--trackers",
+        nargs="+",
+        choices=DATASET_EXPORT_TRACKER_CHOICES,
+        default=list(DATASET_EXPORT_TRACKER_CHOICES),
+    )
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--input", default="", help="Optional direct input video path for a single dataset")
     parser.add_argument("--seq-name", default="", help="Optional sequence name override for a single dataset")

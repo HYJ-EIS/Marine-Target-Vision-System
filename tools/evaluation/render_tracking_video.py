@@ -24,14 +24,14 @@ import target_module.image_detect_module.target_detection as td
 import visualization as vis
 from cv_utils import imwrite_unicode
 from target_module.image_detect_module.config import Config
+from target_module.image_detect_module.constants import TRACKER_CHOICES
 from target_module.image_detect_module.utils.file_utils import get_file_type
 from target_module.image_detect_module.utils.msdc_detection import resolve_msdc_high_low_boxes
-from target_module.image_detect_module.utils.tracker import MultiObjectTracker
-from tools.evaluation.export_mot_results import (
-    TRACKER_CHOICES,
-    _is_msdc_tracker,
-    _update_tracking_for_frame,
+from target_module.image_detect_module.utils.tracking_update import (
+    is_msdc_tracker,
+    update_tracking_for_frame,
 )
+from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,7 +94,7 @@ def render_tracking_video(
 
     file_type = _resolve_file_type(input_video, file_type)
     detector = td.get_detector()
-    if _is_msdc_tracker(tracker_type):
+    if is_msdc_tracker(tracker_type):
         from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
 
         if not debug_dir:
@@ -124,7 +124,7 @@ def render_tracking_video(
                 break
 
             low_boxes = None
-            if _is_msdc_tracker(tracker_type):
+            if is_msdc_tracker(tracker_type):
                 boxes, low_boxes = resolve_msdc_high_low_boxes(detector, frame, file_type)
             else:
                 if not imwrite_unicode(str(tmp_path), frame):
@@ -132,7 +132,7 @@ def render_tracking_video(
                 result = detector.detect_from_image_file(str(tmp_path), file_type=file_type)
                 boxes = result.get("data", {}).get("boxes", []) if result and result.get("success") else []
 
-            tracked_boxes = _update_tracking_for_frame(
+            tracked_boxes = update_tracking_for_frame(
                 tracker_type=tracker_type,
                 tracker=tracker,
                 lifecycle_tracker=lifecycle_tracker,

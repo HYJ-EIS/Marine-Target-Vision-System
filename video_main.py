@@ -44,25 +44,16 @@ import messaging.mq_publisher as mq
 import visualization as vis
 from output_rtsp_video.video_output_manager import create_video_output_manager
 from target_module.image_detect_module.config import Config
+from target_module.image_detect_module.constants import OPTIONAL_TRACKER_CHOICES
 from target_module.image_detect_module.utils.msdc_detection import (
     resolve_msdc_high_low_boxes,
-    run_msdc_low_threshold_detection,
+)
+from target_module.image_detect_module.utils.tracking_update import (
+    is_msdc_tracker,
+    update_tracking_for_frame,
 )
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from target_module.image_detect_module.utils.file_utils import get_file_type
-
-
-TRACKER_CHOICES = [
-    "",
-    "bytetrack",
-    "ocsort",
-    "botsort",
-    "dist_tracker",
-    "official_ocsort",
-    "official_botsort",
-    "msdc_elt",
-]
-
 
 # 帧获取方式：仅在 RTSP 模式下有效
 USEOPENCV = False
@@ -72,7 +63,7 @@ FFMPEG = False
 def parse_args():
     parser = argparse.ArgumentParser(description="视频目标检测 + 多目标追踪")
     parser.add_argument("--input", default="", help="本地视频文件路径（留空使用 RTSP 流）")
-    parser.add_argument("--tracker", default="", choices=TRACKER_CHOICES,
+    parser.add_argument("--tracker", default="", choices=OPTIONAL_TRACKER_CHOICES,
                         help="追踪算法（留空使用 Config 默认值）")
     parser.add_argument("--output", default="", help="输出视频路径（留空使用默认值）")
     parser.add_argument("--no-display", action="store_true", help="不显示窗口（无 GUI 环境）")
@@ -81,10 +72,6 @@ def parse_args():
 
 def _resolve_tracker_type(tracker_arg: str) -> str:
     return tracker_arg if tracker_arg else Config.TRACKER_TYPE
-
-
-def _is_msdc_tracker(tracker_type: str | None) -> bool:
-    return tracker_type == "msdc_elt"
 
 
 def _safe_run_name(input_path: str) -> str:
@@ -101,7 +88,7 @@ def _resolve_msdc_paths(input_path: str, output_arg: str) -> tuple[str, str, str
     return run_dir, output_path, debug_dir
 
 
-def _update_tracking_for_frame(
+def _update_result_tracking_for_frame(
     tracker_type: str,
     tracker,
     lifecycle_tracker,
@@ -114,23 +101,17 @@ def _update_tracking_for_frame(
     low_boxes: list[dict] | None = None,
 ) -> list[dict]:
     boxes = list(high_boxes) if high_boxes is not None else result.get("data", {}).get("boxes", [])
-    if _is_msdc_tracker(tracker_type):
-        if lifecycle_tracker is None:
-            raise RuntimeError("MS-DC-ELT tracker 未初始化")
-        if low_boxes is None:
-            low_boxes = run_msdc_low_threshold_detection(detector, frame, file_type)
-        tracked_boxes = lifecycle_tracker.update(
-            frame=frame,
-            frame_idx=frame_idx,
-            file_type=file_type,
-            high_boxes=boxes,
-            low_boxes=low_boxes,
-        )
-    else:
-        if tracker is None:
-            raise RuntimeError("baseline tracker 未初始化")
-        tracked_boxes = tracker.update(boxes, frame.shape, frame=frame)
-
+    tracked_boxes = update_tracking_for_frame(
+        tracker_type=tracker_type,
+        tracker=tracker,
+        lifecycle_tracker=lifecycle_tracker,
+        detector=detector,
+        frame=frame,
+        frame_idx=frame_idx,
+        file_type=file_type,
+        boxes=boxes,
+        low_boxes=low_boxes,
+    )
     result.setdefault("data", {})["boxes"] = tracked_boxes
     return tracked_boxes
 
@@ -158,7 +139,7 @@ def main():
     args = parse_args()
     is_local_file = bool(args.input)
     selected_tracker_type = _resolve_tracker_type(args.tracker)
-    use_msdc_elt = _is_msdc_tracker(selected_tracker_type)
+    use_msdc_elt = is_msdc_tracker(selected_tracker_type)
     file_type = "visible"
 
     # ── 初始化检测器 ──────────────────────────────────────────────────
@@ -306,7 +287,7 @@ def main():
 
         # 追踪（baseline 传入 frame 供 GMC 使用；MS-DC-ELT 额外执行低阈值检测）
         try:
-            tracked_boxes = _update_tracking_for_frame(
+            tracked_boxes = _update_result_tracking_for_frame(
                 tracker_type=selected_tracker_type,
                 tracker=tracker,
                 lifecycle_tracker=lifecycle_tracker,

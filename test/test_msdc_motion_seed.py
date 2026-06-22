@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -11,7 +10,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from target_module.image_detect_module.utils.motion_seed import MotionSeedGenerator
-from tools.validation.msdc_motion_seed_debug import write_motion_debug_outputs
 
 
 class _MotionConfig:
@@ -123,31 +121,3 @@ def test_motion_clutter_caps_boxes_when_components_explode():
     assert debug["clutter_limited"] is True
     assert len(boxes) == 2
     assert debug["num_motion_boxes"] == 2
-
-
-def test_write_motion_debug_outputs_writes_jsonl_and_mask(tmp_path):
-    stats_path = tmp_path / "motion_seed_stats.jsonl"
-    mask_dir = tmp_path / "motion_masks"
-    mask = np.zeros((16, 16), dtype=np.uint8)
-    mask[4:8, 4:8] = 255
-
-    write_motion_debug_outputs(
-        stats_path=stats_path,
-        mask_dir=mask_dir,
-        frame_idx=3,
-        debug_info={
-            "frame_idx": 3,
-            "num_motion_boxes": 2,
-            "diff_threshold": 12.5,
-            "used_gmc": False,
-        },
-        mask=mask,
-        save_mask=True,
-    )
-
-    record = json.loads(stats_path.read_text(encoding="utf-8").strip())
-    assert record["frame_idx"] == 3
-    assert record["num_motion_boxes"] == 2
-    assert record["diff_threshold"] == 12.5
-    assert record["used_gmc"] is False
-    assert (mask_dir / "frame_000003.png").is_file()

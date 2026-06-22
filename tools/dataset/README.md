@@ -8,20 +8,6 @@
 conda run -n ship_detect python tools/dataset/<script>.py ...
 ```
 
-## ensure_classes_txt.py
-
-用途：给 YOLO 数据集的 `labels/` 子目录补齐 `classes.txt`。
-
-输入：`--dataset-root` 指向包含 `labels/` 的数据集根目录。
-
-输出：在每个存在标注 `.txt` 的标签目录下写入 `classes.txt`，类别来自 `target_module/image_detect_module/config.py` 的 `Config.CLASSES`。
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/dataset/ensure_classes_txt.py --dataset-root "D:\path\to\dataset"
-```
-
 ## extract_tracking_frames.py
 
 用途：从 `_V` / `_T` 原始视频中抽取有代表性的训练帧，并同步导出 YOLO 标签和清单。
@@ -59,32 +45,4 @@ conda run -n ship_detect python tools/dataset/extract_tracking_frames.py --input
 
 ```powershell
 conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --resume --workers 2
-```
-
-## visualize_yolo_labels.py
-
-用途：把 YOLO 标签画回图片，方便人工检查标注框和类别。
-
-输入：`--dataset-root` 指向包含 `images/` 和 `labels/` 的数据集根目录。
-
-输出：默认写入同级目录 `<dataset-root>_visualized/images/`；也可用 `--output-root` 指定。
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/dataset/visualize_yolo_labels.py --dataset-root "D:\path\to\dataset"
-```
-
-## filter_existing_frames.py
-
-用途：对已经抽出的 LabelMe 图片/JSON 数据再跑一遍当前代表帧剪枝规则，生成更紧凑的数据子集。
-
-输入：`--input-dir` 指向已抽帧目录，目录中可以是平铺的 `.jpg + .json`，也可以带 `json/` 子目录。
-
-输出：`--output-dir` 指定压缩后的图片、JSON 和 `filter_summary.csv`。
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/dataset/filter_existing_frames.py --input-dir "D:\path\to\frames" --output-dir "D:\path\to\frames_compacted"
 ```

@@ -25,25 +25,18 @@ if str(_ROOT) not in sys.path:
 import target_module.image_detect_module.target_detection as td
 from cv_utils import imwrite_unicode
 from target_module.image_detect_module.config import Config
+from target_module.image_detect_module.constants import TRACKER_CHOICES
 from target_module.image_detect_module.utils.file_utils import get_file_type
 from target_module.image_detect_module.utils.msdc_detection import (
     resolve_msdc_high_low_boxes,
     run_msdc_high_threshold_detection as _run_msdc_high_threshold_detection,
-    run_msdc_low_threshold_detection as _run_msdc_low_threshold_detection,
     split_msdc_high_from_low_boxes as _split_msdc_high_from_low_boxes,
 )
+from target_module.image_detect_module.utils.tracking_update import (
+    is_msdc_tracker,
+    update_tracking_for_frame,
+)
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
-
-
-TRACKER_CHOICES = [
-    "bytetrack",
-    "ocsort",
-    "botsort",
-    "dist_tracker",
-    "official_ocsort",
-    "official_botsort",
-    "msdc_elt",
-]
 
 
 def format_mot_result_line(frame_id: int, box: dict) -> str:
@@ -54,39 +47,6 @@ def format_mot_result_line(frame_id: int, box: dict) -> str:
         f"{float(box['w']):.2f},{float(box['h']):.2f},"
         f"{float(box.get('confidence', 1.0)):.4f},-1,-1,-1"
     )
-
-
-def _is_msdc_tracker(tracker_type: str | None) -> bool:
-    return tracker_type == "msdc_elt"
-
-
-def _update_tracking_for_frame(
-    tracker_type: str,
-    tracker,
-    lifecycle_tracker,
-    detector,
-    frame,
-    frame_idx: int,
-    file_type: str,
-    boxes: list[dict],
-    low_boxes: list[dict] | None = None,
-) -> list[dict]:
-    if _is_msdc_tracker(tracker_type):
-        if lifecycle_tracker is None:
-            raise RuntimeError("MS-DC-ELT lifecycle tracker is not initialized")
-        if low_boxes is None:
-            low_boxes = _run_msdc_low_threshold_detection(detector, frame, file_type)
-        return lifecycle_tracker.update(
-            frame=frame,
-            frame_idx=frame_idx,
-            file_type=file_type,
-            high_boxes=boxes,
-            low_boxes=low_boxes,
-        )
-
-    if tracker is None:
-        raise RuntimeError("Baseline tracker is not initialized")
-    return tracker.update(boxes, frame.shape, frame=frame)
 
 
 def export_video_to_mot_results(
@@ -120,7 +80,7 @@ def export_video_to_mot_results(
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     detector = td.get_detector()
     diagnostics_dir = None
-    if _is_msdc_tracker(tracker_type):
+    if is_msdc_tracker(tracker_type):
         from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
         tracker = None
         diagnostics_dir = output_root / tracker_output_name / "diagnostics" / seq_name
@@ -151,7 +111,7 @@ def export_video_to_mot_results(
                     break
 
                 low_boxes = None
-                if _is_msdc_tracker(tracker_type):
+                if is_msdc_tracker(tracker_type):
                     boxes, low_boxes = resolve_msdc_high_low_boxes(detector, frame, file_type)
                 else:
                     if not imwrite_unicode(tmp_frame_path, frame):
@@ -162,7 +122,7 @@ def export_video_to_mot_results(
                     if result and result.get("success"):
                         boxes = result.get("data", {}).get("boxes", [])
 
-                tracked_boxes = _update_tracking_for_frame(
+                tracked_boxes = update_tracking_for_frame(
                     tracker_type=tracker_type,
                     tracker=tracker,
                     lifecycle_tracker=lifecycle_tracker,

@@ -294,8 +294,8 @@ def test_msdc_shared_low_high_detection_uses_one_detector_call(tmp_path, monkeyp
     import cv2
     import numpy as np
     import target_module.image_detect_module.target_detection as td
-    import tools.evaluation.export_mot_results as export_helpers
     import target_module.image_detect_module.utils.lifecycle_tracker as lifecycle_module
+    import target_module.image_detect_module.utils.tracking_update as tracking_helpers
     from target_module.image_detect_module.config import Config
 
     class FakeProcessor:
@@ -334,7 +334,7 @@ def test_msdc_shared_low_high_detection_uses_one_detector_call(tmp_path, monkeyp
     monkeypatch.setattr(td, "get_detector", lambda: SimpleNamespace(processor=FakeProcessor()))
     monkeypatch.setattr(cv2, "VideoCapture", FakeCapture)
     monkeypatch.setattr(lifecycle_module, "MSDCLifecycleTracker", lambda **kwargs: object())
-    monkeypatch.setattr(export_helpers, "_update_tracking_for_frame", lambda **kwargs: [])
+    monkeypatch.setattr(tracking_helpers, "update_tracking_for_frame", lambda **kwargs: [])
 
     row = benchmark._run_tracker_benchmark(
         input_video=tmp_path / "input.mp4",
@@ -362,8 +362,8 @@ def test_tracker_update_detector_calls_do_not_subtract_nested_roi_calls(tmp_path
     import cv2
     import numpy as np
     import target_module.image_detect_module.target_detection as td
-    import tools.evaluation.export_mot_results as export_helpers
     import target_module.image_detect_module.utils.lifecycle_tracker as lifecycle_module
+    import target_module.image_detect_module.utils.tracking_update as tracking_helpers
     from target_module.image_detect_module.config import Config
 
     captured_call_counts = {}
@@ -413,7 +413,7 @@ def test_tracker_update_detector_calls_do_not_subtract_nested_roi_calls(tmp_path
     monkeypatch.setattr(td, "get_detector", lambda: SimpleNamespace(processor=FakeProcessor()))
     monkeypatch.setattr(cv2, "VideoCapture", FakeCapture)
     monkeypatch.setattr(lifecycle_module, "MSDCLifecycleTracker", lambda **kwargs: object())
-    monkeypatch.setattr(export_helpers, "_update_tracking_for_frame", fake_update_tracking_for_frame)
+    monkeypatch.setattr(tracking_helpers, "update_tracking_for_frame", fake_update_tracking_for_frame)
 
     row = benchmark._run_tracker_benchmark(
         input_video=tmp_path / "input.mp4",

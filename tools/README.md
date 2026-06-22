@@ -15,28 +15,18 @@ conda run -n ship_detect python <script> ...
 
 `tools/dataset/` 放数据集整理工具，面向“生成、清理、检查训练数据”的离线流程。
 
-- `ensure_classes_txt.py`：给 YOLO 标签目录补齐 `classes.txt`
 - `extract_tracking_frames.py`：从 `_V` / `_T` 视频抽代表帧并导出 YOLO 标签
 - `video_dataset_classify.py`：按时间窗分析原始视频数据质量、场景和目标分布
-- `visualize_yolo_labels.py`：将 YOLO 标签画回图片供人工检查
-- `filter_existing_frames.py`：对已抽帧 LabelMe 数据做代表帧压缩
 
 详细用法见 `tools/dataset/README.md`。
 
 ## validation
 
-`tools/validation/` 放人工验证和调试脚本。它们通常依赖本地视频、模型文件或输出目录，适合手动运行，不作为 pytest 单元测试。
-
-- `video_test_tracking.py`：本地视频检测与跟踪验证
-- `test_image_tracking_api.py`：`detect_targets(..., enable_tracking=True)` 行为验证
-- `debug_bbox_offset.py`：检测框偏移诊断
+`tools/validation/` 放人工验证和调试脚本。当前过时的手工验证入口已移除；新增脚本应优先放入正式 `tools/evaluation/` 链路或配套 pytest。
 
 ## experiments
 
 `tools/experiments/` 放实验编排和对比脚本，产物通常写入 `results/`。
-
-- `run_all_tests.py`：固定测试视频批量跑追踪验证
-- `run_compare_ir_models.py`：两版红外 ONNX 模型对比
 
 ## evaluation
 

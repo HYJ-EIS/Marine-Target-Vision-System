@@ -435,18 +435,6 @@ cd output_rtsp_video\mediamtx
 
 `image_main.py` 的调试副本，包含手工测试模式 `TEST_MODE`。适合本地排查问题，不建议作为正式服务入口。
 
-### 10.3 `tools/validation/video_test_tracking.py`
-
-本地 MP4 跟踪测试脚本，支持低帧率模拟、指定跟踪器和最大处理帧数。
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4"
-conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4" --tracker botsort --fps-override 5
-conda run -n ship_detect python tools/validation/video_test_tracking.py --input "D:\path\to\video.mp4" --tracker dist_tracker --max-frames 100
-```
-
 ### 10.4 `tools/evaluation/export_mot_results.py`
 
 将某个 tracker 在完整视频上的输出导出为 MOTChallenge tracker result 文件，目录形式为 `<output-root>/<tracker>/data/<seq>.txt`。正式评测时不要使用抽帧或低帧率模式，结果帧号必须与 GT 的 `seqinfo.ini` / `gt/gt.txt` 对齐。
@@ -517,103 +505,6 @@ conda run -n ship_detect python tools/evaluation/render_msdc_diagnostics_video.p
 conda run -n ship_detect python tools/dataset/extract_tracking_frames.py
 conda run -n ship_detect python tools/dataset/extract_tracking_frames.py --input-root "D:\Desktop\烟台项目数据\原始数据集\视频" --output-root "D:\Desktop\烟台项目数据\原始数据集\external_frames" --resume
 ```
-
-### 10.10 `tools/validation/test_image_tracking_api.py`
-
-验证 `detect_targets(..., enable_tracking=True)` 的跨帧跟踪行为、延迟和回归项。
-
-### 10.11 `tools/validation/tracker_effect_test.py`
-
-对同一组 RGB / IR 视频执行一次检测，并将同一帧检测结果同时喂给多个跟踪器，输出带 `track_id` 的标注视频和逐帧框数据，用于人工对比跟踪效果。
-
-默认输入：
-
-- IR：`/mnt/d/Desktop/UAV_USV标注数据集/multi_target_source_videos/USV/IR/DJI_20250916100639_0001_T.MP4`
-- RGB：`/mnt/d/Desktop/UAV_USV标注数据集/multi_target_source_videos/USV/RGB/DJI_20250916100639_0001_V.MP4`
-
-默认输出：
-
-- `results/tracker_effect_test/DJI_20250916100639_0001/IR/<tracker>/`
-- `results/tracker_effect_test/DJI_20250916100639_0001/RGB/<tracker>/`
-
-每个 tracker 目录包含：
-
-- `annotated.mp4`
-- `annotated_part_*.mp4`（使用 `--resume` 续跑时生成，表示从中断帧之后继续写出的标注视频段）
-- `tracks.csv`
-- `frames.jsonl`
-- `summary.json`
-- `error.txt`（仅失败时生成）
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/validation/tracker_effect_test.py --max-frames 5
-conda run -n ship_detect python tools/validation/tracker_effect_test.py
-conda run -n ship_detect python tools/validation/tracker_effect_test.py --resume
-conda run -n ship_detect python tools/validation/tracker_effect_test.py --trackers botsort dist_tracker official_botsort
-conda run -n ship_detect python tools/validation/tracker_effect_test.py --modalities IR --trackers dist_tracker --progress-interval 25
-```
-
-`--resume` 会读取每个 tracker 目录下已有 `frames.jsonl` 的行数，并只从下一帧开始追加 `frames.jsonl` / `tracks.csv`。由于 MP4 容器不能可靠原地追加，续跑时不会覆盖已有 `annotated.mp4`，而是写入新的 `annotated_part_<起始帧>.mp4`；脚本仍会从视频开头重放已处理帧来恢复各 tracker 的内部状态，但不会重复写出这些帧的数据。
-
-### 10.12 `tools/validation/video_detect_only.py`
-
-对本地视频逐帧执行当前 ONNX 检测模型，只绘制检测框与类别置信度，不初始化跟踪器、不输出 `track_id`。适合快速检查检测模型在外部视频上的召回和误检情况。
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/validation/video_detect_only.py --file-type visible --input "D:\path\video1.mp4" --input "D:\path\video2.mp4" --output-dir results/detection_only
-conda run -n ship_detect python tools/validation/video_detect_only.py --file-type visible --input "D:\path\video.mp4" --max-frames 5
-conda run -n ship_detect python tools/validation/video_detect_only.py --file-type visible --conf-threshold 0.1 --input "D:\path\video.mp4"
-```
-
-每个输入视频会输出：
-
-- `<视频名>_detected.mp4`
-- `<视频名>_summary.json`
-- `<视频名>_detections.csv`：每个检测框一行，字段为 `frame_index,timestamp_sec,detection_id,x,y,w,h,confidence,class,class_confidence`
-- `<视频名>_frames.jsonl`：每帧一行，包含 `frame_index,timestamp_sec,boxes`；无目标帧也写入 `boxes: []`
-- `<视频名>_analysis.md`：单视频检测覆盖率、类别、置信度和框面积统计
-- `detection_analysis.md`：批量汇总报告
-
-### 10.13 `tools/validation/msdc_low_conf_debug.py`
-
-MS-DC-ELT Task 1 低阈值检测调试脚本。该脚本不初始化跟踪器、不修改 `video_main.py` 主链路；它对每帧/每张图执行一次默认高阈值检测和一次低阈值检测，计算 `high_boxes`、`low_boxes`、`low_only_boxes` 数量，并把低阈值框与高阈值框的 IoU 重叠过滤统计写入独立输出目录。
-
-视频示例：
-
-```powershell
-conda run -n ship_detect python tools/validation/msdc_low_conf_debug.py --input "D:\path\video.mp4" --file-type visible --max-frames 100 --output-dir results/msdc_debug
-```
-
-图片目录示例：
-
-```powershell
-conda run -n ship_detect python tools/validation/msdc_low_conf_debug.py --image-dir "D:\Desktop\UAV_USV标注数据集\USV\RGB\images" --file-type visible --max-frames 100 --output-dir results/msdc_debug
-```
-
-每次运行会创建新的 `<输入名>_<时间戳>` 子目录，不覆盖旧结果。输出：
-
-- `low_det_stats.jsonl`：每行包含 `frame_idx` / `frame_index`、`file_type`、`num_high`、`num_low`、`num_low_only`、`low_conf_thresh`、`low_high_overlap_count`、`low_high_overlap_ratio`
-- `summary.json`：汇总处理帧数、总检测框数、low-only 总数、平均每帧统计和处理速度
-
-### 10.14 `tools/validation/msdc_motion_seed_debug.py`
-
-MS-DC-ELT Task 2 运动种子调试脚本。该脚本只运行 `MotionSeedGenerator`，从相邻帧中提取 class-agnostic motion boxes，并写出逐帧统计；不会初始化 lifecycle tracker，也不会把 motion boxes 送入 OC-SORT / BoT-SORT。
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/validation/msdc_motion_seed_debug.py --input "D:\Desktop\UAV_USV标注数据集\multi_target_source_videos\USV\RGB\DJI_20250711140128_0002_V.MP4" --max-frames 100 --save-masks --output-dir outputs/msdc_debug
-```
-
-每次运行会创建新的 `<视频名>_<时间戳>` 子目录，不覆盖旧结果。输出：
-
-- `motion_seed_stats.jsonl`：每行包含 `frame_idx`、`num_motion_boxes`、`diff_threshold`、`used_gmc`、`raw_component_count`、`kept_component_count`
-- `motion_masks/`：使用 `--save-masks` 时写出每帧二值运动 mask
-- `summary.json`：汇总处理帧数、motion box 总数、平均每帧数量、处理速度和输出路径
 
 当前第一版使用现有 `GMC` 对上一帧做全局仿射补偿；如果 GMC 估计失败会退化为单位变换，海浪、云影、热噪声和大面积背景变化仍可能产生误候选，需要通过后续生命周期证据逻辑做多帧抑制。
 
@@ -1033,23 +924,6 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 
 - `docs/MSDC_EXPERIMENT_RESULT_TEMPLATE.md`
 
-### 10.22 `tools/experiments/run_compare_ir_models.py`
-
-用于比较两版红外模型：
-
-- `A_S_F_ir_FFCA.onnx`
-- `A_S_F_ir_FFCA_v2.onnx`
-
-示例：
-
-```powershell
-conda run -n ship_detect python tools/experiments/run_compare_ir_models.py
-```
-
-输出示例：
-
-- `results/ir_cmp_<视频标签>_<模型标记>.mp4`
-
 ---
 
 ## 11. 测试
@@ -1070,9 +944,7 @@ pytest -q
 
 - `test/test_extract_tracking_frames.py`
 - `test/test_video_dataset_classify.py`
-- `tools/validation/test_image_tracking_api.py`
 - `output_rtsp_video/test_output_rtsp_video.py`
-- `tools/experiments/run_all_tests.py`
 
 说明：
 
@@ -1200,6 +1072,15 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 
 ## 13. Changelog
 
+### 2026-06-22
+
+- `refactor`: 集中 tracker choices、formal MS-DC v3 variant、method labels、metric/speed fields 到 `target_module/image_detect_module/constants.py`，视频入口、MOT 导出、速度 benchmark、dataset/replay benchmark、抽帧和 validation 工具统一引用共享常量，不再本地 hard-code tracker choices
+- `refactor`: 抽出 `target_module/image_detect_module/utils/tracking_update.py` 作为唯一 runtime tracking update helper，`video_main.py`、MOT 导出、直接渲染和速度 benchmark 均直接引用 baseline / MS-DC-ELT 单帧分派逻辑，不再从导出脚本间接复用
+- `refactor`: 删除过时的手工验证/历史验收入口，以及被共享 helper 覆盖的旧测试文件
+- `refactor`: 删除未纳入正式评测链路的 legacy validation/debug 和离线数据整理脚本，并清理对应 README 入口
+- `test`: 新增 `test/test_msdc_constants.py`，固定通用 tracker、baseline-only tracker、论文评测 tracker、正式 v3 名称、速度阶段耗时字段、tracker choices、speed fields 和 method labels 唯一来源契约
+- `test`: 新增 `test/test_tracking_update_helper.py`，覆盖 baseline tracker update、MS-DC lifecycle update、低阈值检测 fallback、缺失 tracker 错误路径和 runtime helper 唯一入口约束
+
 ### 2026-06-14
 
 - `feat`: formal MS-DC-ELT 主变体切换为 `v3_candidate_topk_no_roi_no_motion`，在 runner、ablation、summary 和 speed benchmark 中统一使用关闭 motion/template/ROI、low-observation topK=32、debug off 的正式默认配置
@@ -1251,7 +1132,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 - `feat`: 新增 MS-DC-ELT Task 5 `target_module/image_detect_module/utils/lifecycle_tracker.py`，串联 high_det、low_only、motion seed 和 `EvidenceStateUpdater`，输出兼容现有 tracker 的 active boxes 与 lifecycle debug JSONL，仍不接入 `video_main.py`
 - `test`: 新增 `test/test_msdc_lifecycle_tracker.py`，覆盖 active 输出、candidate debug 输出、motion seed 调用、空输入丢失状态和 low-only 过滤
 - `feat`: `video_main.py` 新增 `--tracker msdc_elt` 独立分支，仅该分支触发低阈值检测和 `MSDCLifecycleTracker`，默认输出到 `outputs/msdc_elt/<run_id>/`，baseline tracker 分支保持 `MultiObjectTracker.update(...)`
-- `test`: 新增 `test/test_video_main_msdc.py`，覆盖 argparse、baseline 不触发低阈值检测、`msdc_elt` 分支调用 lifecycle tracker，以及默认 MS-DC-ELT 输出目录
+- `test`: 新增 MS-DC-ELT 视频入口回归测试，覆盖 argparse、baseline 不触发低阈值检测、`msdc_elt` 分支调用 lifecycle tracker，以及默认输出目录
 - `feat`: 新增 MS-DC-ELT Task 7 `target_module/image_detect_module/utils/template_lock.py`，实现 active-only OpenCV 局部模板匹配、模板数量上限和门控更新，并将 `source="template"` observation 接入 `MSDCLifecycleTracker`
 - `test`: 新增 `test/test_msdc_template_lock.py` 并扩展 `test/test_msdc_lifecycle_tracker.py`，覆盖 candidate 不启模板、active 模板匹配/更新、模板数量上限、关闭模板和 template debug 字段
 - `feat`: 完成 MS-DC-ELT Task 8 lost reacquire / removed guard，lost track 仅在 `MSDC_REACQUIRE_INTERVAL` 间隔帧低频重捕，removed track 写入短期签名并通过 `PREVENT_removed_ID_REUSE` / `NEW_ID_CREATED` 防止旧 ID 被直接继承
@@ -1262,16 +1143,16 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 ### 2026-05-30
 
 - `feat`: 新增 `dist_tracker` 跟踪器，按 Dist-Tracker/FLIT 思路实现 L2-IoU 融合匹配、检测置信度融合和 GMC，保持项目检测框输入输出契约
-- `feat`: `video_main.py`、`video_test_tracking.py`、`export_mot_results.py` 和 `extract_tracking_frames.py` 支持 `--tracker dist_tracker`
-- `feat`: 新增 `tools/validation/tracker_effect_test.py`，同一帧检测结果可同时喂给多个跟踪器并输出标注视频、`tracks.csv`、`frames.jsonl` 和 `summary.json`
-- `feat`: 新增 `tools/validation/video_detect_only.py`，用于本地视频纯检测可视化与检测统计导出，不初始化跟踪器
+- `feat`: 视频入口、MOT 导出和抽帧流程支持 `--tracker dist_tracker`
+- `feat`: 新增早期多 tracker 并排可视化验证工具，用于输出标注视频和逐帧跟踪数据
+- `feat`: 新增本地视频纯检测可视化与检测统计导出工具，不初始化跟踪器
 - `refactor`: ONNX 模型默认路径改为基于 `Config.BASE_DIR` 和 `os.path.join(...)` 构造，避免 Windows 路径分隔符在 Linux/WSL 下失效
-- `test`: 新增 `dist_tracker` 合成检测框单元测试、tracker effect 导出 helper 测试和默认模型路径测试
+- `test`: 新增 `dist_tracker` 合成检测框单元测试、跟踪可视化导出 helper 测试和默认模型路径测试
 - `docs`: README、抽帧说明和 AGENTS 规则同步更新，明确 Dist-Tracker 配置、工具用法和修改代码后更新 README 的要求
 - `docs`: 新增 `docs/MSDC_ELT_IMPLEMENTATION_PLAN.md`，记录 MS-DC-ELT 生命周期跟踪方案的后续实现计划
 - `chore`: 新增 `target_module/models/yolov5n.onnx` 附加模型文件，默认运行配置未切换到该模型
-- `feat`: 新增 MS-DC-ELT Task 1 低阈值检测调试路径 `tools/validation/msdc_low_conf_debug.py`，通过独立参数启用并输出 `low_det_stats.jsonl` / `summary.json`，不改变 baseline 跟踪结果
-- `feat`: 新增 MS-DC-ELT Task 2 运动种子生成模块 `MotionSeedGenerator` 和 `tools/validation/msdc_motion_seed_debug.py`，输出 `motion_seed_stats.jsonl` 与可选 `motion_masks/`，不接入 baseline tracker
+- `feat`: 新增 MS-DC-ELT Task 1 低阈值检测调试路径，通过独立参数输出 low-det 统计，不改变 baseline 跟踪结果
+- `feat`: 新增 MS-DC-ELT Task 2 运动种子生成模块 `MotionSeedGenerator` 和早期调试入口，输出 motion seed 统计，不接入 baseline tracker
 
 ### 2026-04-23
 
@@ -1297,7 +1178,7 @@ conda run -n ship_detect python tools/dataset/video_dataset_classify.py --input-
 ### 2026-03-30
 
 - `feat`: 增加 `tracker.py`、`kalman_bbox.py`、`gmc.py`，形成多算法跟踪基础能力
-- `feat`: 增加 `tools/validation/video_test_tracking.py`、`tools/experiments/run_all_tests.py`
+- `feat`: 增加早期本地视频跟踪验证脚本和批量测试脚本
 - `refactor`: 调整配置与可视化逻辑，强化低帧率场景下的跟踪验证能力
 
 ### 2026-03-27

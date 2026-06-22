@@ -17,8 +17,13 @@ from pathlib import Path
 
 
 _ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
+from target_module.image_detect_module.constants import (  # noqa: E402
+    DATASET_EXPORT_TRACKER_CHOICES,
+    FORMAL_MSDC_VARIANT,
+)
 
 
 V2_BASELINE_ENV = {
@@ -344,8 +349,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--trackers",
         nargs="+",
-        default=["botsort", "ocsort", "msdc_elt"],
-        choices=["botsort", "ocsort", "msdc_elt"],
+        default=list(DATASET_EXPORT_TRACKER_CHOICES),
+        choices=DATASET_EXPORT_TRACKER_CHOICES,
         help="Trackers to include",
     )
     parser.add_argument(

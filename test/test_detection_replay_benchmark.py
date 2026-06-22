@@ -7,8 +7,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
 from tools.evaluation.detection_replay_benchmark import (
-    DETECTION_REPLAY_TRACKERS,
     load_detection_cache,
     tracker_output_name,
     write_detection_cache,
@@ -56,7 +56,7 @@ def test_tracker_output_name_marks_replay_mode():
     assert tracker_output_name("botsort") == "botsort_replay"
     assert tracker_output_name("ocsort") == "ocsort_replay"
     assert tracker_output_name("msdc_elt") == "msdc_elt_high_replay"
-    assert DETECTION_REPLAY_TRACKERS == ["botsort", "ocsort", "msdc_elt"]
+    assert DATASET_EXPORT_TRACKER_CHOICES == ("botsort", "ocsort", "msdc_elt")
 
 
 def test_write_replay_summary_writes_trackeval_fields(tmp_path):

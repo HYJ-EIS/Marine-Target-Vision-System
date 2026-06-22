@@ -15,47 +15,6 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-TRACKER_CHOICES = ["ocsort", "botsort", "msdc_elt"]
-DEFAULT_TRACKERS = list(TRACKER_CHOICES)
-SPEED_FIELDS = [
-    "run_id",
-    "commit_hash",
-    "video_path",
-    "seq_name",
-    "tracker",
-    "method",
-    "resolution",
-    "requested_frames",
-    "processed_frames",
-    "total_time_s",
-    "mean_fps",
-    "mean_latency_ms",
-    "p50_latency_ms",
-    "p95_latency_ms",
-    "peak_memory_mb",
-    "detector_calls_total",
-    "detector_calls_high_det",
-    "detector_calls_low_det",
-    "detector_calls_tracker_update",
-    "detector_calls_roi_redetect",
-    "mean_read_ms",
-    "mean_high_det_ms",
-    "mean_low_det_ms",
-    "mean_roi_redetect_ms",
-    "mean_tracker_ms",
-    "mean_msdc_low_filter_ms",
-    "mean_msdc_roi_redetect_internal_ms",
-    "mean_msdc_motion_ms",
-    "mean_msdc_observation_build_ms",
-    "mean_msdc_template_match_ms",
-    "mean_msdc_evidence_update_ms",
-    "mean_msdc_template_sync_ms",
-    "mean_msdc_output_ms",
-    "mean_msdc_debug_ms",
-    "mean_msdc_total_update_ms",
-    "mean_render_ms",
-    "mean_write_ms",
-]
 COMPARE_FIELDS = [
     "label",
     "share_low_high",
@@ -75,11 +34,6 @@ COMPARE_FIELDS = [
     "fps_speedup_vs_before",
     "detector_call_delta_vs_before",
 ]
-METHOD_LABELS = {
-    "ocsort": "FFCA-YOLO + OC-SORT",
-    "botsort": "FFCA-YOLO + BoT-SORT",
-    "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
-}
 MSDC_INTERNAL_TIMING_KEYS = [
     "low_filter_s",
     "roi_redetect_s",
@@ -97,6 +51,11 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from target_module.image_detect_module.constants import (  # noqa: E402
+    METHOD_LABELS,
+    PAPER_TRACKER_CHOICES,
+    SPEED_FIELDS,
+)
 from tools.experiments.run_msdc_ablation import V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV  # noqa: E402
 
 
@@ -352,11 +311,11 @@ def _run_tracker_benchmark(
         run_msdc_low_threshold_detection,
         split_msdc_high_from_low_boxes,
     )
-    from target_module.image_detect_module.utils.tracker import MultiObjectTracker
-    from tools.evaluation.export_mot_results import (
-        _is_msdc_tracker,
-        _update_tracking_for_frame,
+    from target_module.image_detect_module.utils.tracking_update import (
+        is_msdc_tracker,
+        update_tracking_for_frame,
     )
+    from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 
     _reset_detector_singleton(td)
     detector = td.get_detector()
@@ -375,7 +334,7 @@ def _run_tracker_benchmark(
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
         resolution = f"{width}x{height}" if width > 0 and height > 0 else "N/A"
 
-        if _is_msdc_tracker(tracker_type):
+        if is_msdc_tracker(tracker_type):
             tracker = None
             lifecycle_tracker = MSDCLifecycleTracker(
                 config=Config,
@@ -409,7 +368,7 @@ def _run_tracker_benchmark(
             tracker_s = 0.0
             msdc_timing = _empty_msdc_internal_timing()
 
-            if _is_msdc_tracker(tracker_type):
+            if is_msdc_tracker(tracker_type):
                 if bool(getattr(Config, "MSDC_EXPORT_SHARE_LOW_HIGH_DET", False)):
                     stage_start = time.perf_counter()
                     with processor.use_stage("low_det"):
@@ -432,7 +391,7 @@ def _run_tracker_benchmark(
 
                 stage_start = time.perf_counter()
                 with processor.use_stage("tracker_update"):
-                    _update_tracking_for_frame(
+                    update_tracking_for_frame(
                         tracker_type=tracker_type,
                         tracker=tracker,
                         lifecycle_tracker=lifecycle_tracker,
@@ -692,7 +651,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id", default="", help="Output run id; default is timestamp")
     parser.add_argument("--commit-hash", default="", help="Commit hash recorded in speed_results.csv")
     parser.add_argument("--frames", type=int, default=1000, help="Requested frame count")
-    parser.add_argument("--trackers", nargs="+", choices=TRACKER_CHOICES, default=DEFAULT_TRACKERS)
+    parser.add_argument("--trackers", nargs="+", choices=PAPER_TRACKER_CHOICES, default=list(PAPER_TRACKER_CHOICES))
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
     parser.add_argument(

@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from cv_utils import imread_unicode, imwrite_unicode
 from target_module.image_detect_module.config import Config
+from target_module.image_detect_module.constants import BASELINE_TRACKER_CHOICES
 from target_module.image_detect_module.utils.file_utils import get_file_type
 
 
@@ -144,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tracker",
         default=Config.EXTERNAL_FRAMES_TRACKER,
-        choices=["bytetrack", "ocsort", "botsort", "dist_tracker", "official_ocsort", "official_botsort"],
+        choices=BASELINE_TRACKER_CHOICES,
     )
     parser.add_argument("--motion-threshold", type=float, default=Config.EXTERNAL_FRAMES_MOTION_THRESHOLD)
     parser.add_argument(

@@ -28,6 +28,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES  # noqa: E402
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS  # noqa: E402
 
 
@@ -731,8 +732,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--trackers",
         nargs="+",
-        default=["botsort", "ocsort", "msdc_elt"],
-        choices=["botsort", "ocsort", "msdc_elt"],
+        default=list(DATASET_EXPORT_TRACKER_CHOICES),
+        choices=DATASET_EXPORT_TRACKER_CHOICES,
     )
     parser.add_argument("--variants", nargs="+", default=["Ours-full"], choices=list(ABLATION_VARIANTS))
     parser.add_argument("--max-frames", type=int, default=0, help="Smoke/debug only; 0 means full video")

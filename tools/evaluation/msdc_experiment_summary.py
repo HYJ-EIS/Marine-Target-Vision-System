@@ -9,50 +9,22 @@ import sys
 from pathlib import Path
 
 
-METRIC_FIELDS = ["HOTA", "DetA", "AssA", "MOTA", "IDF1", "IDSW", "FP", "FN", "IDTP", "IDFP", "IDFN"]
-SPEED_FIELDS = [
-    "run_id",
-    "commit_hash",
-    "video_path",
-    "seq_name",
-    "tracker",
-    "method",
-    "resolution",
-    "requested_frames",
-    "processed_frames",
-    "total_time_s",
-    "mean_fps",
-    "mean_latency_ms",
-    "p50_latency_ms",
-    "p95_latency_ms",
-    "peak_memory_mb",
-    "detector_calls_total",
-    "detector_calls_high_det",
-    "detector_calls_low_det",
-    "detector_calls_tracker_update",
-    "detector_calls_roi_redetect",
-    "mean_read_ms",
-    "mean_high_det_ms",
-    "mean_low_det_ms",
-    "mean_roi_redetect_ms",
-    "mean_tracker_ms",
-    "mean_render_ms",
-    "mean_write_ms",
-]
-SPEED_OUTPUT_FIELDS = [*SPEED_FIELDS, "status", "failure"]
-FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-METHOD_LABELS = {
-    "ocsort": "FFCA-YOLO + OC-SORT",
-    "botsort": "FFCA-YOLO + BoT-SORT",
-    "Ours-full": "FFCA-YOLO + MS-DC-ELT",
-    "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
-    "v2_low_clean": "FFCA-YOLO + MS-DC-ELT v2",
-    FORMAL_MSDC_VARIANT: "FFCA-YOLO + MS-DC-ELT v3",
-}
+from target_module.image_detect_module.constants import (  # noqa: E402
+    FORMAL_MSDC_VARIANT,
+    MAIN_MSDC_TRACKER,
+    METHOD_LABELS,
+    METRIC_FIELDS,
+    SPEED_FIELDS,
+    SPEED_OUTPUT_FIELDS,
+    SUMMARY_MAIN_TRACKERS,
+)
 
-MAIN_MSDC_TRACKER = FORMAL_MSDC_VARIANT
-MAIN_TRACKERS = {"ocsort", "botsort", "Ours-full", "msdc_elt", MAIN_MSDC_TRACKER}
+
+MAIN_TRACKERS = SUMMARY_MAIN_TRACKERS
 
 ABLATION_FIELDS = [
     "MSDC_USE_LOW_DET",
