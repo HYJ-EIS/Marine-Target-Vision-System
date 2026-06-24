@@ -34,6 +34,10 @@ from target_module.image_detect_module.constants import (  # noqa: E402
     FORMAL_MSDC_VARIANT,
 )
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS  # noqa: E402
+from tools.evaluation.msdc_diagnostic_metrics import (  # noqa: E402
+    summarize_msdc_diagnostics,
+    write_msdc_diagnostic_summary,
+)
 
 
 @dataclass(frozen=True)
@@ -787,6 +791,7 @@ def main() -> None:
         write_json(metadata_dir / "run_metadata.json", metadata)
         initialize_failures_file(failures_path)
     sequence_names: list[str] = []
+    diagnostic_summary_rows: list[dict] = []
 
     for dataset_root in args.dataset_root:
         spec = resolve_single_sequence_dataset(dataset_root)
@@ -845,13 +850,15 @@ def main() -> None:
             if args.run:
                 out_dir = diagnostics_root / spec.seq_name
                 eval_gt_file = gt_root / spec.seq_name / "gt" / "gt.txt"
-                write_diagnostics_for_tracker(eval_gt_file, tracker_file, out_dir, tracker_name)
-                write_stage_coverage_csv(
-                    eval_gt_file,
-                    trackers_root / tracker_name / "diagnostics" / spec.seq_name / "stage_observations.jsonl",
-                    out_dir,
-                    tracker_name,
-                )
+                per_gt_csv, _ = write_diagnostics_for_tracker(eval_gt_file, tracker_file, out_dir, tracker_name)
+                tracker_diag_dir = trackers_root / tracker_name / "diagnostics" / spec.seq_name
+                stage_observations_path = tracker_diag_dir / "stage_observations.jsonl"
+                write_stage_coverage_csv(eval_gt_file, stage_observations_path, out_dir, tracker_name)
+                lifecycle_events_path = tracker_diag_dir / "lifecycle_events.jsonl"
+                if lifecycle_events_path.is_file():
+                    row = summarize_msdc_diagnostics(lifecycle_events_path, stage_observations_path, per_gt_csv)
+                    row.update({"seq_name": spec.seq_name, "tracker": tracker_name})
+                    diagnostic_summary_rows.append(row)
             if args.render:
                 render_cmd = _build_render_command(
                     input_video=spec.video_path,
@@ -881,6 +888,10 @@ def main() -> None:
     print(f"[EVAL] {_quote_command(eval_cmd)}")
     if args.run:
         run_logged_command("eval", "EVAL", eval_cmd, {}, commands_path, failures_path)
+        write_msdc_diagnostic_summary(
+            diagnostics_root / "msdc_diagnostic_summary.csv",
+            diagnostic_summary_rows,
+        )
 
     if not args.run:
         print("[INFO] print-only mode; add --run to execute exports/evaluation/diagnostics.")

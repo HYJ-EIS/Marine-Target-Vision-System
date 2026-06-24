@@ -113,6 +113,7 @@ MS-DC-ELT 主要实现文件：
 | `tools/evaluation/motchallenge_eval.py` | 运行 MOTChallenge/TrackEval 指标 |
 | `tools/evaluation/msdc_dataset_benchmark.py` | 数据集级 benchmark 编排 |
 | `tools/evaluation/msdc_speed_benchmark.py` | 无渲染速度与分阶段耗时评测 |
+| `tools/evaluation/msdc_diagnostic_metrics.py` | 汇总低分候选、继承、重捕获和碎片化诊断指标 |
 | `tools/evaluation/msdc_sensitivity_matrix.py` | 写出 MS-DC-ELT v3 超参数敏感性矩阵 |
 | `tools/evaluation/msdc_experiment_summary.py` | 汇总主实验、消融和速度结果 |
 | `tools/evaluation/run_msdc_paper_experiments.py` | 论文 phase-1 实验总入口 |
@@ -168,6 +169,7 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 - 速度统计，至少包含总处理帧数、总耗时、平均单帧耗时和平均 FPS。
 - 分阶段耗时，至少拆分为读取/解码、低阈值检测、高阈值框筛选、lifecycle tracker、可视化渲染、结果写盘/导出；不适用阶段写 `0` 或 `N/A`。
 - 输出路径清单，包括 MOT txt、TrackEval summary、诊断 JSONL/CSV、可视化 MP4 和速度/耗时统计文件。
+- MS-DC 正式和 replay benchmark 会额外写出 `diagnostics/msdc_diagnostic_summary.csv`，汇总低分候选确认、继承、重捕获、碎片化和轨迹断裂诊断。
 
 正式测试结果必须写入新的时间戳 run 目录。临时 smoke、失败中断、partial 输出要标清楚或清理，避免和正式结果混在一起。
 

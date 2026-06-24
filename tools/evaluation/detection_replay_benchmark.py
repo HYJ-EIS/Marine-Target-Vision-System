@@ -43,6 +43,10 @@ from tools.evaluation.msdc_dataset_benchmark import (
     write_motchallenge_gt_sequence,
     write_stage_coverage_csv,
 )
+from tools.evaluation.msdc_diagnostic_metrics import (
+    summarize_msdc_diagnostics,
+    write_msdc_diagnostic_summary,
+)
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, FORMAL_V3_ENV
 
 SUMMARY_FIELDS = ["tracker", "variant", "replay_detections", *METRIC_FIELDS]
@@ -433,6 +437,7 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
             planned_trackers.append((tracker, "", tracker_output_name(tracker)))
     tracker_names = [tracker_name for _, _, tracker_name in planned_trackers]
     max_frames = effective_max_frames(args)
+    diagnostic_summary_rows: list[dict] = []
     for dataset_root in args.dataset_root:
         spec = resolve_single_sequence_dataset(dataset_root, video=args.input or None, seq_name=args.seq_name or None)
         if spec.video_path is None:
@@ -466,13 +471,15 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
             )
             diag_dir = diagnostics_root / spec.seq_name
             eval_gt_file = gt_root / spec.seq_name / "gt" / "gt.txt"
-            write_diagnostics_for_tracker(eval_gt_file, tracker_file, diag_dir, tracker_name)
-            write_stage_coverage_csv(
-                eval_gt_file,
-                trackers_root / tracker_name / "diagnostics" / spec.seq_name / "stage_observations.jsonl",
-                diag_dir,
-                tracker_name,
-            )
+            per_gt_csv, _ = write_diagnostics_for_tracker(eval_gt_file, tracker_file, diag_dir, tracker_name)
+            tracker_diag_dir = trackers_root / tracker_name / "diagnostics" / spec.seq_name
+            stage_observations_path = tracker_diag_dir / "stage_observations.jsonl"
+            write_stage_coverage_csv(eval_gt_file, stage_observations_path, diag_dir, tracker_name)
+            lifecycle_events_path = tracker_diag_dir / "lifecycle_events.jsonl"
+            if lifecycle_events_path.is_file():
+                row = summarize_msdc_diagnostics(lifecycle_events_path, stage_observations_path, per_gt_csv)
+                row.update({"seq_name": spec.seq_name, "tracker": tracker_name})
+                diagnostic_summary_rows.append(row)
             if args.render:
                 render_cmd = _build_render_command(
                     input_video=spec.video_path,
@@ -496,6 +503,10 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
         summary.setdefault(tracker_name, {})
         summary[tracker_name]["variant"] = variant
         summary[tracker_name]["replay_detections"] = True
+    write_msdc_diagnostic_summary(
+        diagnostics_root / "msdc_diagnostic_summary.csv",
+        diagnostic_summary_rows,
+    )
     return write_replay_summary(run_root, summary)
 
 
