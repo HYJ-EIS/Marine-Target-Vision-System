@@ -10,6 +10,7 @@ if str(_ROOT) not in sys.path:
 
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
+from tools.evaluation import detection_replay_benchmark as drb
 from tools.evaluation.detection_replay_benchmark import (
     effective_max_frames,
     high_boxes_from_cache_row,
@@ -132,6 +133,9 @@ def test_temporary_env_can_isolate_and_restore_ambient_msdc_keys(monkeypatch):
 def test_msdc_variant_context_resets_polluted_config_to_formal_baseline(monkeypatch):
     monkeypatch.setenv("MSDC_CONFIRM_REQUIRE_HIGH_DET", "0")
     monkeypatch.setattr(Config, "MSDC_CONFIRM_REQUIRE_HIGH_DET", False)
+    polluted_baseline = dict(getattr(drb, "_MSDC_CONFIG_IMPORT_BASELINE", {}))
+    polluted_baseline["MSDC_CONFIRM_REQUIRE_HIGH_DET"] = False
+    monkeypatch.setattr(drb, "_MSDC_CONFIG_IMPORT_BASELINE", polluted_baseline, raising=False)
 
     with msdc_variant_context("msdc_v3"):
         assert os.environ["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "1"
@@ -139,3 +143,18 @@ def test_msdc_variant_context_resets_polluted_config_to_formal_baseline(monkeypa
 
     assert os.environ["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "0"
     assert Config.MSDC_CONFIRM_REQUIRE_HIGH_DET is False
+
+
+def test_msdc_variant_context_resets_missing_env_backed_config_key(monkeypatch):
+    monkeypatch.setenv("MSDC_LOW_INHERIT_CLASS_MATCH", "0")
+    monkeypatch.setattr(Config, "MSDC_LOW_INHERIT_CLASS_MATCH", False)
+    polluted_baseline = dict(getattr(drb, "_MSDC_CONFIG_IMPORT_BASELINE", {}))
+    polluted_baseline["MSDC_LOW_INHERIT_CLASS_MATCH"] = False
+    monkeypatch.setattr(drb, "_MSDC_CONFIG_IMPORT_BASELINE", polluted_baseline, raising=False)
+
+    with msdc_variant_context("msdc_v3"):
+        assert os.environ["MSDC_LOW_INHERIT_CLASS_MATCH"] == "1"
+        assert Config.MSDC_LOW_INHERIT_CLASS_MATCH is True
+
+    assert os.environ["MSDC_LOW_INHERIT_CLASS_MATCH"] == "0"
+    assert Config.MSDC_LOW_INHERIT_CLASS_MATCH is False

@@ -46,10 +46,78 @@ from tools.evaluation.msdc_dataset_benchmark import (
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, FORMAL_V3_ENV
 
 SUMMARY_FIELDS = ["tracker", "variant", "replay_detections", *METRIC_FIELDS]
-_MSDC_CONFIG_IMPORT_BASELINE = {
-    key: getattr(Config, key)
-    for key in dir(Config)
-    if key.startswith("MSDC_") and not callable(getattr(Config, key))
+_MSDC_FORMAL_REPLAY_CONFIG_BASELINE = {
+    "MSDC_USE_REACQUIRE": True,
+    "MSDC_DEBUG_EVENTS": False,
+    "MSDC_DEBUG_TRACK_SNAPSHOT_LIMIT": 128,
+    "MSDC_DEBUG_DETAIL_LIMIT": 8,
+    "MSDC_EVIDENCE_MODE": "score",
+    "MSDC_CONFIRM_SCORE": 2.5,
+    "MSDC_CONFIRM_MIN_HITS": 4,
+    "MSDC_CONFIRM_REQUIRE_DET": True,
+    "MSDC_CONFIRM_MIN_DET_HITS": 4,
+    "MSDC_CONFIRM_MIN_REAL_DET_HITS": 4,
+    "MSDC_CONFIRM_REQUIRE_HIGH_DET": True,
+    "MSDC_LOW_SPAWN_MIN_CONF": 0.30,
+    "MSDC_LOW_CANDIDATE_ENABLE": True,
+    "MSDC_LOW_CONFIRM_MIN_HITS": 5,
+    "MSDC_LOW_CONFIRM_WINDOW": 8,
+    "MSDC_LOW_CONFIRM_MIN_AVG_SCORE": 0.22,
+    "MSDC_LOW_CONFIRM_MAX_MISSES": 1,
+    "MSDC_LOW_CONFIRM_MAX_AREA_CHANGE": 1.8,
+    "MSDC_LOW_CONFIRM_MAX_CENTER_STEP_FACTOR": 3.0,
+    "MSDC_LOW_INHERIT_ENABLE": True,
+    "MSDC_LOW_INHERIT_SCORE": 0.40,
+    "MSDC_LOW_INHERIT_IOU_THRESH": 0.02,
+    "MSDC_LOW_INHERIT_CENTER_DIST": 220.0,
+    "MSDC_LOW_INHERIT_MAX_LOST_AGE": 120,
+    "MSDC_LOW_INHERIT_USE_HISTORY_VELOCITY": True,
+    "MSDC_LOW_INHERIT_MAX_PREDICT_AGE": 120,
+    "MSDC_LOW_INHERIT_VELOCITY_MIN": 0.15,
+    "MSDC_LOW_INHERIT_CLASS_MATCH": True,
+    "MSDC_LOW_INHERIT_CLASS_MISMATCH_CENTER_DIST": 80.0,
+    "MSDC_LOW_INHERIT_CLASS_MISMATCH_PENALTY": 0.0,
+    "MSDC_LOW_INHERIT_WEIGHT_IOU": 0.35,
+    "MSDC_LOW_INHERIT_WEIGHT_CENTER": 0.25,
+    "MSDC_LOW_INHERIT_WEIGHT_VELOCITY": 0.20,
+    "MSDC_LOW_INHERIT_WEIGHT_LOW_SCORE": 0.15,
+    "MSDC_LOW_INHERIT_WEIGHT_RECENCY": 0.05,
+    "MSDC_CANDIDATE_MAX_AGE": 5,
+    "MSDC_LOST_MAX_AGE": 40,
+    "MSDC_REACQUIRE_INTERVAL": 5,
+    "MSDC_REACQUIRE_SCORE": 1.5,
+    "MSDC_REACQUIRE_IOU_THRESH": 0.05,
+    "MSDC_REACQUIRE_CENTER_DIST": 160.0,
+    "MSDC_REACQUIRE_CENTER_SCALE_FACTOR": 4.0,
+    "MSDC_REACQUIRE_MAX_CENTER_DIST": 240.0,
+    "MSDC_REMOVED_GUARD_FRAMES": 80,
+    "MSDC_REUSE_GUARD_ENABLE": True,
+    "MSDC_MAX_ACTIVE_TRACKS": 64,
+    "MSDC_MAX_LOST_TRACKS": 32,
+    "MSDC_MAX_CANDIDATES": 32,
+    "MSDC_MAX_LOW_CANDIDATES": 24,
+    "MSDC_MAX_TOTAL_TRACKS": 128,
+    "MSDC_SPAWN_SUPPRESS_ENABLE": True,
+    "MSDC_SPAWN_SUPPRESS_IOU": 0.1,
+    "MSDC_SPAWN_SUPPRESS_CENTER_DIST": 80.0,
+    "MSDC_LOW_SPAWN_SUPPRESS_CENTER_DIST": 120.0,
+    "MSDC_OUTPUT_NMS_ENABLE": True,
+    "MSDC_OUTPUT_NMS_IOU": 0.3,
+    "MSDC_OUTPUT_NMS_CENTER_DIST": 60.0,
+    "MSDC_OUTPUT_NMS_FRAGMENT_AREA_RATIO": 0.35,
+    "MSDC_OUTPUT_NMS_CONTAINMENT_RATIO": 0.50,
+    "MSDC_OUTPUT_MAX_REAL_DET_AGE": 3,
+    "MSDC_OUTPUT_MIN_BOX_SIZE": 12,
+    "MSDC_LOW_OBS_TOPK": 32,
+    "MSDC_LOW_OBS_GLOBAL_TOPK": 32,
+    "MSDC_LOW_OBS_PER_TRACK_NEAREST": 1,
+    "MSDC_LOW_OBS_MAX_PER_FRAME": 64,
+    "MSDC_LOW_OBS_MIN_CONF": 0.25,
+    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY": True,
+    "MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST": 240.0,
+    "MSDC_LOW_OBS_TRACK_PROXIMITY_IOU": 0.01,
+    "MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST": 240.0,
+    "MSDC_LOW_OBS_MOTION_GATE_IOU": 0.01,
 }
 
 
@@ -226,7 +294,7 @@ def _restore_config(old_values: dict[str, object]) -> None:
 def _complete_msdc_variant_env(variant: str) -> dict[str, str]:
     if variant not in ABLATION_VARIANTS:
         raise ValueError(f"Unsupported MS-DC replay variant: {variant}")
-    env = {key: _config_value_to_env(value) for key, value in _MSDC_CONFIG_IMPORT_BASELINE.items()}
+    env = {key: _config_value_to_env(value) for key, value in _MSDC_FORMAL_REPLAY_CONFIG_BASELINE.items()}
     env.update(FORMAL_V3_ENV)
     env.update(ABLATION_VARIANTS[variant])
     env.setdefault("MSDC_DEBUG_EVENTS", "1")
@@ -239,7 +307,7 @@ def msdc_variant_context(variant: str):
     old_config = _snapshot_msdc_config()
     try:
         with temporary_env(env_delta, isolate_msdc=True):
-            _restore_config(_MSDC_CONFIG_IMPORT_BASELINE)
+            _restore_config(_MSDC_FORMAL_REPLAY_CONFIG_BASELINE)
             _apply_config_env(env_delta)
             yield
     finally:
