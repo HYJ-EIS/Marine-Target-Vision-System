@@ -174,6 +174,8 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py \
 /home/hyj/Anti_Drone_Project/USV_MOT标注数据集
 ```
 
+数据集解析会优先读取 `原视频地址.txt`、`原视频文件地址.txt`、`video.txt` 或 `video_path.txt`；若这些文件不存在，则使用数据集根目录下的首个常见视频文件（如 `.MP4`/`.mp4`）。
+
 正式测试完成时必须同时交付：
 
 - 带标注可视化视频，至少包含目标框、类别和 track ID，并写入本次 run 独立 `visualizations/` 目录。

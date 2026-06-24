@@ -220,6 +220,21 @@ def test_resolve_single_sequence_dataset_supports_nested_and_flat_gt(tmp_path):
     assert flat_spec.seq_name == "uav_usv"
 
 
+def test_resolve_single_sequence_dataset_falls_back_to_root_video_file(tmp_path):
+    dataset_root = tmp_path / "UAV_USV_MOT标注数据集"
+    dataset_root.mkdir()
+    video_path = dataset_root / "DJI_20250916100639_0001_V.MP4"
+    video_path.write_bytes(b"fake")
+    (dataset_root / "gt.txt").write_text("1,1,10,10,20,20,1,1,1\n", encoding="utf-8")
+    (dataset_root / "labels.txt").write_text("UAV\nUSV\n", encoding="utf-8")
+
+    spec = resolve_single_sequence_dataset(dataset_root)
+
+    assert spec.video_ref_file is None
+    assert spec.video_path == video_path
+    assert spec.seq_name == "DJI_20250916100639_0001_V"
+
+
 def test_write_motchallenge_gt_sequence_copies_gt_and_writes_seqinfo(tmp_path):
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()

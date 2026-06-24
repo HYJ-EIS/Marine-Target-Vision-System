@@ -112,6 +112,15 @@ def _find_video_ref_file(dataset_root: Path) -> Path | None:
     return None
 
 
+def _find_root_video_file(dataset_root: Path) -> Path | None:
+    video_suffixes = {".avi", ".m4v", ".mov", ".mp4", ".mpeg", ".mpg"}
+    candidates = sorted(
+        path for path in dataset_root.iterdir()
+        if path.is_file() and path.suffix.lower() in video_suffixes
+    )
+    return candidates[0] if candidates else None
+
+
 def _default_seq_name(dataset_root: Path, video_path: Path | None) -> str:
     if video_path is not None and video_path.stem:
         return video_path.stem
@@ -142,7 +151,7 @@ def resolve_single_sequence_dataset(
     elif video_ref_file is not None:
         video_path = windows_path_to_wsl_path(_read_first_nonempty_line(video_ref_file))
     else:
-        video_path = None
+        video_path = _find_root_video_file(root)
 
     resolved_seq_name = seq_name or _default_seq_name(root, video_path)
     return SingleSequenceDataset(
