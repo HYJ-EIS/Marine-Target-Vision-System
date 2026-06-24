@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -9,9 +10,12 @@ if str(_ROOT) not in sys.path:
 
 from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
 from tools.evaluation.detection_replay_benchmark import (
+    effective_max_frames,
     high_boxes_from_cache_row,
     load_detection_cache,
     low_boxes_from_cache_row,
+    parse_args,
+    temporary_env,
     tracker_output_name,
     write_detection_cache,
     write_replay_summary,
@@ -99,3 +103,25 @@ def test_write_replay_summary_writes_trackeval_fields(tmp_path):
     assert rows[0]["replay_detections"] == "True"
     assert rows[0]["HOTA"] == "1.1"
     assert rows[1]["tracker"] == "ocsort_replay"
+
+
+def test_max_frames_controls_debug_replay_when_formal_limit_is_omitted():
+    args = parse_args(["--dataset-root", "dataset_a", "--max-frames", "10"])
+
+    assert args.formal_frame_limit == 0
+    assert effective_max_frames(args) == 10
+
+
+def test_temporary_env_can_isolate_and_restore_ambient_msdc_keys(monkeypatch):
+    monkeypatch.setenv("MSDC_AMBIENT_ONLY", "leak")
+    monkeypatch.setenv("MSDC_LOW_CANDIDATE_ENABLE", "ambient")
+    monkeypatch.setenv("NON_MSDC_KEY", "keep")
+
+    with temporary_env({"MSDC_LOW_CANDIDATE_ENABLE": "1"}, isolate_msdc=True):
+        assert os.environ["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
+        assert "MSDC_AMBIENT_ONLY" not in os.environ
+        assert os.environ["NON_MSDC_KEY"] == "keep"
+
+    assert os.environ["MSDC_AMBIENT_ONLY"] == "leak"
+    assert os.environ["MSDC_LOW_CANDIDATE_ENABLE"] == "ambient"
+    assert os.environ["NON_MSDC_KEY"] == "keep"

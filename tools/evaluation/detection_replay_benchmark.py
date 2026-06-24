@@ -63,9 +63,16 @@ def low_boxes_from_cache_row(row: dict) -> list[dict]:
 
 
 @contextmanager
-def temporary_env(env_delta: dict[str, str]):
-    old_values = {key: os.environ.get(key) for key in env_delta}
+def temporary_env(env_delta: dict[str, str], isolate_msdc: bool = False):
+    managed_keys = set(env_delta)
+    if isolate_msdc:
+        managed_keys.update(key for key in os.environ if key.startswith("MSDC_"))
+    old_values = {key: os.environ.get(key) for key in managed_keys}
     try:
+        if isolate_msdc:
+            for key in list(os.environ):
+                if key.startswith("MSDC_") and key not in env_delta:
+                    os.environ.pop(key, None)
         for key, value in env_delta.items():
             os.environ[key] = str(value)
         yield
@@ -197,6 +204,11 @@ def _restore_config(old_values: dict[str, object]) -> None:
         setattr(Config, key, value)
 
 
+def effective_max_frames(args: argparse.Namespace) -> int:
+    formal_frame_limit = int(getattr(args, "formal_frame_limit", 0))
+    return formal_frame_limit if formal_frame_limit > 0 else int(getattr(args, "max_frames", 0))
+
+
 def replay_tracker_from_cache(
     *,
     input_video: str | Path,
@@ -236,7 +248,7 @@ def replay_tracker_from_cache(
     if tracker_type == "msdc_elt" and "MSDC_DEBUG_EVENTS" not in env_delta:
         env_delta["MSDC_DEBUG_EVENTS"] = "1"
     try:
-        with temporary_env(env_delta):
+        with temporary_env(env_delta, isolate_msdc=bool(env_delta)):
             old_config = _apply_config_env(env_delta)
             if tracker_type == "msdc_elt":
                 from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
@@ -306,7 +318,7 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
         else:
             planned_trackers.append((tracker, "", tracker_output_name(tracker)))
     tracker_names = [tracker_name for _, _, tracker_name in planned_trackers]
-    max_frames = int(args.formal_frame_limit) if int(args.formal_frame_limit) > 0 else int(args.max_frames)
+    max_frames = effective_max_frames(args)
     for dataset_root in args.dataset_root:
         spec = resolve_single_sequence_dataset(dataset_root, video=args.input or None, seq_name=args.seq_name or None)
         if spec.video_path is None:
@@ -382,8 +394,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--formal-frame-limit",
         type=int,
-        default=FORMAL_FRAME_LIMIT,
-        help=f"Formal replay frame limit; 0 disables and uses --max-frames (default: {FORMAL_FRAME_LIMIT})",
+        default=0,
+        help=f"Formal replay frame limit; 0 disables and uses --max-frames. Use {FORMAL_FRAME_LIMIT} for formal replay.",
     )
     parser.add_argument(
         "--trackers",
