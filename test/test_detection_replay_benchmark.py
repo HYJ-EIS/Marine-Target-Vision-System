@@ -8,12 +8,14 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
 from tools.evaluation.detection_replay_benchmark import (
     effective_max_frames,
     high_boxes_from_cache_row,
     load_detection_cache,
     low_boxes_from_cache_row,
+    msdc_variant_context,
     parse_args,
     temporary_env,
     tracker_output_name,
@@ -125,3 +127,15 @@ def test_temporary_env_can_isolate_and_restore_ambient_msdc_keys(monkeypatch):
     assert os.environ["MSDC_AMBIENT_ONLY"] == "leak"
     assert os.environ["MSDC_LOW_CANDIDATE_ENABLE"] == "ambient"
     assert os.environ["NON_MSDC_KEY"] == "keep"
+
+
+def test_msdc_variant_context_resets_polluted_config_to_formal_baseline(monkeypatch):
+    monkeypatch.setenv("MSDC_CONFIRM_REQUIRE_HIGH_DET", "0")
+    monkeypatch.setattr(Config, "MSDC_CONFIRM_REQUIRE_HIGH_DET", False)
+
+    with msdc_variant_context("msdc_v3"):
+        assert os.environ["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "1"
+        assert Config.MSDC_CONFIRM_REQUIRE_HIGH_DET is True
+
+    assert os.environ["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "0"
+    assert Config.MSDC_CONFIRM_REQUIRE_HIGH_DET is False

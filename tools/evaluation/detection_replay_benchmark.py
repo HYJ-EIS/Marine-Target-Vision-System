@@ -9,7 +9,7 @@ import json
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Iterable
 
@@ -43,9 +43,14 @@ from tools.evaluation.msdc_dataset_benchmark import (
     write_motchallenge_gt_sequence,
     write_stage_coverage_csv,
 )
-from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS
+from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, FORMAL_V3_ENV
 
 SUMMARY_FIELDS = ["tracker", "variant", "replay_detections", *METRIC_FIELDS]
+_MSDC_CONFIG_IMPORT_BASELINE = {
+    key: getattr(Config, key)
+    for key in dir(Config)
+    if key.startswith("MSDC_") and not callable(getattr(Config, key))
+}
 
 
 def tracker_output_name(tracker_type: str, variant: str = "") -> str:
@@ -188,6 +193,20 @@ def _coerce_config_env_value(value: str, old_value: object) -> object:
     return str(value)
 
 
+def _config_value_to_env(value: object) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+def _snapshot_msdc_config() -> dict[str, object]:
+    return {
+        key: getattr(Config, key)
+        for key in dir(Config)
+        if key.startswith("MSDC_") and not callable(getattr(Config, key))
+    }
+
+
 def _apply_config_env(env_delta: dict[str, str]) -> dict[str, object]:
     old_values: dict[str, object] = {}
     for key, value in env_delta.items():
@@ -202,6 +221,29 @@ def _apply_config_env(env_delta: dict[str, str]) -> dict[str, object]:
 def _restore_config(old_values: dict[str, object]) -> None:
     for key, value in old_values.items():
         setattr(Config, key, value)
+
+
+def _complete_msdc_variant_env(variant: str) -> dict[str, str]:
+    if variant not in ABLATION_VARIANTS:
+        raise ValueError(f"Unsupported MS-DC replay variant: {variant}")
+    env = {key: _config_value_to_env(value) for key, value in _MSDC_CONFIG_IMPORT_BASELINE.items()}
+    env.update(FORMAL_V3_ENV)
+    env.update(ABLATION_VARIANTS[variant])
+    env.setdefault("MSDC_DEBUG_EVENTS", "1")
+    return env
+
+
+@contextmanager
+def msdc_variant_context(variant: str):
+    env_delta = _complete_msdc_variant_env(variant)
+    old_config = _snapshot_msdc_config()
+    try:
+        with temporary_env(env_delta, isolate_msdc=True):
+            _restore_config(_MSDC_CONFIG_IMPORT_BASELINE)
+            _apply_config_env(env_delta)
+            yield
+    finally:
+        _restore_config(old_config)
 
 
 def effective_max_frames(args: argparse.Namespace) -> int:
@@ -244,12 +286,15 @@ def replay_tracker_from_cache(
         raise RuntimeError(f"Failed to open video: {input_video}")
 
     old_config: dict[str, object] = {}
-    env_delta = dict(ABLATION_VARIANTS[variant]) if tracker_type == "msdc_elt" and variant else {}
-    if tracker_type == "msdc_elt" and "MSDC_DEBUG_EVENTS" not in env_delta:
-        env_delta["MSDC_DEBUG_EVENTS"] = "1"
+    replay_context = nullcontext()
+    if tracker_type == "msdc_elt" and variant:
+        replay_context = msdc_variant_context(variant)
+    elif tracker_type == "msdc_elt":
+        replay_context = temporary_env({"MSDC_DEBUG_EVENTS": "1"})
     try:
-        with temporary_env(env_delta, isolate_msdc=bool(env_delta)):
-            old_config = _apply_config_env(env_delta)
+        with replay_context:
+            if tracker_type == "msdc_elt" and not variant:
+                old_config = _apply_config_env({"MSDC_DEBUG_EVENTS": "1"})
             if tracker_type == "msdc_elt":
                 from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
 
