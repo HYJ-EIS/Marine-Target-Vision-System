@@ -7,7 +7,7 @@
 - 默认检测模型、阈值、输入输出路径集中在 `target_module/image_detect_module/config.py`。
 - 跟踪器选择、正式 MS-DC 变体名、方法展示名、速度字段集中在 `target_module/image_detect_module/constants.py`。
 - 视频运行与 MOT 导出的逐帧 tracking 更新逻辑共用 `target_module/image_detect_module/utils/tracking_update.py`。
-- 当前正式 MS-DC-ELT 变体为 `msdc_v3`，正式论文评测默认截取每个数据集前 5400 帧。
+- 当前正式 MS-DC-ELT 变体为 `v3_candidate_topk_no_roi_no_motion`。
 - 已删除早期一次性验证脚本；`tools/validation/` 当前仅保留包入口。
 
 ## 环境
@@ -101,7 +101,7 @@ MS-DC-ELT 主要实现文件：
 | `utils/evidence_state.py` | 证据累计与候选确认 |
 | `utils/msdc_types.py` | MS-DC 内部数据结构 |
 
-正式 v3 变体名为 `msdc_v3`。该变体用于当前论文主实验标签，MS-DC 路径只运行一次低阈值检测，并从低阈值结果中筛出高阈值框；低分候选 Top-K、低分继承、重获取和输出 NMS 的正式开关集中在 `tools/experiments/run_msdc_ablation.py` 的 `FORMAL_V3_ENV`。旧 ROI、motion、template 辅助模块已删除。
+正式 v3 变体名为 `v3_candidate_topk_no_roi_no_motion`。该变体用于当前论文主实验标签，MS-DC 路径只运行一次低阈值检测，并从低阈值结果中筛出高阈值框；低分候选 Top-K 和轨迹近邻预算用于控制候选规模。旧 ROI、motion、template 辅助模块已删除。
 
 ## 评测工具
 
@@ -150,8 +150,6 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 ```bash
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal
 ```
-
-正式主实验默认使用 `bytetrack`、`ocsort`、`botsort`、`msdc_elt` 四个 tracker，并通过 `--formal-frame-limit 5400` 让每个数据集只导出和评测前 5400 帧。Smoke/debug 仍使用 `--max-frames`。
 
 常用默认数据集根目录：
 
@@ -230,7 +228,6 @@ conda run -n ship_detect pytest \
 
 ## 最近维护
 
-- 2026-06-24：冻结论文正式配置为 `msdc_v3`，主实验纳入 ByteTrack，并为正式数据集评测增加 5400 帧 `--formal-frame-limit`。
 - 2026-06-22：集中 tracker choices、formal MS-DC 变体名、method labels、speed fields。
 - 2026-06-22：抽出 tracking update helper，统一 `video_main.py` 与 MOT 导出路径的 tracking 分发逻辑。
 - 2026-06-22：删除默认关闭且评测退化的 MS-DC motion seed、ROI redetect、template lock 辅助模块。
