@@ -15,6 +15,7 @@ from tools.evaluation import run_msdc_paper_experiments as runner
 from tools.evaluation.run_msdc_paper_experiments import (
     build_ablation_command,
     build_main_command,
+    build_sensitivity_command,
     build_speed_command,
 )
 
@@ -112,10 +113,19 @@ def test_ablation_command_includes_required_variants():
         progress_interval=500,
         run=True,
     )
-    assert "no_low_candidate" in cmd
-    assert "no_direct_reacquire" in cmd
-    assert "low_budget_topk16" in cmd
-    assert FORMAL_MSDC_VARIANT in cmd
+    assert runner.ABLATION_VARIANTS == [
+        FORMAL_MSDC_VARIANT,
+        "no_low_candidate",
+        "no_direct_reacquire",
+        "no_low_inheritance",
+        "hits_only_no_evidence",
+        "no_output_nms",
+        "no_output_real_det_age_gate",
+        "low_budget_off",
+        "low_budget_topk16",
+        "low_budget_topk64",
+    ]
+    assert cmd[cmd.index("--variants") + 1:cmd.index("--formal-frame-limit")] == runner.ABLATION_VARIANTS
 
 
 def test_ablation_command_uses_formal_frame_limit():
@@ -173,6 +183,20 @@ def test_speed_command_records_fixed_frame_count():
     assert "msdc_elt" in cmd
 
 
+def test_sensitivity_command_writes_matrix_under_run_root(tmp_path):
+    cmd = build_sensitivity_command(
+        output_root=tmp_path / "sensitivity",
+        run_id="sensitivity_full",
+    )
+
+    assert cmd == [
+        sys.executable,
+        str(runner._ROOT / "tools" / "evaluation" / "msdc_sensitivity_matrix.py"),
+        "--output",
+        str(tmp_path / "sensitivity" / "sensitivity_full" / "sensitivity_matrix.csv"),
+    ]
+
+
 def test_default_dry_run_does_not_create_output_or_latest(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, "_ROOT", tmp_path)
     monkeypatch.setattr(runner, "get_commit_hash", lambda: "abcdef0")
@@ -197,6 +221,7 @@ def test_relative_output_root_is_resolved_under_repo_root(tmp_path, monkeypatch,
     assert str(expected_root / "main") in captured.out
     assert str(expected_root / "ablation") in captured.out
     assert str(expected_root / "speed") in captured.out
+    assert str(expected_root / "sensitivity") in captured.out
     assert str(expected_root / "summary") in captured.out
 
 
@@ -230,12 +255,15 @@ def test_formal_success_writes_latest_after_all_commands(tmp_path, monkeypatch):
 
     runner.main(["--run-formal", "--output-root", str(tmp_path / "runs"), "--run-id", "formal", "--speed-frames", "7"])
 
-    assert [label for label, _ in calls] == ["main", "ablation", "speed", "summary"]
+    assert [label for label, _ in calls] == ["main", "ablation", "speed", "sensitivity", "summary"]
     latest = json.loads((tmp_path / "runs" / "latest_run.json").read_text(encoding="utf-8"))
     assert latest["run_root"] == str(tmp_path / "runs" / "formal")
     assert latest["main_root"] == str(tmp_path / "runs" / "formal" / "main" / "main_full")
     assert latest["ablation_root"] == str(tmp_path / "runs" / "formal" / "ablation" / "ablation_full")
     assert latest["speed_root"] == str(tmp_path / "runs" / "formal" / "speed" / "speed_7")
+    assert latest["sensitivity_matrix_csv"] == str(
+        tmp_path / "runs" / "formal" / "sensitivity" / "sensitivity_full" / "sensitivity_matrix.csv"
+    )
     assert Path(latest["main_results_csv"]).is_absolute()
 
 

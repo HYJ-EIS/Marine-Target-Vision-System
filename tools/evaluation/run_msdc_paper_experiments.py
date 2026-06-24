@@ -46,6 +46,10 @@ def _speed_benchmark_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_speed_benchmark.py")
 
 
+def _sensitivity_matrix_script() -> str:
+    return str(_ROOT / "tools" / "evaluation" / "msdc_sensitivity_matrix.py")
+
+
 def _summary_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_experiment_summary.py")
 
@@ -163,6 +167,15 @@ def build_speed_command(
         *MAIN_TRACKERS,
         "--progress-interval",
         str(progress_interval),
+    ]
+
+
+def build_sensitivity_command(output_root: Path, run_id: str) -> list[str]:
+    return [
+        sys.executable,
+        _sensitivity_matrix_script(),
+        "--output",
+        str(output_root / run_id / "sensitivity_matrix.csv"),
     ]
 
 
@@ -300,17 +313,20 @@ def build_latest_payload(
     main_output_root: Path,
     ablation_output_root: Path,
     speed_output_root: Path,
+    sensitivity_output_root: Path,
     summary_output_root: Path,
     frames: int,
 ) -> dict[str, str]:
     main_root = main_output_root / "main_full"
     ablation_root = ablation_output_root / "ablation_full"
     speed_root = speed_output_root / f"speed_{frames}"
+    sensitivity_csv = sensitivity_output_root / "sensitivity_full" / "sensitivity_matrix.csv"
     return {
         "run_root": _absolute_path(run_root),
         "main_results_csv": _absolute_path(summary_output_root / "main_results.csv"),
         "ablation_results_csv": _absolute_path(summary_output_root / "ablation_results.csv"),
         "speed_results_csv": _absolute_path(summary_output_root / "speed_results.csv"),
+        "sensitivity_matrix_csv": _absolute_path(sensitivity_csv),
         "report_path": _absolute_path(run_root / "MSDC_EXPERIMENT_REPORT.md"),
         "docs_result_path": _absolute_path(_ROOT / "docs" / "MSDC_EXPERIMENT_RESULT.md"),
         "main_root": _absolute_path(main_root),
@@ -387,6 +403,7 @@ def main(argv: list[str] | None = None) -> None:
     main_output_root = run_root / "main"
     ablation_output_root = run_root / "ablation"
     speed_output_root = run_root / "speed"
+    sensitivity_output_root = run_root / "sensitivity"
     summary_output_root = run_root / "summary"
     speed_run_id = f"speed_{int(args.speed_frames)}"
 
@@ -421,6 +438,10 @@ def main(argv: list[str] | None = None) -> None:
         frames=int(args.speed_frames),
         progress_interval=int(args.progress_interval),
     )
+    sensitivity_cmd = build_sensitivity_command(
+        output_root=sensitivity_output_root,
+        run_id="sensitivity_full",
+    )
 
     summary_cmd = build_summary_command(
         main_root=main_output_root / "main_full",
@@ -435,6 +456,7 @@ def main(argv: list[str] | None = None) -> None:
         ("main", main_cmd),
         ("ablation", ablation_cmd),
         ("speed", speed_cmd),
+        ("sensitivity", sensitivity_cmd),
         ("summary", summary_cmd),
     ]
     if not args.run_formal:
@@ -450,6 +472,7 @@ def main(argv: list[str] | None = None) -> None:
         main_output_root=main_output_root,
         ablation_output_root=ablation_output_root,
         speed_output_root=speed_output_root,
+        sensitivity_output_root=sensitivity_output_root,
         summary_output_root=summary_output_root,
         frames=int(args.speed_frames),
     )
