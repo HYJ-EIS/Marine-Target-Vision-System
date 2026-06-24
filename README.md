@@ -125,8 +125,6 @@ MS-DC-ELT 主要实现文件：
 | `tools/evaluation/render_msdc_diagnostics_video.py` | 基于 MS-DC 诊断 JSONL 渲染视频 |
 | `tools/evaluation/detection_replay_benchmark.py` | 回放缓存检测框进行 tracker 对比 |
 
-`detection_replay_benchmark.py` 的新缓存行同时保存 `high_boxes` 和 `low_boxes`。基线 tracker 只回放高阈值框，MS-DC 变体回放高/低阈值框；旧 `boxes` 缓存列仍可作为兼容回退。
-
 ### 实验
 
 | 脚本 | 用途 |
@@ -230,7 +228,6 @@ conda run -n ship_detect pytest \
 
 ## 最近维护
 
-- 2026-06-24：`detection_replay_benchmark.py` 支持高/低阈值检测缓存回放、MS-DC 正式/消融变体输出名和可选 MOT 可视化渲染。
 - 2026-06-22：集中 tracker choices、formal MS-DC 变体名、method labels、speed fields。
 - 2026-06-22：抽出 tracking update helper，统一 `video_main.py` 与 MOT 导出路径的 tracking 分发逻辑。
 - 2026-06-22：删除默认关闭且评测退化的 MS-DC motion seed、ROI redetect、template lock 辅助模块。
