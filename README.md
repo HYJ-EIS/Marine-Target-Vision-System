@@ -113,6 +113,7 @@ MS-DC-ELT 主要实现文件：
 | `tools/evaluation/motchallenge_eval.py` | 运行 MOTChallenge/TrackEval 指标 |
 | `tools/evaluation/msdc_dataset_benchmark.py` | 数据集级 benchmark 编排 |
 | `tools/evaluation/msdc_speed_benchmark.py` | 无渲染速度与分阶段耗时评测 |
+| `tools/evaluation/msdc_sensitivity_matrix.py` | 写出 MS-DC-ELT v3 超参数敏感性矩阵 |
 | `tools/evaluation/msdc_experiment_summary.py` | 汇总主实验、消融和速度结果 |
 | `tools/evaluation/run_msdc_paper_experiments.py` | 论文 phase-1 实验总入口 |
 | `tools/evaluation/validate_msdc_formal_run.py` | 检查正式 run 产物完整性 |
@@ -150,6 +151,8 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 ```bash
 conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal
 ```
+
+正式 run 会依次规划/执行 main、ablation、speed、sensitivity 和 summary 阶段；`sensitivity/` 阶段产物为 `sensitivity/sensitivity_full/sensitivity_matrix.csv`，`latest_run.json` 会记录 `sensitivity_matrix_csv`。
 
 常用默认数据集根目录：
 

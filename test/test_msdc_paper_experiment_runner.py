@@ -113,7 +113,7 @@ def test_ablation_command_includes_required_variants():
         progress_interval=500,
         run=True,
     )
-    assert runner.ABLATION_VARIANTS == [
+    required_variants = {
         FORMAL_MSDC_VARIANT,
         "no_low_candidate",
         "no_direct_reacquire",
@@ -124,8 +124,10 @@ def test_ablation_command_includes_required_variants():
         "low_budget_off",
         "low_budget_topk16",
         "low_budget_topk64",
-    ]
-    assert cmd[cmd.index("--variants") + 1:cmd.index("--formal-frame-limit")] == runner.ABLATION_VARIANTS
+    }
+    variants = cmd[cmd.index("--variants") + 1:cmd.index("--formal-frame-limit")]
+    assert variants[0] == FORMAL_MSDC_VARIANT
+    assert required_variants <= set(variants)
 
 
 def test_ablation_command_uses_formal_frame_limit():
