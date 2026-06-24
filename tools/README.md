@@ -35,10 +35,12 @@ conda run -n ship_detect python <script> ...
 - `export_mot_results.py`：把项目 tracker 输出导出为 `<tracker>/data/<seq>.txt`
 - `motchallenge_eval.py`：调用 vendored TrackEval 计算 HOTA、MOTA、IDF1
 - `msdc_dataset_benchmark.py`：解析双单序列标注数据集，编排 MOT 导出、TrackEval、诊断和可选可视化
+- `detection_replay_benchmark.py`：先缓存 high/low detector 输出，再回放给 baseline 与 MS-DC-ELT，保证主实验和消融使用同一 detector 输入。
 - `msdc_speed_benchmark.py`：在不渲染、不发 MQ、不跑 TrackEval 的条件下，对 OC-SORT、BoT-SORT、MS-DC-ELT 做固定帧数速度统计
+- `msdc_diagnostic_metrics.py`：汇总 low_candidate、inherit、reacquire、fragmentation 和 track break 诊断指标。
 - `msdc_experiment_summary.py`：把 TrackEval summary、速度结果和输出路径汇总为论文实验 CSV 与 Markdown 报告
-- `msdc_slice_eval.py`：从 per-GT diagnostics 生成短漏检 slice manifest
-- `msdc_sensitivity_matrix.py`：写出 MS-DC-ELT v3 超参数敏感性矩阵
+- `msdc_slice_eval.py`：从 per-GT diagnostics 生成短时漏检/低置信片段切片清单。
+- `msdc_sensitivity_matrix.py`：输出 v3 超参数敏感性扫描矩阵。
 - `validate_msdc_formal_run.py`：校验正式 run 的 MOT、TrackEval、诊断、slice、速度、敏感性和 summary/manifest 产物
 - `run_msdc_paper_experiments.py`：编排 MS-DC-ELT 论文第一阶段 main、ablation、slice、speed、sensitivity 与 summary/validation 流程；默认只打印计划命令，正式运行需显式传 `--run-formal`
 

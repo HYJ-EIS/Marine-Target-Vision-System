@@ -151,10 +151,20 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 执行正式 run：
 
 ```bash
-conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py --run-formal
+conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py \
+  --dataset-root \
+  /home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集 \
+  /home/hyj/Anti_Drone_Project/USV_MOT标注数据集 \
+  --formal-frame-limit 5400 \
+  --speed-frames 5400 \
+  --progress-interval 500 \
+  --run-formal
 ```
 
+正式 v3 论文评测默认使用 replay detections：每个序列先以同一 detector 和同一低阈值检测策略生成 high/low 检测缓存，再让 ByteTrack、OC-SORT、BoT-SORT 和 MS-DC-ELT v3 读取同一份 high 检测流；MS-DC-ELT v3 额外读取同一份 low 检测流用于 low_candidate、reacquire、inherit 和 evidence update。报告中必须写明 `replay_detections=true`。
+
 正式 run 会依次规划/执行 main、ablation、slice、speed、sensitivity 和 summary 阶段；`slice/` 阶段产物为 `slice/slice_manifest.csv`，`sensitivity/` 阶段产物为 `sensitivity/sensitivity_full/sensitivity_matrix.csv`，`latest_run.json` 会记录 `slice_manifest_csv` 和 `sensitivity_matrix_csv`。
+正式 run 必须包含 `main/`、`ablation/`、`slice/`、`speed/`、`sensitivity/`、`summary/`、`visualizations/`、`diagnostics/`，并通过 `tools/evaluation/validate_msdc_formal_run.py --run-root <run_root>`。
 `validate_msdc_formal_run.py` 会检查 `main_results.csv` 和 `speed_results.csv` 每一行必填字段非空且非 `N/A`，并要求 `msdc_diagnostic_summary.csv` 和 `sensitivity_matrix.csv` 至少包含一行数据；`slice_manifest.csv` 在无短漏检片段时允许只有表头。
 
 常用默认数据集根目录：
