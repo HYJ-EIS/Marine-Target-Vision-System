@@ -40,12 +40,17 @@ def _read_jsonl(path: str | Path) -> list[dict]:
     if not jsonl_path.is_file():
         return []
     rows: list[dict] = []
-    with jsonl_path.open("r", encoding="utf-8") as fh:
+    with jsonl_path.open("r", encoding="utf-8-sig") as fh:
         for line in fh:
             line = line.strip()
             if not line:
                 continue
-            rows.append(json.loads(line))
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
     return rows
 
 

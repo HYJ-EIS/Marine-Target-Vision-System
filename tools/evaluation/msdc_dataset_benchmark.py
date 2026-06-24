@@ -855,7 +855,7 @@ def main() -> None:
                 stage_observations_path = tracker_diag_dir / "stage_observations.jsonl"
                 write_stage_coverage_csv(eval_gt_file, stage_observations_path, out_dir, tracker_name)
                 lifecycle_events_path = tracker_diag_dir / "lifecycle_events.jsonl"
-                if lifecycle_events_path.is_file():
+                if per_gt_csv.is_file():
                     row = summarize_msdc_diagnostics(lifecycle_events_path, stage_observations_path, per_gt_csv)
                     row.update({"seq_name": spec.seq_name, "tracker": tracker_name})
                     diagnostic_summary_rows.append(row)

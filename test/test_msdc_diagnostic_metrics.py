@@ -101,6 +101,48 @@ def test_summarize_msdc_diagnostics_supports_current_event_aliases(tmp_path):
     assert row["reacquire_success"] == 2
 
 
+def test_summarize_msdc_diagnostics_skips_malformed_jsonl_lines(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    events_path.write_text(
+        "\ufeff"
+        + json.dumps({"frame_idx": 1, "gid": 7, "event_type": "NEW_LOW_CANDIDATE"})
+        + "\n"
+        + "{truncated\n"
+        + json.dumps({"frame_idx": 4, "gid": 7, "event_type": "CONFIRM_LOW_ACTIVE"})
+        + "\n",
+        encoding="utf-8",
+    )
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    row = summarize_msdc_diagnostics(events_path, tmp_path / "missing_stage.jsonl", per_gt_path)
+
+    assert row["low_candidate_confirmed"] == 1
+    assert row["low_candidate_precision"] == 1.0
+    assert row["low_candidate_avg_confirm_delay"] == 3.0
+
+
+def test_summarize_msdc_diagnostics_uses_per_gt_when_events_are_missing(tmp_path):
+    per_gt_path = tmp_path / "per_gt.csv"
+    with per_gt_path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["gt_id", "predicted_id_count", "matched_segments"])
+        writer.writeheader()
+        writer.writerow({"gt_id": 1, "predicted_id_count": 2, "matched_segments": "1-2;5-6"})
+        writer.writerow({"gt_id": 2, "predicted_id_count": 1, "matched_segments": "3-4"})
+
+    row = summarize_msdc_diagnostics(
+        tmp_path / "missing_lifecycle_events.jsonl",
+        tmp_path / "missing_stage_observations.jsonl",
+        per_gt_path,
+    )
+
+    assert row["low_candidate_confirmed"] == 0
+    assert row["low_candidate_precision"] == "N/A"
+    assert row["low_candidate_avg_confirm_delay"] == 0.0
+    assert row["fragmentation_count"] == 1
+    assert row["track_break_count"] == 1
+
+
 def test_write_msdc_diagnostic_summary_writes_header_and_rows(tmp_path):
     output_path = tmp_path / "diagnostics" / "msdc_diagnostic_summary.csv"
     row = {field: "" for field in DIAGNOSTIC_FIELDS}

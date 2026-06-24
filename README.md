@@ -169,7 +169,7 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 - 速度统计，至少包含总处理帧数、总耗时、平均单帧耗时和平均 FPS。
 - 分阶段耗时，至少拆分为读取/解码、低阈值检测、高阈值框筛选、lifecycle tracker、可视化渲染、结果写盘/导出；不适用阶段写 `0` 或 `N/A`。
 - 输出路径清单，包括 MOT txt、TrackEval summary、诊断 JSONL/CSV、可视化 MP4 和速度/耗时统计文件。
-- MS-DC 正式和 replay benchmark 会额外写出 `diagnostics/msdc_diagnostic_summary.csv`，汇总低分候选确认、继承、重捕获、碎片化和轨迹断裂诊断。
+- MS-DC 正式和 replay benchmark 会在 per-GT diagnostics 可用时额外写出 `diagnostics/msdc_diagnostic_summary.csv`，汇总低分候选确认、继承、重捕获、碎片化和轨迹断裂诊断。
 
 正式测试结果必须写入新的时间戳 run 目录。临时 smoke、失败中断、partial 输出要标清楚或清理，避免和正式结果混在一起。
 
