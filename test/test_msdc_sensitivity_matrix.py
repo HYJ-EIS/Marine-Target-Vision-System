@@ -1,5 +1,6 @@
 import csv
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -56,3 +57,20 @@ def test_write_sensitivity_matrix_writes_expected_csv(tmp_path):
 
     rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
     assert rows == matrix.build_sensitivity_variants()
+
+
+def test_cli_runs_directly_as_script(tmp_path):
+    output = tmp_path / "sensitivity_matrix.csv"
+    script = _ROOT / "tools" / "evaluation" / "msdc_sensitivity_matrix.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--output", str(output)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.is_file()
+    rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
+    assert rows
