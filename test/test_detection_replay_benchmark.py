@@ -16,6 +16,7 @@ from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_C
 from tools.evaluation import detection_replay_benchmark as drb
 from tools.evaluation.detection_replay_benchmark import (
     effective_max_frames,
+    expected_replay_frames,
     high_boxes_from_cache_row,
     is_detection_cache_complete,
     is_mot_result_complete,
@@ -154,6 +155,12 @@ def test_max_frames_controls_debug_replay_when_formal_limit_is_omitted():
 
     assert args.formal_frame_limit == 0
     assert effective_max_frames(args) == 10
+
+
+def test_expected_replay_frames_caps_formal_limit_to_video_length():
+    assert expected_replay_frames(max_frames=5400, video_frame_count=4770) == 4770
+    assert expected_replay_frames(max_frames=5400, video_frame_count=9000) == 5400
+    assert expected_replay_frames(max_frames=5400, video_frame_count=0) == 5400
 
 
 def test_temporary_env_can_isolate_and_restore_ambient_msdc_keys(monkeypatch):

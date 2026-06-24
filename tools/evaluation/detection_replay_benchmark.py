@@ -371,6 +371,14 @@ def effective_max_frames(args: argparse.Namespace) -> int:
     return formal_frame_limit if formal_frame_limit > 0 else int(getattr(args, "max_frames", 0))
 
 
+def expected_replay_frames(max_frames: int, video_frame_count: int) -> int:
+    if max_frames <= 0:
+        return max(0, int(video_frame_count))
+    if video_frame_count <= 0:
+        return int(max_frames)
+    return min(int(max_frames), int(video_frame_count))
+
+
 def replay_tracker_from_cache(
     *,
     input_video: str | Path,
@@ -493,10 +501,11 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
             raise FileNotFoundError(f"Resolved video path is not accessible: {spec.video_path}")
         info = read_video_info(spec.video_path)
         file_type = _resolve_file_type(spec.video_path, args.file_type)
+        expected_frames = expected_replay_frames(max_frames, int(info.frame_count))
         sequences.append(spec.seq_name)
         write_motchallenge_gt_sequence(spec, gt_root, info, max_frames=max_frames)
         cache_path = detections_root / f"{spec.seq_name}_high_low_detections.jsonl"
-        if is_detection_cache_complete(cache_path, max_frames):
+        if is_detection_cache_complete(cache_path, expected_frames):
             print(f"[SKIP] detection cache complete: {cache_path}", flush=True)
         else:
             dump_video_detections(
@@ -508,7 +517,7 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
             )
         for tracker_type, variant, tracker_name in planned_trackers:
             tracker_file = trackers_root / tracker_name / "data" / f"{spec.seq_name}.txt"
-            if is_mot_result_complete(tracker_file, max_frames):
+            if is_mot_result_complete(tracker_file, expected_frames):
                 print(f"[SKIP] replay MOT complete: {tracker_file}", flush=True)
             else:
                 tracker_file = replay_tracker_from_cache(
@@ -536,7 +545,7 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
                 diagnostic_summary_rows.append(row)
             if args.render:
                 render_output = run_root / "visualizations" / spec.seq_name / f"{tracker_name}.mp4"
-                if is_render_video_complete(render_output, max_frames):
+                if is_render_video_complete(render_output, expected_frames):
                     print(f"[SKIP] rendered video complete: {render_output}", flush=True)
                     continue
                 render_cmd = _build_render_command(
