@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import json
+import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -18,26 +21,60 @@ if str(_ROOT) not in sys.path:
 
 import target_module.image_detect_module.target_detection as td
 from target_module.image_detect_module.config import Config
-from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
+from target_module.image_detect_module.constants import (
+    DATASET_EXPORT_TRACKER_CHOICES,
+    FORMAL_FRAME_LIMIT,
+    FORMAL_MSDC_VARIANT,
+    METRIC_FIELDS,
+)
 from target_module.image_detect_module.utils.file_utils import get_file_type
+from target_module.image_detect_module.utils.msdc_detection import (
+    run_msdc_low_threshold_detection,
+    split_msdc_high_from_low_boxes,
+)
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from tools.evaluation.export_mot_results import format_mot_result_line
 from tools.evaluation.motchallenge_eval import run_motchallenge_eval
 from tools.evaluation.msdc_dataset_benchmark import (
+    _build_render_command,
     read_video_info,
     resolve_single_sequence_dataset,
     write_diagnostics_for_tracker,
     write_motchallenge_gt_sequence,
     write_stage_coverage_csv,
 )
+from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS
 
-SUMMARY_FIELDS = ["tracker", "HOTA", "DetA", "AssA", "MOTA", "IDF1", "IDSW", "FP", "FN", "IDTP", "IDFP", "IDFN"]
+SUMMARY_FIELDS = ["tracker", "variant", "replay_detections", *METRIC_FIELDS]
 
 
-def tracker_output_name(tracker_type: str) -> str:
-    if tracker_type == "msdc_elt":
-        return "msdc_elt_high_replay"
+def tracker_output_name(tracker_type: str, variant: str = "") -> str:
+    if tracker_type == "msdc_elt" and variant:
+        return f"{variant}_replay"
     return f"{tracker_type}_replay"
+
+
+def high_boxes_from_cache_row(row: dict) -> list[dict]:
+    return list(row.get("high_boxes", row.get("boxes", [])) or [])
+
+
+def low_boxes_from_cache_row(row: dict) -> list[dict]:
+    return list(row.get("low_boxes", row.get("boxes", [])) or [])
+
+
+@contextmanager
+def temporary_env(env_delta: dict[str, str]):
+    old_values = {key: os.environ.get(key) for key in env_delta}
+    try:
+        for key, value in env_delta.items():
+            os.environ[key] = str(value)
+        yield
+    finally:
+        for key, value in old_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def write_detection_cache(path: str | Path, rows: Iterable[dict]) -> Path:
@@ -70,8 +107,21 @@ def write_replay_summary(run_root: str | Path, summary: dict[str, dict]) -> Path
         writer = csv.DictWriter(fh, fieldnames=SUMMARY_FIELDS)
         writer.writeheader()
         for tracker, values in summary.items():
-            writer.writerow({"tracker": tracker, **values})
+            row = {field: "" for field in SUMMARY_FIELDS}
+            row.update({key: value for key, value in values.items() if key in SUMMARY_FIELDS})
+            row["tracker"] = tracker
+            row["variant"] = values.get("variant", _summary_variant_from_tracker(tracker))
+            row["replay_detections"] = values.get("replay_detections", True)
+            writer.writerow(row)
     return output_path
+
+
+def _summary_variant_from_tracker(tracker_name: str) -> str:
+    if not tracker_name.endswith("_replay"):
+        return ""
+    base_name = tracker_name[:-len("_replay")]
+    baseline_names = set(DATASET_EXPORT_TRACKER_CHOICES) - {"msdc_elt"}
+    return "" if base_name in baseline_names else base_name
 
 
 def _resolve_file_type(video_path: Path, requested: str = "") -> str:
@@ -95,11 +145,6 @@ def dump_video_detections(
         raise RuntimeError(f"Failed to open video: {input_video}")
 
     detector = td.get_detector()
-    processor = getattr(detector, "processor", None)
-    if processor is None or not hasattr(processor, "process_frame"):
-        cap.release()
-        raise RuntimeError("detector.processor.process_frame(frame, file_type) is unavailable")
-
     rows: list[dict] = []
     frame_id = 0
     try:
@@ -110,10 +155,15 @@ def dump_video_detections(
             frame_id += 1
             if max_frames > 0 and frame_id > max_frames:
                 break
-            stats = processor.process_frame(frame, file_type)
-            if stats is None:
-                raise RuntimeError(f"Detection failed: frame={frame_id}")
-            rows.append({"frame_id": frame_id, "boxes": list(stats.get("boxes", []) or [])})
+            low_boxes = run_msdc_low_threshold_detection(detector, frame, file_type)
+            high_boxes = split_msdc_high_from_low_boxes(low_boxes, file_type)
+            rows.append({
+                "frame_id": frame_id,
+                "file_type": file_type,
+                "replay_detections": True,
+                "high_boxes": high_boxes,
+                "low_boxes": low_boxes,
+            })
             if progress_interval > 0 and frame_id % progress_interval == 0:
                 print(f"[PROGRESS] dump {input_video.stem}: {frame_id}/{max_frames}", flush=True)
     finally:
@@ -121,10 +171,24 @@ def dump_video_detections(
     return write_detection_cache(output_cache, rows)
 
 
-def _set_msdc_replay_config() -> dict[str, object]:
-    keys = ["MSDC_DEBUG_EVENTS"]
-    old_values = {key: getattr(Config, key) for key in keys if hasattr(Config, key)}
-    Config.MSDC_DEBUG_EVENTS = True
+def _coerce_config_env_value(value: str, old_value: object) -> object:
+    if isinstance(old_value, bool):
+        return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+    if isinstance(old_value, int) and not isinstance(old_value, bool):
+        return int(str(value).strip())
+    if isinstance(old_value, float):
+        return float(str(value).strip())
+    return str(value)
+
+
+def _apply_config_env(env_delta: dict[str, str]) -> dict[str, object]:
+    old_values: dict[str, object] = {}
+    for key, value in env_delta.items():
+        if not hasattr(Config, key):
+            continue
+        old_value = getattr(Config, key)
+        old_values[key] = old_value
+        setattr(Config, key, _coerce_config_env_value(str(value), old_value))
     return old_values
 
 
@@ -139,6 +203,7 @@ def replay_tracker_from_cache(
     detection_cache: str | Path,
     output_root: str | Path,
     tracker_type: str,
+    variant: str = "",
     seq_name: str,
     file_type: str,
     frame_rate: float,
@@ -147,60 +212,74 @@ def replay_tracker_from_cache(
 ) -> Path:
     if tracker_type not in DATASET_EXPORT_TRACKER_CHOICES:
         raise ValueError(f"Unsupported replay tracker: {tracker_type}")
+    if tracker_type == "msdc_elt" and variant and variant not in ABLATION_VARIANTS:
+        raise ValueError(f"Unsupported MS-DC replay variant: {variant}")
 
     input_video = Path(input_video)
-    tracker_name = tracker_output_name(tracker_type)
+    tracker_name = tracker_output_name(tracker_type, variant)
     output_file = Path(output_root) / tracker_name / "data" / f"{seq_name}.txt"
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_rows = {int(row["frame_id"]): list(row.get("boxes", []) or []) for row in load_detection_cache(detection_cache, max_frames)}
+    cache_rows = {
+        int(row["frame_id"]): {
+            "high_boxes": high_boxes_from_cache_row(row),
+            "low_boxes": low_boxes_from_cache_row(row),
+        }
+        for row in load_detection_cache(detection_cache, max_frames)
+    }
 
     cap = cv2.VideoCapture(str(input_video))
     if not cap.isOpened():
         raise RuntimeError(f"Failed to open video: {input_video}")
 
     old_config: dict[str, object] = {}
+    env_delta = dict(ABLATION_VARIANTS[variant]) if tracker_type == "msdc_elt" and variant else {}
+    if tracker_type == "msdc_elt" and "MSDC_DEBUG_EVENTS" not in env_delta:
+        env_delta["MSDC_DEBUG_EVENTS"] = "1"
     try:
-        if tracker_type == "msdc_elt":
-            from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
+        with temporary_env(env_delta):
+            old_config = _apply_config_env(env_delta)
+            if tracker_type == "msdc_elt":
+                from target_module.image_detect_module.utils.lifecycle_tracker import MSDCLifecycleTracker
 
-            old_config = _set_msdc_replay_config()
-            tracker = None
-            diagnostics_dir = Path(output_root) / tracker_name / "diagnostics" / seq_name
-            lifecycle_tracker = MSDCLifecycleTracker(
-                config=Config,
-                file_type=file_type,
-                debug_dir=diagnostics_dir,
-                processor=None,
-            )
-        else:
-            tracker = MultiObjectTracker(frame_rate=frame_rate, tracker_type=tracker_type)
-            lifecycle_tracker = None
+                tracker = None
+                diagnostics_dir = Path(output_root) / tracker_name / "diagnostics" / seq_name
+                lifecycle_tracker = MSDCLifecycleTracker(
+                    config=Config,
+                    file_type=file_type,
+                    debug_dir=diagnostics_dir,
+                    processor=None,
+                )
+            else:
+                tracker = MultiObjectTracker(frame_rate=frame_rate, tracker_type=tracker_type)
+                lifecycle_tracker = None
 
-        frame_id = 0
-        with output_file.open("w", encoding="utf-8") as fh:
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                frame_id += 1
-                if max_frames > 0 and frame_id > max_frames:
-                    break
-                boxes = cache_rows.get(frame_id, [])
-                if tracker_type == "msdc_elt":
-                    tracked_boxes = lifecycle_tracker.update(
-                        frame=frame,
-                        frame_idx=frame_id - 1,
-                        file_type=file_type,
-                        high_boxes=boxes,
-                        low_boxes=[],
-                    )
-                else:
-                    tracked_boxes = tracker.update(boxes, frame.shape, frame=frame)
-                for box in tracked_boxes:
-                    fh.write(format_mot_result_line(frame_id, box) + "\n")
-                if progress_interval > 0 and frame_id % progress_interval == 0:
-                    fh.flush()
-                    print(f"[PROGRESS] replay {tracker_name} {seq_name}: {frame_id}/{max_frames}", flush=True)
+            frame_id = 0
+            with output_file.open("w", encoding="utf-8") as fh:
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    frame_id += 1
+                    if max_frames > 0 and frame_id > max_frames:
+                        break
+                    cached = cache_rows.get(frame_id, {"high_boxes": [], "low_boxes": []})
+                    high_boxes = cached["high_boxes"]
+                    low_boxes = cached["low_boxes"]
+                    if tracker_type == "msdc_elt":
+                        tracked_boxes = lifecycle_tracker.update(
+                            frame=frame,
+                            frame_idx=frame_id - 1,
+                            file_type=file_type,
+                            high_boxes=high_boxes,
+                            low_boxes=low_boxes,
+                        )
+                    else:
+                        tracked_boxes = tracker.update(high_boxes, frame.shape, frame=frame)
+                    for box in tracked_boxes:
+                        fh.write(format_mot_result_line(frame_id, box) + "\n")
+                    if progress_interval > 0 and frame_id % progress_interval == 0:
+                        fh.flush()
+                        print(f"[PROGRESS] replay {tracker_name} {seq_name}: {frame_id}/{max_frames}", flush=True)
     finally:
         cap.release()
         if old_config:
@@ -219,8 +298,15 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
     run_root.mkdir(parents=True, exist_ok=True)
 
     sequences: list[str] = []
-    tracker_names = [tracker_output_name(tracker) for tracker in args.trackers]
-    max_frames = int(args.max_frames)
+    planned_trackers: list[tuple[str, str, str]] = []
+    for tracker in args.trackers:
+        if tracker == "msdc_elt":
+            for variant in args.variants:
+                planned_trackers.append((tracker, variant, tracker_output_name(tracker, variant)))
+        else:
+            planned_trackers.append((tracker, "", tracker_output_name(tracker)))
+    tracker_names = [tracker_name for _, _, tracker_name in planned_trackers]
+    max_frames = int(args.formal_frame_limit) if int(args.formal_frame_limit) > 0 else int(args.max_frames)
     for dataset_root in args.dataset_root:
         spec = resolve_single_sequence_dataset(dataset_root, video=args.input or None, seq_name=args.seq_name or None)
         if spec.video_path is None:
@@ -231,7 +317,7 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
         file_type = _resolve_file_type(spec.video_path, args.file_type)
         sequences.append(spec.seq_name)
         write_motchallenge_gt_sequence(spec, gt_root, info, max_frames=max_frames)
-        cache_path = detections_root / f"{spec.seq_name}_high_detections.jsonl"
+        cache_path = detections_root / f"{spec.seq_name}_high_low_detections.jsonl"
         dump_video_detections(
             input_video=spec.video_path,
             output_cache=cache_path,
@@ -239,12 +325,13 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
             max_frames=max_frames,
             progress_interval=int(args.progress_interval),
         )
-        for tracker_type in args.trackers:
+        for tracker_type, variant, tracker_name in planned_trackers:
             tracker_file = replay_tracker_from_cache(
                 input_video=spec.video_path,
                 detection_cache=cache_path,
                 output_root=trackers_root,
                 tracker_type=tracker_type,
+                variant=variant,
                 seq_name=spec.seq_name,
                 file_type=file_type,
                 frame_rate=info.fps,
@@ -253,7 +340,6 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
             )
             diag_dir = diagnostics_root / spec.seq_name
             eval_gt_file = gt_root / spec.seq_name / "gt" / "gt.txt"
-            tracker_name = tracker_output_name(tracker_type)
             write_diagnostics_for_tracker(eval_gt_file, tracker_file, diag_dir, tracker_name)
             write_stage_coverage_csv(
                 eval_gt_file,
@@ -261,6 +347,16 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
                 diag_dir,
                 tracker_name,
             )
+            if args.render:
+                render_cmd = _build_render_command(
+                    input_video=spec.video_path,
+                    tracker_file=tracker_file,
+                    output_file=run_root / "visualizations" / spec.seq_name / f"{tracker_name}.mp4",
+                    max_frames=max_frames,
+                    progress_interval=int(args.progress_interval),
+                    class_source=str(args.render_class_source),
+                )
+                subprocess.run(render_cmd, cwd=str(_ROOT), check=True)
 
     summary = run_motchallenge_eval(
         gt_root=gt_root,
@@ -270,6 +366,10 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
         sequences=sequences,
         print_results=False,
     )
+    for _, variant, tracker_name in planned_trackers:
+        summary.setdefault(tracker_name, {})
+        summary[tracker_name]["variant"] = variant
+        summary[tracker_name]["replay_detections"] = True
     return write_replay_summary(run_root, summary)
 
 
@@ -278,20 +378,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dataset-root", nargs="+", required=True, help="Single-sequence annotation roots")
     parser.add_argument("--output-root", default="results/detection_replay_benchmark")
     parser.add_argument("--run-id", default="")
-    parser.add_argument("--max-frames", type=int, default=300)
+    parser.add_argument("--max-frames", type=int, default=300, help="Smoke/debug limit used when --formal-frame-limit is 0")
+    parser.add_argument(
+        "--formal-frame-limit",
+        type=int,
+        default=FORMAL_FRAME_LIMIT,
+        help=f"Formal replay frame limit; 0 disables and uses --max-frames (default: {FORMAL_FRAME_LIMIT})",
+    )
     parser.add_argument(
         "--trackers",
         nargs="+",
         choices=DATASET_EXPORT_TRACKER_CHOICES,
         default=list(DATASET_EXPORT_TRACKER_CHOICES),
     )
+    parser.add_argument("--variants", nargs="+", default=[FORMAL_MSDC_VARIANT], choices=list(ABLATION_VARIANTS))
     parser.add_argument("--progress-interval", type=int, default=0)
+    parser.add_argument("--render", action="store_true", help="Render annotated videos after replay exports")
+    parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
     parser.add_argument("--input", default="", help="Optional direct input video path for a single dataset")
     parser.add_argument("--seq-name", default="", help="Optional sequence name override for a single dataset")
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
     args = parser.parse_args(argv)
-    if int(args.max_frames) <= 0:
-        parser.error("--max-frames must be > 0 for replay diagnostics")
+    if int(args.max_frames) < 0:
+        parser.error("--max-frames must be >= 0")
+    if int(args.formal_frame_limit) < 0:
+        parser.error("--formal-frame-limit must be >= 0")
+    if int(args.formal_frame_limit) == 0 and int(args.max_frames) <= 0:
+        parser.error("--max-frames must be > 0 when --formal-frame-limit is 0")
     if int(args.progress_interval) < 0:
         parser.error("--progress-interval must be >= 0")
     return args

@@ -9,7 +9,9 @@ if str(_ROOT) not in sys.path:
 
 from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES
 from tools.evaluation.detection_replay_benchmark import (
+    high_boxes_from_cache_row,
     load_detection_cache,
+    low_boxes_from_cache_row,
     tracker_output_name,
     write_detection_cache,
     write_replay_summary,
@@ -53,10 +55,29 @@ def test_load_detection_cache_can_clip_to_frame_count(tmp_path):
 
 
 def test_tracker_output_name_marks_replay_mode():
+    assert tracker_output_name("bytetrack") == "bytetrack_replay"
     assert tracker_output_name("botsort") == "botsort_replay"
     assert tracker_output_name("ocsort") == "ocsort_replay"
-    assert tracker_output_name("msdc_elt") == "msdc_elt_high_replay"
-    assert DATASET_EXPORT_TRACKER_CHOICES == ("botsort", "ocsort", "msdc_elt")
+    assert tracker_output_name("msdc_elt", "msdc_v3") == "msdc_v3_replay"
+    assert tracker_output_name("msdc_elt", "no_low_candidate") == "no_low_candidate_replay"
+    assert DATASET_EXPORT_TRACKER_CHOICES == ("bytetrack", "botsort", "ocsort", "msdc_elt")
+
+
+def test_high_and_low_boxes_read_named_cache_columns():
+    high_boxes = [{"x": 1, "confidence": 0.7}]
+    low_boxes = [{"x": 2, "confidence": 0.2}]
+    row = {"frame_id": 1, "high_boxes": high_boxes, "low_boxes": low_boxes}
+
+    assert high_boxes_from_cache_row(row) == high_boxes
+    assert low_boxes_from_cache_row(row) == low_boxes
+
+
+def test_high_and_low_boxes_fall_back_to_legacy_boxes_column():
+    boxes = [{"x": 3, "confidence": 0.8}]
+    row = {"frame_id": 1, "boxes": boxes}
+
+    assert high_boxes_from_cache_row(row) == boxes
+    assert low_boxes_from_cache_row(row) == boxes
 
 
 def test_write_replay_summary_writes_trackeval_fields(tmp_path):
@@ -72,6 +93,9 @@ def test_write_replay_summary_writes_trackeval_fields(tmp_path):
         rows = list(csv.DictReader(fh))
 
     assert summary_path == tmp_path / "summary" / "replay_summary.csv"
+    assert set(["tracker", "variant", "replay_detections", "MOTA", "IDF1"]).issubset(rows[0])
     assert rows[0]["tracker"] == "botsort_replay"
+    assert rows[0]["variant"] == ""
+    assert rows[0]["replay_detections"] == "True"
     assert rows[0]["HOTA"] == "1.1"
     assert rows[1]["tracker"] == "ocsort_replay"
