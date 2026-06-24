@@ -42,14 +42,28 @@ def _has_nonempty_glob(root: Path, pattern: str) -> bool:
     return any(path.is_file() and path.stat().st_size > 0 for path in root.glob(pattern))
 
 
+def _has_csv_rows_glob(root: Path, pattern: str) -> bool:
+    return any(_csv_has_rows(path) for path in root.glob(pattern))
+
+
+def _csv_has_rows(path: Path) -> bool:
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    return bool(_read_csv(path))
+
+
 def _csv_has_fields(path: Path, fields: list[str]) -> bool:
     if not path.is_file() or path.stat().st_size == 0:
         return False
     rows = _read_csv(path)
     if not rows:
         return False
+    return all(_row_has_fields(row, fields) for row in rows)
+
+
+def _row_has_fields(row: dict[str, str], fields: list[str]) -> bool:
     return all(
-        field in rows[0] and str(rows[0].get(field, "")).strip() not in {"", "N/A"}
+        field in row and str(row.get(field, "")).strip() not in {"", "N/A"}
         for field in fields
     )
 
@@ -66,14 +80,20 @@ def validate_run(run_root: str | Path) -> dict[str, object]:
         ("stage_observations", "**/trackers/*/diagnostics/**/stage_observations.jsonl"),
         ("candidate_pool_stats", "**/trackers/*/diagnostics/**/candidate_pool_stats.jsonl"),
         ("diagnostic_csv", "**/diagnostics/**/*.csv"),
-        ("diagnostic_summary", "**/diagnostics/msdc_diagnostic_summary.csv"),
         ("visualization", "**/visualizations/**/*.mp4"),
         ("path_manifest", "summary/path_manifest.csv"),
         ("slice_manifest", "slice/slice_manifest.csv"),
-        ("sensitivity_matrix", "sensitivity/sensitivity_full/sensitivity_matrix.csv"),
     ]
     for label, pattern in glob_checks:
         if not _has_nonempty_glob(root, pattern):
+            missing.append(f"{label}:{pattern}")
+
+    csv_row_checks = [
+        ("diagnostic_summary", "**/diagnostics/msdc_diagnostic_summary.csv"),
+        ("sensitivity_matrix", "sensitivity/sensitivity_full/sensitivity_matrix.csv"),
+    ]
+    for label, pattern in csv_row_checks:
+        if not _has_csv_rows_glob(root, pattern):
             missing.append(f"{label}:{pattern}")
 
     main_results = root / "summary" / "main_results.csv"

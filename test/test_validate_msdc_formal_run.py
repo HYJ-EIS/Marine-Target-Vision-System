@@ -8,7 +8,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from tools.evaluation.validate_msdc_formal_run import validate_run
+from tools.evaluation.validate_msdc_formal_run import REQUIRED_SPEED, validate_run
 
 
 def _write_csv(path, rows, fields):
@@ -230,6 +230,34 @@ def test_validate_run_rejects_missing_sensitivity_matrix(tmp_path):
     assert any("sensitivity_matrix" in item for item in result["missing"])
 
 
+def test_validate_run_rejects_header_only_diagnostic_summary(tmp_path):
+    _make_valid_run(tmp_path)
+    _write_csv(
+        tmp_path / "main/main_full/diagnostics/msdc_diagnostic_summary.csv",
+        [],
+        ["seq_name", "tracker", "rows"],
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("diagnostic_summary" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_header_only_sensitivity_matrix(tmp_path):
+    _make_valid_run(tmp_path)
+    _write_csv(
+        tmp_path / "sensitivity/sensitivity_full/sensitivity_matrix.csv",
+        [],
+        ["variant", "MOTA"],
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("sensitivity_matrix" in item for item in result["missing"])
+
+
 def test_validate_run_rejects_placeholder_speed_values(tmp_path):
     _make_valid_run(tmp_path)
     _write_csv(
@@ -288,6 +316,25 @@ def test_validate_run_rejects_placeholder_speed_values(tmp_path):
             "status",
             "failure",
         ],
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("speed" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_placeholder_values_in_second_speed_row(tmp_path):
+    _make_valid_run(tmp_path)
+    valid_speed_row = {field: "1" for field in REQUIRED_SPEED}
+    valid_speed_row["tracker"] = "msdc_elt"
+    invalid_speed_row = dict(valid_speed_row)
+    invalid_speed_row["tracker"] = "botsort"
+    invalid_speed_row["mean_low_detection_ms"] = "N/A"
+    _write_csv(
+        tmp_path / "summary/speed_results.csv",
+        [valid_speed_row, invalid_speed_row],
+        ["tracker", *REQUIRED_SPEED],
     )
 
     result = validate_run(tmp_path)

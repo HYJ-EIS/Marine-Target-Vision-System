@@ -155,6 +155,7 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py -
 ```
 
 正式 run 会依次规划/执行 main、ablation、slice、speed、sensitivity 和 summary 阶段；`slice/` 阶段产物为 `slice/slice_manifest.csv`，`sensitivity/` 阶段产物为 `sensitivity/sensitivity_full/sensitivity_matrix.csv`，`latest_run.json` 会记录 `slice_manifest_csv` 和 `sensitivity_matrix_csv`。
+`validate_msdc_formal_run.py` 会检查 `main_results.csv` 和 `speed_results.csv` 每一行必填字段非空且非 `N/A`，并要求 `msdc_diagnostic_summary.csv` 和 `sensitivity_matrix.csv` 至少包含一行数据；`slice_manifest.csv` 在无短漏检片段时允许只有表头。
 
 常用默认数据集根目录：
 
