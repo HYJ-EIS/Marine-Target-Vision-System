@@ -122,6 +122,11 @@ class StateDecisionConfig(Config):
     MSDC_LOST_MAX_AGE = 4
 
 
+class HitsOnlyEvidenceConfig(Config):
+    MSDC_EVIDENCE_MODE = "hits_only"
+    MSDC_CONFIRM_REQUIRE_HIGH_DET = False
+
+
 def test_assign_state_is_priority_ordered_and_complete():
     cases = [
         (0.0, 0.0, 10, 5, TrackState.REMOVED),
@@ -217,6 +222,33 @@ def test_high_observation_accumulates_into_active_track():
         "public_id": tracks[0].public_id,
         "lifecycle_state": "active",
     }]
+
+
+def test_hits_only_evidence_uses_hit_count_instead_of_weighted_scores():
+    updater = EvidenceStateUpdater(HitsOnlyEvidenceConfig)
+    tracks, _ = updater.update_tracks(
+        [],
+        [_obs(0, source="high_det", score=0.2, box=[10, 10, 20, 20])],
+        frame_idx=0,
+    )
+
+    assert tracks[0].hits == 1
+    assert tracks[0].evidence_score == 1.0
+
+    tracks, _ = updater.update_tracks(
+        tracks,
+        [_obs(1, source="high_det", score=0.2, box=[10, 10, 20, 20])],
+        frame_idx=1,
+    )
+
+    assert tracks[0].hits == 2
+    assert tracks[0].evidence_score == 2.0
+
+    tracks, _ = updater.update_tracks(tracks, [], frame_idx=2)
+
+    assert tracks[0].misses == 1
+    assert tracks[0].hits == 2
+    assert tracks[0].evidence_score == 2.0
 
 
 def test_update_tracks_enforces_state_pool_hard_caps():

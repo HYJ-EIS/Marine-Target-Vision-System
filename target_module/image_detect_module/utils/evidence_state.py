@@ -353,7 +353,7 @@ class EvidenceStateUpdater:
                 continue
             if active_candidates + len(tracks) >= max_candidates:
                 break
-            evidence_score = self._rounded_score(self._evidence_increment(group))
+            evidence_score = self._spawn_evidence_score(group)
             gid = self.next_gid
             self.next_gid += 1
             real_det_hits = 1 if self._group_has_real_detection(group) else 0
@@ -1381,10 +1381,13 @@ class EvidenceStateUpdater:
         if refresh_primary_box:
             track.velocity = [float(new_center[0] - old_center[0]), float(new_center[1] - old_center[1])]
             track.box = new_box
-        track.evidence_score = self._rounded_score(
-            float(self._cfg("MSDC_EVIDENCE_ALPHA", 0.85)) * float(track.evidence_score) + positive_score
-        )
         track.hits = int(track.hits) + 1
+        if self._hits_only_mode():
+            track.evidence_score = self._rounded_score(float(track.hits))
+        else:
+            track.evidence_score = self._rounded_score(
+                float(self._cfg("MSDC_EVIDENCE_ALPHA", 0.85)) * float(track.evidence_score) + positive_score
+            )
         track.misses = 0
         track.last_seen = int(frame_idx)
         track.last_real_det_frame = int(frame_idx)
@@ -1404,6 +1407,8 @@ class EvidenceStateUpdater:
 
     def _apply_negative_evidence(self, track: EvidenceTrack) -> None:
         track.misses = int(track.misses) + 1
+        if self._hits_only_mode():
+            return
         track.evidence_score = self._rounded_score(
             max(
                 0.0,
@@ -1587,6 +1592,14 @@ class EvidenceStateUpdater:
         for source, score in group.source_scores.items():
             total += self._source_weight(source) * float(score)
         return self._rounded_score(total)
+
+    def _spawn_evidence_score(self, group: _ObservationGroup) -> float:
+        if self._hits_only_mode() and self._group_has_real_detection(group):
+            return 1.0
+        return self._rounded_score(self._evidence_increment(group))
+
+    def _hits_only_mode(self) -> bool:
+        return str(self._cfg("MSDC_EVIDENCE_MODE", "score")).strip().lower() == "hits_only"
 
     def _source_weight(self, source: str) -> float:
         mapping = {

@@ -97,6 +97,8 @@ class Config:
     MSDC_LIFECYCLE_DEBUG_OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "msdc_debug")
     # evidence score 衰减系数 alpha
     MSDC_EVIDENCE_ALPHA = 0.85
+    # evidence score 模式：score 使用加权分数累计；hits_only 仅用命中次数作为证据分数
+    MSDC_EVIDENCE_MODE = os.environ.get("MSDC_EVIDENCE_MODE", "score")
     # 不同 observation source 的固定证据权重
     MSDC_WEIGHT_HIGH = 1.3
     MSDC_WEIGHT_LOW = 1.0

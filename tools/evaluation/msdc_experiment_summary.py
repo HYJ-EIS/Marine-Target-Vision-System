@@ -22,13 +22,21 @@ from target_module.image_detect_module.constants import (  # noqa: E402
     SPEED_OUTPUT_FIELDS,
     SUMMARY_MAIN_TRACKERS,
 )
+from tools.experiments.run_msdc_ablation import (  # noqa: E402
+    ABLATION_VARIANTS as FORMAL_ABLATION_VARIANTS,
+    FORMAL_V3_ENV,
+)
 
 
-MAIN_TRACKERS = SUMMARY_MAIN_TRACKERS
+LEGACY_FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
+MAIN_TRACKERS = set(SUMMARY_MAIN_TRACKERS) | {LEGACY_FORMAL_MSDC_VARIANT}
 
-ABLATION_FIELDS = [
+LEGACY_ABLATION_FIELDS = [
+    "MSDC_LOW_CANDIDATE_ENABLE",
     "MSDC_USE_REACQUIRE",
     "MSDC_REUSE_GUARD_ENABLE",
+    "MSDC_LOW_INHERIT_ENABLE",
+    "MSDC_OUTPUT_NMS_ENABLE",
     "MSDC_OUTPUT_MAX_REAL_DET_AGE",
     "MSDC_OUTPUT_MIN_BOX_SIZE",
     "MSDC_LOW_CONFIRM_MIN_HITS",
@@ -41,6 +49,11 @@ ABLATION_FIELDS = [
     "MSDC_LOW_OBS_MAX_PER_FRAME",
     "MSDC_LOW_OBS_MIN_CONF",
     "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY",
+    "MSDC_EVIDENCE_MODE",
+    "MSDC_REACQUIRE_SCORE",
+    "MSDC_LOW_INHERIT_SCORE",
+    "MSDC_EVIDENCE_ALPHA",
+    "MSDC_CONFIRM_SCORE",
     "MSDC_DEBUG_EVENTS",
     "MSDC_MAX_ACTIVE_TRACKS",
     "MSDC_MAX_LOST_TRACKS",
@@ -51,10 +64,19 @@ ABLATION_FIELDS = [
     "MSDC_REACQUIRE_CENTER_DIST",
     "MSDC_REACQUIRE_MAX_CENTER_DIST",
 ]
+FORMAL_ABLATION_FIELDS = list(dict.fromkeys(
+    field
+    for env in [FORMAL_V3_ENV, *FORMAL_ABLATION_VARIANTS.values()]
+    for field in env
+))
+ABLATION_FIELDS = list(dict.fromkeys([*LEGACY_ABLATION_FIELDS, *FORMAL_ABLATION_FIELDS]))
 
 ABLATION_SWITCH_DEFAULTS = {
+    "MSDC_LOW_CANDIDATE_ENABLE": "True",
     "MSDC_USE_REACQUIRE": "True",
     "MSDC_REUSE_GUARD_ENABLE": "True",
+    "MSDC_LOW_INHERIT_ENABLE": "True",
+    "MSDC_OUTPUT_NMS_ENABLE": "True",
     "MSDC_OUTPUT_MAX_REAL_DET_AGE": "3",
     "MSDC_OUTPUT_MIN_BOX_SIZE": "12",
     "MSDC_LOW_CONFIRM_MIN_HITS": "5",
@@ -67,6 +89,11 @@ ABLATION_SWITCH_DEFAULTS = {
     "MSDC_LOW_OBS_MAX_PER_FRAME": "64",
     "MSDC_LOW_OBS_MIN_CONF": "0.0",
     "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY": "True",
+    "MSDC_EVIDENCE_MODE": "score",
+    "MSDC_REACQUIRE_SCORE": "1.5",
+    "MSDC_LOW_INHERIT_SCORE": "0.40",
+    "MSDC_EVIDENCE_ALPHA": "0.85",
+    "MSDC_CONFIRM_SCORE": "2.5",
     "MSDC_DEBUG_EVENTS": "True",
     "MSDC_MAX_ACTIVE_TRACKS": "128",
     "MSDC_MAX_LOST_TRACKS": "64",
@@ -109,7 +136,7 @@ ABLATION_SWITCH_OVERRIDES = {
         "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
         "MSDC_LOW_OBS_MIN_CONF": "0.25",
     },
-    FORMAL_MSDC_VARIANT: {
+    LEGACY_FORMAL_MSDC_VARIANT: {
         "MSDC_USE_REACQUIRE": "True",
         "MSDC_REUSE_GUARD_ENABLE": "True",
         "MSDC_LOW_OBS_TOPK": "32",
@@ -234,7 +261,16 @@ def write_main_results(
 
 
 def _ablation_switches(variant: str) -> dict[str, str]:
-    switches = dict(ABLATION_SWITCH_DEFAULTS)
+    switches = {field: "N/A" for field in ABLATION_FIELDS}
+    if variant in FORMAL_ABLATION_VARIANTS:
+        switches.update({
+            "MSDC_REUSE_GUARD_ENABLE": "True",
+            "MSDC_EVIDENCE_MODE": "score",
+        })
+        switches.update({key: str(value) for key, value in FORMAL_ABLATION_VARIANTS[variant].items()})
+        return switches
+
+    switches.update(ABLATION_SWITCH_DEFAULTS)
     switches.update(ABLATION_SWITCH_OVERRIDES.get(variant, {}))
     return switches
 

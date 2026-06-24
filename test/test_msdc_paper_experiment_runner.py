@@ -118,6 +118,21 @@ def test_ablation_command_includes_required_variants():
     assert FORMAL_MSDC_VARIANT in cmd
 
 
+def test_ablation_command_uses_formal_frame_limit():
+    cmd = build_ablation_command(
+        dataset_roots=["/data/a"],
+        output_root=Path("results/ablation"),
+        run_id="ablation_full",
+        commit_hash="abcdef0",
+        progress_interval=500,
+        run=True,
+        formal_frame_limit=FORMAL_FRAME_LIMIT,
+    )
+
+    assert "--formal-frame-limit" in cmd
+    assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
+
+
 def test_ablation_command_accepts_selected_variants():
     args = runner.parse_args([
         "--ablation-variants",

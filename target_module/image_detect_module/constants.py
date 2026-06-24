@@ -75,4 +75,5 @@ METHOD_LABELS = {
     "botsort": "FFCA-YOLO + BoT-SORT",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",
     FORMAL_MSDC_VARIANT: "FFCA-YOLO + MS-DC-ELT v3",
+    "v3_candidate_topk_no_roi_no_motion": "FFCA-YOLO + MS-DC-ELT v3",
 }

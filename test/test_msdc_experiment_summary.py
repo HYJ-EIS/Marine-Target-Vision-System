@@ -180,6 +180,36 @@ def test_ablation_results_reports_new_v2_speed_ablation_switches(tmp_path):
     assert by_variant["v2_speed_diag_off"]["MSDC_DEBUG_EVENTS"] == "False"
 
 
+def test_ablation_results_reports_formal_v3_variant_switches(tmp_path):
+    variants = [
+        "msdc_v3",
+        "no_low_candidate",
+        "hits_only_no_evidence",
+        "no_output_nms",
+        "low_budget_topk16",
+    ]
+    summary = tmp_path / "eval" / "motchallenge_summary.csv"
+    _write_csv(summary, [
+        {"tracker": variant, "HOTA": "60", "DetA": "61", "AssA": "62", "MOTA": "63", "IDF1": "64", "IDSW": "1", "FP": "2", "FN": "3", "IDTP": "4", "IDFP": "5", "IDFN": "6"}
+        for variant in variants
+    ])
+
+    rows = write_ablation_results(
+        metric_rows=load_metric_rows(summary),
+        output_csv=tmp_path / "ablation_results.csv",
+        run_name="ablation_full",
+        benchmark_root=tmp_path,
+    )
+    by_variant = {row["variant"]: row for row in rows}
+
+    assert by_variant["msdc_v3"]["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
+    assert by_variant["no_low_candidate"]["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
+    assert by_variant["hits_only_no_evidence"]["MSDC_EVIDENCE_MODE"] == "hits_only"
+    assert by_variant["no_output_nms"]["MSDC_OUTPUT_NMS_ENABLE"] == "0"
+    assert by_variant["low_budget_topk16"]["MSDC_LOW_OBS_TOPK"] == "16"
+    assert by_variant["low_budget_topk16"]["MSDC_LOW_OBS_MAX_PER_FRAME"] == "32"
+
+
 def test_analysis_text_reports_direction_without_inventing_values():
     rows = [
         {"method": "FFCA-YOLO + OC-SORT", "IDF1": "50", "IDSW": "10", "HOTA": "20", "AssA": "30", "FP": "5", "FN": "100"},
