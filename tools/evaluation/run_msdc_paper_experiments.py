@@ -50,6 +50,10 @@ def _sensitivity_matrix_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_sensitivity_matrix.py")
 
 
+def _slice_eval_script() -> str:
+    return str(_ROOT / "tools" / "evaluation" / "msdc_slice_eval.py")
+
+
 def _summary_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_experiment_summary.py")
 
@@ -176,6 +180,19 @@ def build_sensitivity_command(output_root: Path, run_id: str) -> list[str]:
         _sensitivity_matrix_script(),
         "--output",
         str(output_root / run_id / "sensitivity_matrix.csv"),
+    ]
+
+
+def build_slice_command(diagnostics_root: Path, output_root: Path) -> list[str]:
+    return [
+        sys.executable,
+        _slice_eval_script(),
+        "--diagnostics-root",
+        str(diagnostics_root),
+        "--output",
+        str(output_root / "slice_manifest.csv"),
+        "--max-len",
+        "30",
     ]
 
 
@@ -312,6 +329,7 @@ def build_latest_payload(
     run_root: Path,
     main_output_root: Path,
     ablation_output_root: Path,
+    slice_output_root: Path,
     speed_output_root: Path,
     sensitivity_output_root: Path,
     summary_output_root: Path,
@@ -319,6 +337,7 @@ def build_latest_payload(
 ) -> dict[str, str]:
     main_root = main_output_root / "main_full"
     ablation_root = ablation_output_root / "ablation_full"
+    slice_manifest_csv = slice_output_root / "slice_manifest.csv"
     speed_root = speed_output_root / f"speed_{frames}"
     sensitivity_csv = sensitivity_output_root / "sensitivity_full" / "sensitivity_matrix.csv"
     return {
@@ -326,6 +345,7 @@ def build_latest_payload(
         "main_results_csv": _absolute_path(summary_output_root / "main_results.csv"),
         "ablation_results_csv": _absolute_path(summary_output_root / "ablation_results.csv"),
         "speed_results_csv": _absolute_path(summary_output_root / "speed_results.csv"),
+        "slice_manifest_csv": _absolute_path(slice_manifest_csv),
         "sensitivity_matrix_csv": _absolute_path(sensitivity_csv),
         "report_path": _absolute_path(run_root / "MSDC_EXPERIMENT_REPORT.md"),
         "docs_result_path": _absolute_path(_ROOT / "docs" / "MSDC_EXPERIMENT_RESULT.md"),
@@ -402,6 +422,7 @@ def main(argv: list[str] | None = None) -> None:
 
     main_output_root = run_root / "main"
     ablation_output_root = run_root / "ablation"
+    slice_output_root = run_root / "slice"
     speed_output_root = run_root / "speed"
     sensitivity_output_root = run_root / "sensitivity"
     summary_output_root = run_root / "summary"
@@ -442,6 +463,10 @@ def main(argv: list[str] | None = None) -> None:
         output_root=sensitivity_output_root,
         run_id="sensitivity_full",
     )
+    slice_cmd = build_slice_command(
+        diagnostics_root=ablation_output_root / "ablation_full" / "diagnostics",
+        output_root=slice_output_root,
+    )
 
     summary_cmd = build_summary_command(
         main_root=main_output_root / "main_full",
@@ -455,6 +480,7 @@ def main(argv: list[str] | None = None) -> None:
     formal_commands = [
         ("main", main_cmd),
         ("ablation", ablation_cmd),
+        ("slice", slice_cmd),
         ("speed", speed_cmd),
         ("sensitivity", sensitivity_cmd),
         ("summary", summary_cmd),
@@ -471,6 +497,7 @@ def main(argv: list[str] | None = None) -> None:
         run_root=run_root,
         main_output_root=main_output_root,
         ablation_output_root=ablation_output_root,
+        slice_output_root=slice_output_root,
         speed_output_root=speed_output_root,
         sensitivity_output_root=sensitivity_output_root,
         summary_output_root=summary_output_root,

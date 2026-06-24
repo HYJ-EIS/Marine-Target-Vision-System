@@ -16,6 +16,7 @@ from tools.evaluation.run_msdc_paper_experiments import (
     build_ablation_command,
     build_main_command,
     build_sensitivity_command,
+    build_slice_command,
     build_speed_command,
 )
 
@@ -199,6 +200,24 @@ def test_sensitivity_command_writes_matrix_under_run_root(tmp_path):
     ]
 
 
+def test_slice_command_writes_manifest_under_slice_root(tmp_path):
+    cmd = build_slice_command(
+        diagnostics_root=tmp_path / "ablation" / "ablation_full" / "diagnostics",
+        output_root=tmp_path / "slice",
+    )
+
+    assert cmd == [
+        sys.executable,
+        str(runner._ROOT / "tools" / "evaluation" / "msdc_slice_eval.py"),
+        "--diagnostics-root",
+        str(tmp_path / "ablation" / "ablation_full" / "diagnostics"),
+        "--output",
+        str(tmp_path / "slice" / "slice_manifest.csv"),
+        "--max-len",
+        "30",
+    ]
+
+
 def test_default_dry_run_does_not_create_output_or_latest(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, "_ROOT", tmp_path)
     monkeypatch.setattr(runner, "get_commit_hash", lambda: "abcdef0")
@@ -222,6 +241,7 @@ def test_relative_output_root_is_resolved_under_repo_root(tmp_path, monkeypatch,
     expected_root = tmp_path / "relative_runs" / "dry"
     assert str(expected_root / "main") in captured.out
     assert str(expected_root / "ablation") in captured.out
+    assert str(expected_root / "slice") in captured.out
     assert str(expected_root / "speed") in captured.out
     assert str(expected_root / "sensitivity") in captured.out
     assert str(expected_root / "summary") in captured.out
@@ -257,11 +277,12 @@ def test_formal_success_writes_latest_after_all_commands(tmp_path, monkeypatch):
 
     runner.main(["--run-formal", "--output-root", str(tmp_path / "runs"), "--run-id", "formal", "--speed-frames", "7"])
 
-    assert [label for label, _ in calls] == ["main", "ablation", "speed", "sensitivity", "summary"]
+    assert [label for label, _ in calls] == ["main", "ablation", "slice", "speed", "sensitivity", "summary"]
     latest = json.loads((tmp_path / "runs" / "latest_run.json").read_text(encoding="utf-8"))
     assert latest["run_root"] == str(tmp_path / "runs" / "formal")
     assert latest["main_root"] == str(tmp_path / "runs" / "formal" / "main" / "main_full")
     assert latest["ablation_root"] == str(tmp_path / "runs" / "formal" / "ablation" / "ablation_full")
+    assert latest["slice_manifest_csv"] == str(tmp_path / "runs" / "formal" / "slice" / "slice_manifest.csv")
     assert latest["speed_root"] == str(tmp_path / "runs" / "formal" / "speed" / "speed_7")
     assert latest["sensitivity_matrix_csv"] == str(
         tmp_path / "runs" / "formal" / "sensitivity" / "sensitivity_full" / "sensitivity_matrix.csv"
@@ -285,7 +306,7 @@ def test_formal_failure_does_not_write_latest(tmp_path, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         runner.main(["--run-formal", "--output-root", str(output_root), "--run-id", "formal"])
 
-    assert [label for label, _ in calls] == ["main", "ablation", "speed"]
+    assert [label for label, _ in calls] == ["main", "ablation", "slice", "speed"]
     assert not (output_root / "latest_run.json").exists()
 
 
