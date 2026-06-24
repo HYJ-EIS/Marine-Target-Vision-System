@@ -158,3 +158,15 @@ def test_msdc_variant_context_resets_missing_env_backed_config_key(monkeypatch):
 
     assert os.environ["MSDC_LOW_INHERIT_CLASS_MATCH"] == "0"
     assert Config.MSDC_LOW_INHERIT_CLASS_MATCH is False
+
+
+def test_msdc_variant_context_resets_removed_guard_alias(monkeypatch):
+    monkeypatch.setattr(Config, "MSDC_REMOVED_GUARD_FRAMES", 44)
+    monkeypatch.setattr(Config, "MSDC_removed_GUARD_FRAMES", 44)
+
+    with msdc_variant_context("msdc_v3"):
+        assert Config.MSDC_REMOVED_GUARD_FRAMES == 80
+        assert Config.MSDC_removed_GUARD_FRAMES == 80
+
+    assert Config.MSDC_REMOVED_GUARD_FRAMES == 44
+    assert Config.MSDC_removed_GUARD_FRAMES == 44
