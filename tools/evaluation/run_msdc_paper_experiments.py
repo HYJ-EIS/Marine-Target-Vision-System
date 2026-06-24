@@ -21,28 +21,15 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from target_module.image_detect_module.constants import (  # noqa: E402
+    FORMAL_FRAME_LIMIT,
     FORMAL_MSDC_VARIANT,
     PAPER_TRACKER_CHOICES,
 )
+from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS as MSDC_ABLATION_VARIANTS  # noqa: E402
 
 MAIN_TRACKERS = list(PAPER_TRACKER_CHOICES)
 MAIN_MSDC_VARIANT = FORMAL_MSDC_VARIANT
-ABLATION_VARIANTS = [
-    "Ours-no-reacquire",
-    "Ours-no-removed-guard",
-    "v2_output_age5_size8",
-    "v2_output_age8_size8",
-    "v2_output_age12_size8",
-    "v2_candidate_low3_window6",
-    "v2_candidate_low4_window8",
-    "v2_candidate_real2_age8",
-    "v2_candidate_topk",
-    FORMAL_MSDC_VARIANT,
-    "v2_speed_diag_off",
-    "v2_reacquire_interval1",
-    "v2_reacquire_interval2",
-    "v2_reacquire_interval5_center240",
-]
+ABLATION_VARIANTS = list(MSDC_ABLATION_VARIANTS)
 DEFAULT_DATASET_ROOTS = [
     "/home/hyj/Anti_Drone_Project/UAV_USV_MOT标注数据集",
     "/home/hyj/Anti_Drone_Project/USV_MOT标注数据集",
@@ -72,6 +59,7 @@ def build_main_command(
     run: bool,
     duration_seconds: float = 0.0,
     render_class_source: str = "detector",
+    formal_frame_limit: int = FORMAL_FRAME_LIMIT,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -90,6 +78,8 @@ def build_main_command(
         *MAIN_TRACKERS,
         "--variants",
         MAIN_MSDC_VARIANT,
+        "--formal-frame-limit",
+        str(int(formal_frame_limit)),
         "--progress-interval",
         str(progress_interval),
         "--render",
@@ -113,6 +103,7 @@ def build_ablation_command(
     variants: list[str] | None = None,
     duration_seconds: float = 0.0,
     render_class_source: str = "detector",
+    formal_frame_limit: int = FORMAL_FRAME_LIMIT,
 ) -> list[str]:
     selected_variants = ABLATION_VARIANTS if variants is None else variants
     cmd = [
@@ -132,6 +123,8 @@ def build_ablation_command(
         "msdc_elt",
         "--variants",
         *selected_variants,
+        "--formal-frame-limit",
+        str(int(formal_frame_limit)),
         "--progress-interval",
         str(progress_interval),
         "--render",
@@ -333,6 +326,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--speed-frames", type=int, default=1000)
     parser.add_argument("--progress-interval", type=int, default=500)
     parser.add_argument("--duration-seconds", type=float, default=0.0, help="Limit main/ablation videos to first N seconds; 0 means full videos")
+    parser.add_argument("--formal-frame-limit", type=int, default=FORMAL_FRAME_LIMIT)
     parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
     parser.add_argument("--run-id", default="", help="Top-level run id; default is timestamp")
     parser.add_argument("--ablation-variants", nargs="+", default=ABLATION_VARIANTS)
@@ -348,6 +342,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--progress-interval must be >= 0")
     if float(args.duration_seconds) < 0.0:
         parser.error("--duration-seconds must be >= 0")
+    if int(args.formal_frame_limit) < 0:
+        parser.error("--formal-frame-limit must be >= 0")
     return args
 
 
@@ -403,6 +399,7 @@ def main(argv: list[str] | None = None) -> None:
         run=bool(args.run_formal),
         duration_seconds=float(args.duration_seconds),
         render_class_source=str(args.render_class_source),
+        formal_frame_limit=int(args.formal_frame_limit),
     )
     ablation_cmd = build_ablation_command(
         dataset_roots=list(args.dataset_root),
@@ -414,6 +411,7 @@ def main(argv: list[str] | None = None) -> None:
         variants=list(args.ablation_variants),
         duration_seconds=float(args.duration_seconds),
         render_class_source=str(args.render_class_source),
+        formal_frame_limit=int(args.formal_frame_limit),
     )
     speed_cmd = build_speed_command(
         dataset_root=str(args.dataset_root[0]),

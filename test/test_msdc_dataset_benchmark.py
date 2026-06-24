@@ -28,6 +28,38 @@ from tools.evaluation.msdc_dataset_benchmark import (
 )
 
 
+def test_formal_frame_limit_controls_printed_export_limit(monkeypatch, tmp_path, capsys):
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    (dataset_root / "gt.txt").write_text("1,1,10,10,20,20,1,1,1\n", encoding="utf-8")
+    (dataset_root / "原视频地址.txt").write_text(str(video_path), encoding="utf-8")
+    output_root = tmp_path / "runs"
+
+    monkeypatch.setattr(sys, "argv", [
+        "msdc_dataset_benchmark.py",
+        "--dataset-root",
+        str(dataset_root),
+        "--output-root",
+        str(output_root),
+        "--run-id",
+        "formal",
+        "--trackers",
+        "ocsort",
+        "--formal-frame-limit",
+        "5400",
+        "--render",
+    ])
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "--max-frames 5400" in captured.out
+    assert "[INFO] formal frame limit: first 5400 frames" in captured.out
+    assert not (output_root / "formal").exists()
+
+
 def test_windows_path_to_wsl_path_handles_drive_and_wsl_unc():
     assert windows_path_to_wsl_path(r'"D:\dataset\video.mp4"') == Path("/mnt/d/dataset/video.mp4")
     assert windows_path_to_wsl_path(

@@ -8,6 +8,7 @@ if str(_ROOT) not in sys.path:
 from target_module.image_detect_module.constants import (
     BASELINE_TRACKER_CHOICES,
     DATASET_EXPORT_TRACKER_CHOICES,
+    FORMAL_FRAME_LIMIT,
     FORMAL_MSDC_VARIANT,
     METHOD_LABELS,
     OPTIONAL_BASELINE_TRACKER_CHOICES,
@@ -33,8 +34,14 @@ def test_tracker_choice_constants_preserve_cli_contracts():
     assert OPTIONAL_TRACKER_CHOICES == ("", *TRACKER_CHOICES)
     assert BASELINE_TRACKER_CHOICES == TRACKER_CHOICES[:-1]
     assert OPTIONAL_BASELINE_TRACKER_CHOICES == ("", *BASELINE_TRACKER_CHOICES)
-    assert PAPER_TRACKER_CHOICES == ("ocsort", "botsort", "msdc_elt")
-    assert DATASET_EXPORT_TRACKER_CHOICES == ("botsort", "ocsort", "msdc_elt")
+    assert PAPER_TRACKER_CHOICES == ("bytetrack", "ocsort", "botsort", "msdc_elt")
+    assert DATASET_EXPORT_TRACKER_CHOICES == ("bytetrack", "botsort", "ocsort", "msdc_elt")
+
+
+def test_formal_v3_and_baseline_tracker_contract():
+    assert FORMAL_MSDC_VARIANT == "msdc_v3"
+    assert PAPER_TRACKER_CHOICES == ("bytetrack", "ocsort", "botsort", "msdc_elt")
+    assert FORMAL_FRAME_LIMIT == 5400
 
 
 def test_tracker_choices_are_only_defined_in_shared_constants():
@@ -52,10 +59,10 @@ def test_tracker_choices_are_only_defined_in_shared_constants():
         "DETECTION_REPLAY_TRACKERS =",
         'choices=["bytetrack", "ocsort", "botsort"',
         'choices=["", "bytetrack", "ocsort", "botsort"',
-        'choices=["botsort", "ocsort", "msdc_elt"]',
-        'default=["botsort", "ocsort", "msdc_elt"]',
-        '["botsort", "ocsort", "msdc_elt"]',
-        '["ocsort", "botsort", "msdc_elt"]',
+        'choices=["bytetrack", "botsort", "ocsort", "msdc_elt"]',
+        'default=["bytetrack", "botsort", "ocsort", "msdc_elt"]',
+        '["bytetrack", "botsort", "ocsort", "msdc_elt"]',
+        '["bytetrack", "ocsort", "botsort", "msdc_elt"]',
     ]
 
     for path in production_files:
@@ -67,7 +74,8 @@ def test_tracker_choices_are_only_defined_in_shared_constants():
 
 
 def test_formal_msdc_variant_has_method_label():
-    assert FORMAL_MSDC_VARIANT == "v3_candidate_topk_no_roi_no_motion"
+    assert FORMAL_MSDC_VARIANT == "msdc_v3"
+    assert METHOD_LABELS["bytetrack"] == "FFCA-YOLO + ByteTrack"
     assert METHOD_LABELS[FORMAL_MSDC_VARIANT] == "FFCA-YOLO + MS-DC-ELT v3"
     assert METHOD_LABELS["msdc_elt"] == "FFCA-YOLO + MS-DC-ELT"
 

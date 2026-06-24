@@ -28,7 +28,11 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from target_module.image_detect_module.constants import DATASET_EXPORT_TRACKER_CHOICES, FORMAL_MSDC_VARIANT  # noqa: E402
+from target_module.image_detect_module.constants import (  # noqa: E402
+    DATASET_EXPORT_TRACKER_CHOICES,
+    FORMAL_FRAME_LIMIT,
+    FORMAL_MSDC_VARIANT,
+)
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS  # noqa: E402
 
 
@@ -735,6 +739,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--variants", nargs="+", default=[FORMAL_MSDC_VARIANT], choices=list(ABLATION_VARIANTS))
     parser.add_argument("--max-frames", type=int, default=0, help="Smoke/debug only; 0 means full video")
+    parser.add_argument(
+        "--formal-frame-limit",
+        type=int,
+        default=0,
+        help="Formal evaluation frame limit; 0 disables clipping. Use 5400 for the paper v3 runs.",
+    )
     parser.add_argument("--duration-seconds", type=float, default=0.0, help="Run the first N seconds; 0 disables")
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--render", action="store_true", help="Render annotated videos after successful exports")
@@ -743,7 +753,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default="", help="Timestamp/run folder name; default uses current time")
     parser.add_argument("--mode", default="benchmark", choices=["benchmark", "main", "ablation", "smoke"])
     parser.add_argument("--commit-hash", default="", help="Commit hash recorded in run metadata")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if int(args.formal_frame_limit) < 0:
+        parser.error("--formal-frame-limit must be >= 0")
+    return args
 
 
 def main() -> None:
@@ -766,10 +779,10 @@ def main() -> None:
             output_root=root,
             trackers=list(args.trackers),
             variants=list(args.variants),
-            max_frames=int(args.max_frames),
+            max_frames=int(args.formal_frame_limit) if int(args.formal_frame_limit) > 0 else int(args.max_frames),
             duration_seconds=float(args.duration_seconds),
             render=bool(args.render),
-            formal=not bool(args.max_frames) and not bool(args.duration_seconds),
+            formal=bool(int(args.formal_frame_limit) == FORMAL_FRAME_LIMIT and not args.duration_seconds),
         )
         write_json(metadata_dir / "run_metadata.json", metadata)
         initialize_failures_file(failures_path)
@@ -789,7 +802,7 @@ def main() -> None:
         video_accessible = spec.video_path.is_file()
         if not video_accessible:
             print(f"  [WARN] resolved video path is not accessible: {spec.video_path}")
-        export_max_frames = int(args.max_frames)
+        export_max_frames = int(args.formal_frame_limit) if int(args.formal_frame_limit) > 0 else int(args.max_frames)
         info = None
         if video_accessible and float(args.duration_seconds) > 0:
             info = read_video_info(spec.video_path)
@@ -872,7 +885,9 @@ def main() -> None:
     if not args.run:
         print("[INFO] print-only mode; add --run to execute exports/evaluation/diagnostics.")
     if args.max_frames > 0:
-        print("[WARN] --max-frames is for smoke/debug runs. Formal evaluation should use full videos.")
+        print("[WARN] --max-frames is for smoke/debug runs. Formal evaluation should use --formal-frame-limit.")
+    if args.formal_frame_limit > 0:
+        print(f"[INFO] formal frame limit: first {int(args.formal_frame_limit)} frames")
     if args.duration_seconds > 0:
         print("[WARN] --duration-seconds clips both tracker export and GT; use only for slice diagnostics.")
     if not args.render:

@@ -12,12 +12,13 @@ TRACKER_CHOICES = (
 OPTIONAL_TRACKER_CHOICES = ("", *TRACKER_CHOICES)
 BASELINE_TRACKER_CHOICES = TRACKER_CHOICES[:-1]
 OPTIONAL_BASELINE_TRACKER_CHOICES = ("", *BASELINE_TRACKER_CHOICES)
-PAPER_TRACKER_CHOICES = ("ocsort", "botsort", "msdc_elt")
-DATASET_EXPORT_TRACKER_CHOICES = ("botsort", "ocsort", "msdc_elt")
+PAPER_TRACKER_CHOICES = ("bytetrack", "ocsort", "botsort", "msdc_elt")
+DATASET_EXPORT_TRACKER_CHOICES = ("bytetrack", "botsort", "ocsort", "msdc_elt")
 
-FORMAL_MSDC_VARIANT = "v3_candidate_topk_no_roi_no_motion"
+FORMAL_FRAME_LIMIT = 5400
+FORMAL_MSDC_VARIANT = "msdc_v3"
 MAIN_MSDC_TRACKER = FORMAL_MSDC_VARIANT
-SUMMARY_MAIN_TRACKERS = {"ocsort", "botsort", "msdc_elt", MAIN_MSDC_TRACKER}
+SUMMARY_MAIN_TRACKERS = {"bytetrack", "ocsort", "botsort", "msdc_elt", MAIN_MSDC_TRACKER}
 
 METRIC_FIELDS = (
     "HOTA",
@@ -69,6 +70,7 @@ SPEED_FIELDS = (
 SPEED_OUTPUT_FIELDS = (*SPEED_FIELDS, "status", "failure")
 
 METHOD_LABELS = {
+    "bytetrack": "FFCA-YOLO + ByteTrack",
     "ocsort": "FFCA-YOLO + OC-SORT",
     "botsort": "FFCA-YOLO + BoT-SORT",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",

@@ -9,6 +9,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from target_module.image_detect_module.constants import FORMAL_FRAME_LIMIT, FORMAL_MSDC_VARIANT
+from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, FORMAL_V3_ENV
 from tools.evaluation import run_msdc_paper_experiments as runner
 from tools.evaluation.run_msdc_paper_experiments import (
     build_ablation_command,
@@ -30,8 +32,45 @@ def test_main_command_uses_full_video_and_render():
     assert "--duration-seconds" not in cmd
     assert "--render" in cmd
     assert "--run" in cmd
-    assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == ["ocsort", "botsort", "msdc_elt"]
-    assert cmd[cmd.index("--variants") + 1] == "v3_candidate_topk_no_roi_no_motion"
+    assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == [
+        "bytetrack",
+        "ocsort",
+        "botsort",
+        "msdc_elt",
+    ]
+    assert cmd[cmd.index("--variants") + 1] == FORMAL_MSDC_VARIANT
+
+
+def test_formal_v3_env_freezes_expected_switches():
+    assert FORMAL_MSDC_VARIANT == "msdc_v3"
+    assert ABLATION_VARIANTS[FORMAL_MSDC_VARIANT] == FORMAL_V3_ENV
+    assert FORMAL_V3_ENV["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
+    assert FORMAL_V3_ENV["MSDC_USE_REACQUIRE"] == "1"
+    assert FORMAL_V3_ENV["MSDC_LOW_INHERIT_ENABLE"] == "1"
+    assert FORMAL_V3_ENV["MSDC_OUTPUT_NMS_ENABLE"] == "1"
+    assert FORMAL_V3_ENV["MSDC_OUTPUT_MAX_REAL_DET_AGE"] == "3"
+    assert FORMAL_V3_ENV["MSDC_LOW_OBS_TOPK"] == "32"
+
+
+def test_main_command_uses_formal_frame_limit_and_all_main_trackers(tmp_path):
+    cmd = build_main_command(
+        dataset_roots=["/data/a", "/data/b"],
+        output_root=tmp_path,
+        run_id="main_full",
+        commit_hash="abc123",
+        progress_interval=500,
+        run=True,
+        formal_frame_limit=FORMAL_FRAME_LIMIT,
+        render_class_source="detector",
+    )
+    assert "--formal-frame-limit" in cmd
+    assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
+    assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == [
+        "bytetrack",
+        "ocsort",
+        "botsort",
+        "msdc_elt",
+    ]
 
 
 def test_formal_commands_accept_duration_limit():
@@ -52,7 +91,7 @@ def test_formal_commands_accept_duration_limit():
         commit_hash="abcdef0",
         progress_interval=500,
         run=True,
-        variants=["v2_candidate_topk"],
+        variants=["low_budget_topk16"],
         duration_seconds=120.0,
         render_class_source="none",
     )
@@ -61,7 +100,7 @@ def test_formal_commands_accept_duration_limit():
     assert ablation_cmd[ablation_cmd.index("--duration-seconds") + 1] == "120.0"
     assert main_cmd[main_cmd.index("--render-class-source") + 1] == "none"
     assert ablation_cmd[ablation_cmd.index("--render-class-source") + 1] == "none"
-    assert main_cmd[main_cmd.index("--variants") + 1] == "v3_candidate_topk_no_roi_no_motion"
+    assert main_cmd[main_cmd.index("--variants") + 1] == FORMAL_MSDC_VARIANT
 
 
 def test_ablation_command_includes_required_variants():
@@ -73,19 +112,19 @@ def test_ablation_command_includes_required_variants():
         progress_interval=500,
         run=True,
     )
-    assert "Ours-no-reacquire" in cmd
-    assert "Ours-no-removed-guard" in cmd
-    assert "v2_candidate_topk" in cmd
-    assert "v3_candidate_topk_no_roi_no_motion" in cmd
+    assert "no_low_candidate" in cmd
+    assert "no_direct_reacquire" in cmd
+    assert "low_budget_topk16" in cmd
+    assert FORMAL_MSDC_VARIANT in cmd
 
 
 def test_ablation_command_accepts_selected_variants():
     args = runner.parse_args([
         "--ablation-variants",
-        "v2_output_age5_size8",
-        "v2_candidate_topk",
-        "v3_candidate_topk_no_roi_no_motion",
-        "v2_speed_diag_off",
+        "no_low_candidate",
+        "hits_only_no_evidence",
+        FORMAL_MSDC_VARIANT,
+        "low_budget_topk64",
     ])
     cmd = build_ablation_command(
         dataset_roots=["/data/a"],
@@ -97,10 +136,10 @@ def test_ablation_command_accepts_selected_variants():
         variants=list(args.ablation_variants),
     )
     joined = " ".join(cmd)
-    assert "v2_output_age5_size8" in joined
-    assert "v2_candidate_topk" in joined
-    assert "v3_candidate_topk_no_roi_no_motion" in joined
-    assert "v2_speed_diag_off" in joined
+    assert "no_low_candidate" in joined
+    assert "hits_only_no_evidence" in joined
+    assert FORMAL_MSDC_VARIANT in joined
+    assert "low_budget_topk64" in joined
 
 
 def test_speed_command_records_fixed_frame_count():
@@ -113,6 +152,7 @@ def test_speed_command_records_fixed_frame_count():
         progress_interval=100,
     )
     assert cmd[cmd.index("--frames") + 1] == "1000"
+    assert "bytetrack" in cmd
     assert "ocsort" in cmd
     assert "botsort" in cmd
     assert "msdc_elt" in cmd
@@ -272,44 +312,43 @@ def test_run_command_executes_child_from_repo_root(tmp_path, monkeypatch):
     assert calls == [{"cmd": ["python", "script.py"], "check": True, "cwd": tmp_path}]
 
 
-def test_v2_ablation_variants_are_available():
+def test_formal_v3_ablation_variants_are_available():
     from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, _variant_env
 
     expected = {
-        "v2_output_age5_size8",
-        "v2_output_age8_size8",
-        "v2_output_age12_size8",
-        "v2_candidate_low3_window6",
-        "v2_candidate_low4_window8",
-        "v2_candidate_real2_age8",
-        "v2_candidate_topk",
-        "v2_reacquire_interval1",
-        "v2_reacquire_interval2",
-        "v2_reacquire_interval5_center240",
-        "v3_candidate_topk_no_roi_no_motion",
+        FORMAL_MSDC_VARIANT,
+        "no_low_candidate",
+        "no_direct_reacquire",
+        "no_low_inheritance",
+        "hits_only_no_evidence",
+        "no_output_nms",
+        "no_output_real_det_age_gate",
+        "low_budget_off",
+        "low_budget_topk16",
+        "low_budget_topk64",
     }
     assert expected <= set(ABLATION_VARIANTS)
 
-    env = _variant_env("v2_candidate_real2_age8")
+    env = _variant_env("low_budget_topk16")
     assert env["MSDC_USE_REACQUIRE"] == "1"
-    assert env["MSDC_REUSE_GUARD_ENABLE"] == "1"
-    assert env["MSDC_CONFIRM_MIN_REAL_DET_HITS"] == "2"
-    assert env["MSDC_CANDIDATE_MAX_AGE"] == "8"
+    assert env["MSDC_LOW_OBS_TOPK"] == "16"
+    assert env["MSDC_LOW_OBS_GLOBAL_TOPK"] == "16"
+    assert env["MSDC_LOW_OBS_MAX_PER_FRAME"] == "32"
 
-    formal_env = _variant_env("v3_candidate_topk_no_roi_no_motion")
+    formal_env = _variant_env(FORMAL_MSDC_VARIANT)
     assert formal_env["MSDC_LOW_OBS_TOPK"] == "32"
     assert formal_env["MSDC_LOW_OBS_GLOBAL_TOPK"] == "32"
     assert formal_env["MSDC_LOW_OBS_MIN_CONF"] == "0.25"
-    assert formal_env["MSDC_DEBUG_EVENTS"] == "0"
+    assert formal_env["MSDC_DEBUG_EVENTS"] == "1"
 
 
-def test_v2_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):
+def test_formal_v3_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):
     from tools.experiments.run_msdc_ablation import _execution_env, _variant_env
 
     monkeypatch.setenv("MSDC_CONFIRM_REQUIRE_HIGH_DET", "0")
     monkeypatch.setenv("UNRELATED_FLAG", "keep")
 
-    env = _execution_env("v3_candidate_topk_no_roi_no_motion", _variant_env("v3_candidate_topk_no_roi_no_motion"))
+    env = _execution_env(FORMAL_MSDC_VARIANT, _variant_env(FORMAL_MSDC_VARIANT))
 
     assert "MSDC_CONFIRM_REQUIRE_HIGH_DET" not in env
     assert env["UNRELATED_FLAG"] == "keep"
