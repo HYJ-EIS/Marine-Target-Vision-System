@@ -13,6 +13,7 @@ if str(_ROOT) not in sys.path:
 import pytest
 
 import tools.evaluation.msdc_speed_benchmark as benchmark
+from target_module.image_detect_module.constants import SPEED_FIELDS
 from tools.evaluation.msdc_speed_benchmark import (
     CountingProcessor,
     percentile,
@@ -36,6 +37,25 @@ def test_summarize_latencies_reports_mean_p50_p95():
     assert round(summary["mean_latency_ms"], 4) == 20.0
     assert round(summary["p50_latency_ms"], 4) == 20.0
     assert round(summary["p95_latency_ms"], 4) == 29.0
+
+
+def test_speed_fields_include_v3_staged_timing_aliases_and_legacy_fields():
+    for field in [
+        "mean_read_decode_ms",
+        "mean_low_detection_ms",
+        "mean_high_split_ms",
+        "mean_low_filter_budget_ms",
+        "mean_observation_build_ms",
+        "mean_evidence_update_ms",
+        "mean_output_nms_ms",
+        "mean_render_write_ms",
+        "mean_read_ms",
+        "mean_high_det_ms",
+        "mean_low_det_ms",
+        "mean_render_ms",
+        "mean_write_ms",
+    ]:
+        assert field in SPEED_FIELDS
 
 
 def test_counting_processor_records_calls_by_stage():
@@ -97,6 +117,14 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
             "detector_calls_high_det": 0,
             "detector_calls_low_det": 0,
             "detector_calls_tracker_update": 0,
+            "mean_read_decode_ms": "0.000000",
+            "mean_low_detection_ms": "0.000000",
+            "mean_high_split_ms": "0.000000",
+            "mean_low_filter_budget_ms": "0.000000",
+            "mean_observation_build_ms": "0.000000",
+            "mean_evidence_update_ms": "0.000000",
+            "mean_output_nms_ms": "0.000000",
+            "mean_render_write_ms": "0.000000",
             "mean_read_ms": "0.000000",
             "mean_high_det_ms": "0.000000",
             "mean_low_det_ms": "0.000000",
@@ -125,6 +153,8 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
         rows = list(csv.DictReader(fh))
     assert [row["tracker"] for row in rows] == ["ocsort", "msdc_elt"]
     assert {row["processed_frames"] for row in rows} == {"0"}
+    assert "mean_read_decode_ms" in rows[0]
+    assert "mean_render_write_ms" in rows[0]
     assert "mean_render_ms" in rows[0]
     assert "mean_write_ms" in rows[0]
 
@@ -190,6 +220,14 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
             "detector_calls_high_det": 0,
             "detector_calls_low_det": 0,
             "detector_calls_tracker_update": 0,
+            "mean_read_decode_ms": "0.000000",
+            "mean_low_detection_ms": "0.000000",
+            "mean_high_split_ms": "0.000000",
+            "mean_low_filter_budget_ms": "0.000000",
+            "mean_observation_build_ms": "0.000000",
+            "mean_evidence_update_ms": "0.000000",
+            "mean_output_nms_ms": "0.000000",
+            "mean_render_write_ms": "0.000000",
             "mean_read_ms": "0.000000",
             "mean_high_det_ms": "0.000000",
             "mean_low_det_ms": "0.000000",
@@ -325,5 +363,13 @@ def test_msdc_shared_low_high_detection_uses_one_detector_call(tmp_path, monkeyp
     assert row["detector_calls_total"] == 1
     assert row["detector_calls_high_det"] == 0
     assert row["detector_calls_low_det"] == 1
+    assert float(row["mean_read_decode_ms"]) >= 0.0
+    assert float(row["mean_low_detection_ms"]) >= 0.0
+    assert float(row["mean_high_split_ms"]) >= 0.0
+    assert row["mean_low_filter_budget_ms"] == "0.000000"
+    assert row["mean_observation_build_ms"] == "0.000000"
+    assert row["mean_evidence_update_ms"] == "0.000000"
+    assert row["mean_output_nms_ms"] == "0.000000"
+    assert row["mean_render_write_ms"] == "0.000000"
     assert row["mean_render_ms"] == "0.000000"
     assert row["mean_write_ms"] == "0.000000"

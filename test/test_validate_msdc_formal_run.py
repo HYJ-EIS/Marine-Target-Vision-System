@@ -41,6 +41,11 @@ def _make_valid_run(root):
         "gt_id,coverage_ratio\n1,1.0\n",
         encoding="utf-8",
     )
+    summary_diag_dir = root / "main/main_full/diagnostics"
+    (summary_diag_dir / "msdc_diagnostic_summary.csv").write_text(
+        "seq_name,tracker,rows\nseq,msdc_elt,1\n",
+        encoding="utf-8",
+    )
     eval_dir = root / "main/main_full/eval"
     eval_dir.mkdir(parents=True)
     (eval_dir / "motchallenge_summary.csv").write_text(
@@ -52,6 +57,16 @@ def _make_valid_run(root):
     vis_dir.mkdir(parents=True)
     (vis_dir / "msdc_elt.mp4").write_bytes(b"mp4")
 
+    _write_csv(
+        root / "slice/slice_manifest.csv",
+        [{"seq_name": "seq", "video_path": "seq.mp4"}],
+        ["seq_name", "video_path"],
+    )
+    _write_csv(
+        root / "sensitivity/sensitivity_full/sensitivity_matrix.csv",
+        [{"variant": "msdc_v3", "MOTA": "80"}],
+        ["variant", "MOTA"],
+    )
     _write_csv(
         root / "summary/main_results.csv",
         [
@@ -83,6 +98,14 @@ def _make_valid_run(root):
                 "detector_calls_high_det": "0",
                 "detector_calls_low_det": "1000",
                 "detector_calls_tracker_update": "0",
+                "mean_read_decode_ms": "1",
+                "mean_low_detection_ms": "80",
+                "mean_high_split_ms": "1",
+                "mean_low_filter_budget_ms": "2",
+                "mean_observation_build_ms": "3",
+                "mean_evidence_update_ms": "4",
+                "mean_output_nms_ms": "5",
+                "mean_render_write_ms": "0",
                 "mean_read_ms": "1",
                 "mean_high_det_ms": "0",
                 "mean_low_det_ms": "80",
@@ -101,6 +124,14 @@ def _make_valid_run(root):
             "detector_calls_high_det",
             "detector_calls_low_det",
             "detector_calls_tracker_update",
+            "mean_read_decode_ms",
+            "mean_low_detection_ms",
+            "mean_high_split_ms",
+            "mean_low_filter_budget_ms",
+            "mean_observation_build_ms",
+            "mean_evidence_update_ms",
+            "mean_output_nms_ms",
+            "mean_render_write_ms",
             "mean_read_ms",
             "mean_high_det_ms",
             "mean_low_det_ms",
@@ -169,6 +200,36 @@ def test_validate_run_rejects_missing_path_manifest(tmp_path):
     assert any("path_manifest" in item for item in result["missing"])
 
 
+def test_validate_run_rejects_missing_diagnostic_summary(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "main/main_full/diagnostics/msdc_diagnostic_summary.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("diagnostic_summary" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_slice_manifest(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "slice/slice_manifest.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("slice_manifest" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_sensitivity_matrix(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "sensitivity/sensitivity_full/sensitivity_matrix.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("sensitivity_matrix" in item for item in result["missing"])
+
+
 def test_validate_run_rejects_placeholder_speed_values(tmp_path):
     _make_valid_run(tmp_path)
     _write_csv(
@@ -183,6 +244,14 @@ def test_validate_run_rejects_placeholder_speed_values(tmp_path):
             "detector_calls_high_det": "N/A",
             "detector_calls_low_det": "N/A",
             "detector_calls_tracker_update": "N/A",
+            "mean_read_decode_ms": "N/A",
+            "mean_low_detection_ms": "N/A",
+            "mean_high_split_ms": "N/A",
+            "mean_low_filter_budget_ms": "N/A",
+            "mean_observation_build_ms": "N/A",
+            "mean_evidence_update_ms": "N/A",
+            "mean_output_nms_ms": "N/A",
+            "mean_render_write_ms": "N/A",
             "mean_read_ms": "N/A",
             "mean_high_det_ms": "N/A",
             "mean_low_det_ms": "N/A",
@@ -202,6 +271,14 @@ def test_validate_run_rejects_placeholder_speed_values(tmp_path):
             "detector_calls_high_det",
             "detector_calls_low_det",
             "detector_calls_tracker_update",
+            "mean_read_decode_ms",
+            "mean_low_detection_ms",
+            "mean_high_split_ms",
+            "mean_low_filter_budget_ms",
+            "mean_observation_build_ms",
+            "mean_evidence_update_ms",
+            "mean_output_nms_ms",
+            "mean_render_write_ms",
             "mean_read_ms",
             "mean_high_det_ms",
             "mean_low_det_ms",

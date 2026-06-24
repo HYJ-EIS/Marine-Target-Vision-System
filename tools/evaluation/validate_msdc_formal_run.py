@@ -16,6 +16,14 @@ REQUIRED_SPEED = [
     "detector_calls_high_det",
     "detector_calls_low_det",
     "detector_calls_tracker_update",
+    "mean_read_decode_ms",
+    "mean_low_detection_ms",
+    "mean_high_split_ms",
+    "mean_low_filter_budget_ms",
+    "mean_observation_build_ms",
+    "mean_evidence_update_ms",
+    "mean_output_nms_ms",
+    "mean_render_write_ms",
     "mean_read_ms",
     "mean_high_det_ms",
     "mean_low_det_ms",
@@ -58,8 +66,11 @@ def validate_run(run_root: str | Path) -> dict[str, object]:
         ("stage_observations", "**/trackers/*/diagnostics/**/stage_observations.jsonl"),
         ("candidate_pool_stats", "**/trackers/*/diagnostics/**/candidate_pool_stats.jsonl"),
         ("diagnostic_csv", "**/diagnostics/**/*.csv"),
+        ("diagnostic_summary", "**/diagnostics/msdc_diagnostic_summary.csv"),
         ("visualization", "**/visualizations/**/*.mp4"),
         ("path_manifest", "summary/path_manifest.csv"),
+        ("slice_manifest", "slice/slice_manifest.csv"),
+        ("sensitivity_matrix", "sensitivity/sensitivity_full/sensitivity_matrix.csv"),
     ]
     for label, pattern in glob_checks:
         if not _has_nonempty_glob(root, pattern):
