@@ -319,6 +319,22 @@ def test_build_render_command_accepts_class_source_none(tmp_path):
     assert cmd[cmd.index("--class-source") + 1] == "none"
 
 
+def test_build_render_command_passes_detection_cache_for_cache_class_source(tmp_path):
+    cache_file = tmp_path / "detections" / "seq_high_low_detections.jsonl"
+    cmd = _build_render_command(
+        input_video=tmp_path / "video.mp4",
+        tracker_file=tmp_path / "trackers" / "msdc_v3_replay" / "data" / "seq.txt",
+        output_file=tmp_path / "visualizations" / "seq" / "msdc_v3_replay.mp4",
+        max_frames=5400,
+        progress_interval=500,
+        class_source="cache",
+        detections_cache=cache_file,
+    )
+
+    assert cmd[cmd.index("--class-source") + 1] == "cache"
+    assert cmd[cmd.index("--detections-cache") + 1] == str(cache_file)
+
+
 def test_compute_per_gt_diagnostics_reports_fragmented_identity(tmp_path):
     gt_file = tmp_path / "gt.txt"
     tracker_file = tmp_path / "tracker.txt"

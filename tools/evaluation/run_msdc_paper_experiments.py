@@ -70,7 +70,7 @@ def build_main_command(
     progress_interval: int,
     run: bool,
     duration_seconds: float = 0.0,
-    render_class_source: str = "detector",
+    render_class_source: str = "cache",
     formal_frame_limit: int = FORMAL_FRAME_LIMIT,
 ) -> list[str]:
     cmd = [
@@ -106,7 +106,7 @@ def build_ablation_command(
     run: bool,
     variants: list[str] | None = None,
     duration_seconds: float = 0.0,
-    render_class_source: str = "detector",
+    render_class_source: str = "cache",
     formal_frame_limit: int = FORMAL_FRAME_LIMIT,
 ) -> list[str]:
     selected_variants = ABLATION_VARIANTS if variants is None else variants
@@ -351,7 +351,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--progress-interval", type=int, default=500)
     parser.add_argument("--duration-seconds", type=float, default=0.0, help="Legacy option; formal replay main/ablation commands ignore this")
     parser.add_argument("--formal-frame-limit", type=int, default=FORMAL_FRAME_LIMIT)
-    parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
+    parser.add_argument("--render-class-source", choices=["detector", "cache", "none"], default="cache")
     parser.add_argument("--run-id", default="", help="Top-level run id; default is timestamp")
     parser.add_argument("--ablation-variants", nargs="+", default=ABLATION_VARIANTS)
     run_mode = parser.add_mutually_exclusive_group()

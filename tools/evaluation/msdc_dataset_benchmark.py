@@ -720,6 +720,7 @@ def _build_render_command(
     max_frames: int,
     progress_interval: int,
     class_source: str = "detector",
+    detections_cache: Path | None = None,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -733,6 +734,8 @@ def _build_render_command(
         "--class-source",
         class_source,
     ]
+    if detections_cache is not None:
+        cmd.extend(["--detections-cache", str(detections_cache)])
     if max_frames > 0:
         cmd.extend(["--max-frames", str(max_frames)])
     if progress_interval > 0:

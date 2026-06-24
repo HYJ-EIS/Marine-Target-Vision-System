@@ -4,6 +4,9 @@ import os
 import sys
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -14,6 +17,9 @@ from tools.evaluation import detection_replay_benchmark as drb
 from tools.evaluation.detection_replay_benchmark import (
     effective_max_frames,
     high_boxes_from_cache_row,
+    is_detection_cache_complete,
+    is_mot_result_complete,
+    is_render_video_complete,
     load_detection_cache,
     low_boxes_from_cache_row,
     msdc_variant_context,
@@ -59,6 +65,41 @@ def test_load_detection_cache_can_clip_to_frame_count(tmp_path):
     rows = load_detection_cache(cache_path, max_frames=2)
 
     assert [row["frame_id"] for row in rows] == [1, 2]
+
+
+def test_detection_cache_complete_requires_last_requested_frame(tmp_path):
+    cache_path = tmp_path / "detections.jsonl"
+    write_detection_cache(cache_path, [{"frame_id": 1}, {"frame_id": 3}])
+
+    assert is_detection_cache_complete(cache_path, max_frames=3)
+    assert not is_detection_cache_complete(cache_path, max_frames=4)
+    assert not is_detection_cache_complete(tmp_path / "missing.jsonl", max_frames=3)
+
+
+def test_mot_result_complete_requires_last_requested_frame(tmp_path):
+    mot_path = tmp_path / "seq.txt"
+    mot_path.write_text(
+        "1,1,10,10,20,20,0.9,-1,-1,-1\n"
+        "3,1,12,10,20,20,0.8,-1,-1,-1\n",
+        encoding="utf-8",
+    )
+
+    assert is_mot_result_complete(mot_path, max_frames=3)
+    assert not is_mot_result_complete(mot_path, max_frames=4)
+    assert not is_mot_result_complete(tmp_path / "missing.txt", max_frames=3)
+
+
+def test_render_video_complete_checks_frame_count(tmp_path):
+    video_path = tmp_path / "render.mp4"
+    writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (8, 8))
+    assert writer.isOpened()
+    for _ in range(3):
+        writer.write(np.zeros((8, 8, 3), dtype=np.uint8))
+    writer.release()
+
+    assert is_render_video_complete(video_path, max_frames=3)
+    assert not is_render_video_complete(video_path, max_frames=4)
+    assert not is_render_video_complete(tmp_path / "missing.mp4", max_frames=3)
 
 
 def test_tracker_output_name_marks_replay_mode():

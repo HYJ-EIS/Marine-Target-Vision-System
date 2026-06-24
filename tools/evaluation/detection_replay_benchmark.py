@@ -185,6 +185,53 @@ def load_detection_cache(path: str | Path, max_frames: int = 0) -> list[dict]:
     return rows
 
 
+def is_detection_cache_complete(path: str | Path, max_frames: int) -> bool:
+    path = Path(path)
+    if max_frames <= 0 or not path.is_file():
+        return False
+    try:
+        max_seen = 0
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                max_seen = max(max_seen, int(json.loads(line).get("frame_id", 0)))
+        return max_seen >= max_frames
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def is_mot_result_complete(path: str | Path, max_frames: int) -> bool:
+    path = Path(path)
+    if max_frames <= 0 or not path.is_file():
+        return False
+    try:
+        max_seen = 0
+        with path.open("r", encoding="utf-8-sig", newline="") as fh:
+            for row in csv.reader(fh):
+                if not row:
+                    continue
+                max_seen = max(max_seen, int(float(row[0])))
+        return max_seen >= max_frames
+    except (OSError, ValueError):
+        return False
+
+
+def is_render_video_complete(path: str | Path, max_frames: int) -> bool:
+    path = Path(path)
+    if max_frames <= 0 or not path.is_file():
+        return False
+    cap = cv2.VideoCapture(str(path))
+    try:
+        if not cap.isOpened():
+            return False
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        return frame_count >= max_frames
+    finally:
+        cap.release()
+
+
 def write_replay_summary(run_root: str | Path, summary: dict[str, dict]) -> Path:
     output_path = Path(run_root) / "summary" / "replay_summary.csv"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -449,26 +496,33 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
         sequences.append(spec.seq_name)
         write_motchallenge_gt_sequence(spec, gt_root, info, max_frames=max_frames)
         cache_path = detections_root / f"{spec.seq_name}_high_low_detections.jsonl"
-        dump_video_detections(
-            input_video=spec.video_path,
-            output_cache=cache_path,
-            file_type=file_type,
-            max_frames=max_frames,
-            progress_interval=int(args.progress_interval),
-        )
-        for tracker_type, variant, tracker_name in planned_trackers:
-            tracker_file = replay_tracker_from_cache(
+        if is_detection_cache_complete(cache_path, max_frames):
+            print(f"[SKIP] detection cache complete: {cache_path}", flush=True)
+        else:
+            dump_video_detections(
                 input_video=spec.video_path,
-                detection_cache=cache_path,
-                output_root=trackers_root,
-                tracker_type=tracker_type,
-                variant=variant,
-                seq_name=spec.seq_name,
+                output_cache=cache_path,
                 file_type=file_type,
-                frame_rate=info.fps,
                 max_frames=max_frames,
                 progress_interval=int(args.progress_interval),
             )
+        for tracker_type, variant, tracker_name in planned_trackers:
+            tracker_file = trackers_root / tracker_name / "data" / f"{spec.seq_name}.txt"
+            if is_mot_result_complete(tracker_file, max_frames):
+                print(f"[SKIP] replay MOT complete: {tracker_file}", flush=True)
+            else:
+                tracker_file = replay_tracker_from_cache(
+                    input_video=spec.video_path,
+                    detection_cache=cache_path,
+                    output_root=trackers_root,
+                    tracker_type=tracker_type,
+                    variant=variant,
+                    seq_name=spec.seq_name,
+                    file_type=file_type,
+                    frame_rate=info.fps,
+                    max_frames=max_frames,
+                    progress_interval=int(args.progress_interval),
+                )
             diag_dir = diagnostics_root / spec.seq_name
             eval_gt_file = gt_root / spec.seq_name / "gt" / "gt.txt"
             per_gt_csv, _ = write_diagnostics_for_tracker(eval_gt_file, tracker_file, diag_dir, tracker_name)
@@ -481,13 +535,18 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
                 row.update({"seq_name": spec.seq_name, "tracker": tracker_name})
                 diagnostic_summary_rows.append(row)
             if args.render:
+                render_output = run_root / "visualizations" / spec.seq_name / f"{tracker_name}.mp4"
+                if is_render_video_complete(render_output, max_frames):
+                    print(f"[SKIP] rendered video complete: {render_output}", flush=True)
+                    continue
                 render_cmd = _build_render_command(
                     input_video=spec.video_path,
                     tracker_file=tracker_file,
-                    output_file=run_root / "visualizations" / spec.seq_name / f"{tracker_name}.mp4",
+                    output_file=render_output,
                     max_frames=max_frames,
                     progress_interval=int(args.progress_interval),
                     class_source=str(args.render_class_source),
+                    detections_cache=cache_path if str(args.render_class_source) == "cache" else None,
                 )
                 subprocess.run(render_cmd, cwd=str(_ROOT), check=True)
 
@@ -531,7 +590,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--variants", nargs="+", default=[FORMAL_MSDC_VARIANT], choices=list(ABLATION_VARIANTS))
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--render", action="store_true", help="Render annotated videos after replay exports")
-    parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
+    parser.add_argument("--render-class-source", choices=["detector", "cache", "none"], default="cache")
     parser.add_argument("--input", default="", help="Optional direct input video path for a single dataset")
     parser.add_argument("--seq-name", default="", help="Optional sequence name override for a single dataset")
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])

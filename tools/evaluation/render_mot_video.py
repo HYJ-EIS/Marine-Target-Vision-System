@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -46,6 +47,33 @@ def load_mot_results(path: str | Path) -> dict[int, list[dict]]:
                 "confidence": float(row[6]),
             }
             rows_by_frame.setdefault(frame_id, []).append(box)
+    return rows_by_frame
+
+
+def load_detection_class_cache(path: str | Path, max_frames: int = 0) -> dict[int, list[dict]]:
+    """Load replay detector boxes grouped by 1-based frame id for class labels."""
+    path = Path(path)
+    rows_by_frame: dict[int, list[dict]] = {}
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            frame_id = int(row.get("frame_id", 0))
+            if frame_id <= 0:
+                continue
+            if max_frames > 0 and frame_id > max_frames:
+                continue
+            boxes = []
+            for key in ("high_boxes", "low_boxes", "boxes"):
+                for box in row.get(key, []) or []:
+                    item = dict(box)
+                    item.setdefault("class_confidence", item.get("confidence", 0.0))
+                    boxes.append(item)
+                if boxes and key == "boxes":
+                    break
+            rows_by_frame[frame_id] = boxes
     return rows_by_frame
 
 
@@ -141,6 +169,7 @@ def render_mot_video(
     max_frames: int = 0,
     scale: float = 1.0,
     class_source: str = "detector",
+    detections_cache: str | Path | None = None,
     class_iou_threshold: float = 0.1,
     progress_interval: int = 100,
 ) -> Path:
@@ -161,9 +190,14 @@ def render_mot_video(
 
     detector = None
     conf_override = None
+    cached_detections: dict[int, list[dict]] = {}
     if class_source == "detector":
         detector = td.get_detector()
         conf_override = _low_conf_for_file_type(resolved_type)
+    elif class_source == "cache":
+        if detections_cache is None:
+            raise ValueError("--detections-cache is required when --class-source=cache")
+        cached_detections = load_detection_class_cache(detections_cache, max_frames=max_frames)
 
     cap = cv2.VideoCapture(str(input_video))
     if not cap.isOpened():
@@ -202,6 +236,8 @@ def render_mot_video(
             detections = []
             if detector is not None and track_boxes:
                 detections = _detect_frame_classes(detector, frame, resolved_type, conf_override)
+            elif cached_detections and track_boxes:
+                detections = cached_detections.get(frame_id, [])
             annotated_boxes = _assign_classes(track_boxes, detections, class_cache, class_iou_threshold)
 
             if abs(scale - 1.0) >= 1e-9:
@@ -245,7 +281,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
     parser.add_argument("--max-frames", type=int, default=0, help="0 means render until video/result end")
     parser.add_argument("--scale", type=float, default=1.0, help="Output scale, e.g. 0.5 for half-size")
-    parser.add_argument("--class-source", choices=["detector", "none"], default="detector")
+    parser.add_argument("--class-source", choices=["detector", "cache", "none"], default="detector")
+    parser.add_argument("--detections-cache", default="", help="Replay detection JSONL for --class-source=cache")
     parser.add_argument("--class-iou-threshold", type=float, default=0.1)
     parser.add_argument("--progress-interval", type=int, default=100)
     return parser.parse_args()
@@ -261,6 +298,7 @@ def main() -> None:
         max_frames=args.max_frames,
         scale=args.scale,
         class_source=args.class_source,
+        detections_cache=args.detections_cache or None,
         class_iou_threshold=args.class_iou_threshold,
         progress_interval=args.progress_interval,
     )
