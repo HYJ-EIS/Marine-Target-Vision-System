@@ -81,6 +81,7 @@ FORMAL_V3_CONFIG_OVERRIDES = {
     key: _coerce_formal_v3_value(key, V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV[key])
     for key in [*_FORMAL_V3_BOOL_KEYS, *_FORMAL_V3_INT_KEYS, *_FORMAL_V3_FLOAT_KEYS]
 }
+FORMAL_V3_CONFIG_OVERRIDES["MSDC_DEBUG_EVENTS"] = False
 
 
 def percentile(values: list[float] | tuple[float, ...], q: float) -> float:
