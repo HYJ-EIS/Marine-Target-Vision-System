@@ -161,7 +161,7 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py \
   --run-formal
 ```
 
-正式 v3 论文评测默认使用 replay detections：每个序列先以同一 detector 和同一低阈值检测策略生成 high/low 检测缓存，再让 ByteTrack、OC-SORT、BoT-SORT 和 MS-DC-ELT v3 读取同一份 high 检测流；MS-DC-ELT v3 额外读取同一份 low 检测流用于 low_candidate、reacquire、inherit 和 evidence update。报告中必须写明 `replay_detections=true`。
+正式 v3 论文评测默认使用 replay detections，`run_msdc_paper_experiments.py` 的 main/ablation 阶段会调用 `tools/evaluation/detection_replay_benchmark.py`，smoke 仍调用 `tools/evaluation/msdc_dataset_benchmark.py`。每个序列先以同一 detector 和同一低阈值检测策略生成 high/low 检测缓存，再让 ByteTrack、OC-SORT、BoT-SORT 和 MS-DC-ELT v3 读取同一份 high 检测流；MS-DC-ELT v3 额外读取同一份 low 检测流用于 low_candidate、reacquire、inherit 和 evidence update。报告中必须写明 `replay_detections=true`。
 
 正式 run 会依次规划/执行 main、ablation、slice、speed、sensitivity 和 summary 阶段；`slice/` 阶段产物为 `slice/slice_manifest.csv`，`sensitivity/` 阶段产物为 `sensitivity/sensitivity_full/sensitivity_matrix.csv`，`latest_run.json` 会记录 `slice_manifest_csv` 和 `sensitivity_matrix_csv`。
 正式 run 必须包含 `main/`、`ablation/`、`slice/`、`speed/`、`sensitivity/`、`summary/`、`visualizations/`、`diagnostics/`，并通过 `tools/evaluation/validate_msdc_formal_run.py --run-root <run_root>`。

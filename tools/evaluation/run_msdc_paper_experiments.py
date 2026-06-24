@@ -42,6 +42,10 @@ def _dataset_benchmark_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_dataset_benchmark.py")
 
 
+def _detection_replay_script() -> str:
+    return str(_ROOT / "tools" / "evaluation" / "detection_replay_benchmark.py")
+
+
 def _speed_benchmark_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_speed_benchmark.py")
 
@@ -71,17 +75,13 @@ def build_main_command(
 ) -> list[str]:
     cmd = [
         sys.executable,
-        _dataset_benchmark_script(),
+        _detection_replay_script(),
         "--dataset-root",
         *[str(path) for path in dataset_roots],
         "--output-root",
         str(output_root),
         "--run-id",
         run_id,
-        "--mode",
-        "main",
-        "--commit-hash",
-        commit_hash,
         "--trackers",
         *MAIN_TRACKERS,
         "--variants",
@@ -94,10 +94,6 @@ def build_main_command(
         "--render-class-source",
         render_class_source,
     ]
-    if duration_seconds > 0.0:
-        cmd.extend(["--duration-seconds", str(float(duration_seconds))])
-    if run:
-        cmd.append("--run")
     return cmd
 
 
@@ -116,17 +112,13 @@ def build_ablation_command(
     selected_variants = ABLATION_VARIANTS if variants is None else variants
     cmd = [
         sys.executable,
-        _dataset_benchmark_script(),
+        _detection_replay_script(),
         "--dataset-root",
         *[str(path) for path in dataset_roots],
         "--output-root",
         str(output_root),
         "--run-id",
         run_id,
-        "--mode",
-        "ablation",
-        "--commit-hash",
-        commit_hash,
         "--trackers",
         "msdc_elt",
         "--variants",
@@ -139,10 +131,6 @@ def build_ablation_command(
         "--render-class-source",
         render_class_source,
     ]
-    if duration_seconds > 0.0:
-        cmd.extend(["--duration-seconds", str(float(duration_seconds))])
-    if run:
-        cmd.append("--run")
     return cmd
 
 
@@ -361,7 +349,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--speed-frames", type=int, default=1000)
     parser.add_argument("--progress-interval", type=int, default=500)
-    parser.add_argument("--duration-seconds", type=float, default=0.0, help="Limit main/ablation videos to first N seconds; 0 means full videos")
+    parser.add_argument("--duration-seconds", type=float, default=0.0, help="Legacy option; formal replay main/ablation commands ignore this")
     parser.add_argument("--formal-frame-limit", type=int, default=FORMAL_FRAME_LIMIT)
     parser.add_argument("--render-class-source", choices=["detector", "none"], default="detector")
     parser.add_argument("--run-id", default="", help="Top-level run id; default is timestamp")

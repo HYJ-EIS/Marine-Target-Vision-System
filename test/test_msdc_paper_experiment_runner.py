@@ -20,6 +20,25 @@ from tools.evaluation.run_msdc_paper_experiments import (
     build_speed_command,
 )
 
+UNSUPPORTED_REPLAY_FLAGS = {
+    "--mode",
+    "--commit-hash",
+    "--run",
+    "--duration-seconds",
+}
+
+
+def assert_replay_command(cmd, run_id):
+    assert cmd[1] == str(runner._ROOT / "tools" / "evaluation" / "detection_replay_benchmark.py")
+    assert cmd[cmd.index("--run-id") + 1] == run_id
+    assert "--dataset-root" in cmd
+    assert "--output-root" in cmd
+    assert "--formal-frame-limit" in cmd
+    assert "--progress-interval" in cmd
+    assert "--render" in cmd
+    assert "--render-class-source" in cmd
+    assert not (UNSUPPORTED_REPLAY_FLAGS & set(cmd))
+
 
 def test_main_command_uses_full_video_and_render():
     cmd = build_main_command(
@@ -30,10 +49,9 @@ def test_main_command_uses_full_video_and_render():
         progress_interval=500,
         run=True,
     )
+    assert_replay_command(cmd, "main_full")
     assert "--max-frames" not in cmd
-    assert "--duration-seconds" not in cmd
     assert "--render" in cmd
-    assert "--run" in cmd
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == [
         "bytetrack",
         "ocsort",
@@ -65,6 +83,7 @@ def test_main_command_uses_formal_frame_limit_and_all_main_trackers(tmp_path):
         formal_frame_limit=FORMAL_FRAME_LIMIT,
         render_class_source="detector",
     )
+    assert_replay_command(cmd, "main_full")
     assert "--formal-frame-limit" in cmd
     assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == [
@@ -75,7 +94,7 @@ def test_main_command_uses_formal_frame_limit_and_all_main_trackers(tmp_path):
     ]
 
 
-def test_formal_commands_accept_duration_limit():
+def test_formal_replay_commands_ignore_duration_limit():
     main_cmd = build_main_command(
         dataset_roots=["/data/a"],
         output_root=Path("results/main"),
@@ -98,8 +117,8 @@ def test_formal_commands_accept_duration_limit():
         render_class_source="none",
     )
 
-    assert main_cmd[main_cmd.index("--duration-seconds") + 1] == "120.0"
-    assert ablation_cmd[ablation_cmd.index("--duration-seconds") + 1] == "120.0"
+    assert "--duration-seconds" not in main_cmd
+    assert "--duration-seconds" not in ablation_cmd
     assert main_cmd[main_cmd.index("--render-class-source") + 1] == "none"
     assert ablation_cmd[ablation_cmd.index("--render-class-source") + 1] == "none"
     assert main_cmd[main_cmd.index("--variants") + 1] == FORMAL_MSDC_VARIANT
@@ -114,6 +133,7 @@ def test_ablation_command_includes_required_variants():
         progress_interval=500,
         run=True,
     )
+    assert_replay_command(cmd, "ablation_full")
     required_variants = {
         FORMAL_MSDC_VARIANT,
         "no_low_candidate",
@@ -142,6 +162,7 @@ def test_ablation_command_uses_formal_frame_limit():
         formal_frame_limit=FORMAL_FRAME_LIMIT,
     )
 
+    assert_replay_command(cmd, "ablation_full")
     assert "--formal-frame-limit" in cmd
     assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
 
@@ -168,6 +189,22 @@ def test_ablation_command_accepts_selected_variants():
     assert "hits_only_no_evidence" in joined
     assert FORMAL_MSDC_VARIANT in joined
     assert "low_budget_topk64" in joined
+
+
+def test_formal_main_and_ablation_commands_are_replay_commands(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(runner, "_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "get_commit_hash", lambda: "abcdef0")
+    monkeypatch.setattr(runner, "run_command", lambda label, cmd: calls.append((label, cmd)))
+
+    runner.main(["--run-formal", "--output-root", str(tmp_path / "runs"), "--run-id", "formal", "--speed-frames", "0"])
+
+    main_cmd = calls[0][1]
+    ablation_cmd = calls[1][1]
+    assert_replay_command(main_cmd, "main_full")
+    assert_replay_command(ablation_cmd, "ablation_full")
+    assert main_cmd[main_cmd.index("--variants") + 1] == FORMAL_MSDC_VARIANT
+    assert ablation_cmd[ablation_cmd.index("--trackers") + 1:ablation_cmd.index("--variants")] == ["msdc_elt"]
 
 
 def test_speed_command_records_fixed_frame_count():
