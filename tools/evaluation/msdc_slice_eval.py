@@ -79,8 +79,14 @@ def build_slice_manifest_from_diagnostics(
     max_len: int = 30,
 ) -> Path:
     diagnostics_root = Path(diagnostics_root)
+    if not diagnostics_root.is_dir():
+        raise FileNotFoundError(f"Diagnostics root does not exist or is not a directory: {diagnostics_root}")
+    per_gt_paths = sorted(diagnostics_root.glob("*/*_per_gt_diagnostics.csv"))
+    if not per_gt_paths:
+        raise FileNotFoundError(f"No per-GT diagnostics CSV files found under: {diagnostics_root}")
+
     manifest_rows: list[dict[str, int | str]] = []
-    for csv_path in sorted(diagnostics_root.glob("*/*_per_gt_diagnostics.csv")):
+    for csv_path in per_gt_paths:
         seq_name = csv_path.parent.name
         suffix = "_per_gt_diagnostics.csv"
         tracker = csv_path.name[: -len(suffix)] if csv_path.name.endswith(suffix) else csv_path.stem

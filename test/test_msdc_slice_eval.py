@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -75,6 +77,38 @@ def test_build_slice_manifest_from_diagnostics(tmp_path):
             "slice_type": "short_miss",
         },
     ]
+
+
+def test_build_slice_manifest_raises_when_diagnostics_root_is_missing(tmp_path):
+    missing_root = tmp_path / "missing_diagnostics"
+
+    with pytest.raises(FileNotFoundError, match="Diagnostics root does not exist or is not a directory"):
+        slice_eval.build_slice_manifest_from_diagnostics(missing_root, tmp_path / "slice_manifest.csv")
+
+
+def test_build_slice_manifest_raises_when_no_per_gt_files_exist(tmp_path):
+    diagnostics_root = tmp_path / "diagnostics"
+    (diagnostics_root / "seq_without_csv").mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError, match="No per-GT diagnostics CSV files found"):
+        slice_eval.build_slice_manifest_from_diagnostics(diagnostics_root, tmp_path / "slice_manifest.csv")
+
+
+def test_build_slice_manifest_keeps_header_only_when_no_short_misses_match(tmp_path):
+    diagnostics_root = tmp_path / "diagnostics"
+    seq_dir = diagnostics_root / "seq_no_short_miss"
+    seq_dir.mkdir(parents=True)
+    (seq_dir / "msdc_elt_per_gt_diagnostics.csv").write_text(
+        "gt_id,missed_segments\n"
+        "1,10-45\n"
+        "2,\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "slice_manifest.csv"
+
+    slice_eval.build_slice_manifest_from_diagnostics(diagnostics_root, output, max_len=30)
+
+    assert output.read_text(encoding="utf-8").splitlines() == [",".join(slice_eval.SLICE_FIELDS)]
 
 
 def test_cli_runs_directly_as_script(tmp_path):

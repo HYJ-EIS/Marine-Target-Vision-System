@@ -234,6 +234,7 @@ conda run -n ship_detect pytest \
 
 ## 最近维护
 
+- 2026-06-24：`msdc_slice_eval.py` 在 diagnostics 根目录缺失或没有 per-GT diagnostics CSV 时会失败退出，避免正式 slice 阶段静默生成空清单。
 - 2026-06-22：集中 tracker choices、formal MS-DC 变体名、method labels、speed fields。
 - 2026-06-22：抽出 tracking update helper，统一 `video_main.py` 与 MOT 导出路径的 tracking 分发逻辑。
 - 2026-06-22：删除默认关闭且评测退化的 MS-DC motion seed、ROI redetect、template lock 辅助模块。
