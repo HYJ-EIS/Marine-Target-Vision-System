@@ -11,6 +11,22 @@ if str(_ROOT) not in sys.path:
 from tools.evaluation.validate_msdc_formal_run import REQUIRED_SPEED, validate_run
 
 
+REQUIRED_DIAGNOSTIC_FIELDS = [
+    "low_candidate_created",
+    "low_candidate_confirmed",
+    "low_candidate_precision",
+    "low_candidate_opportunities",
+    "low_candidate_recall",
+    "reacquire_attempts",
+    "reacquire_opportunities",
+    "reacquire_success",
+    "inherit_opportunities",
+    "inherit_correct",
+    "inherit_wrong",
+    "inherit_ambiguous",
+]
+
+
 def _write_csv(path, rows, fields):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8-sig") as fh:
@@ -42,9 +58,17 @@ def _make_valid_run(root):
         encoding="utf-8",
     )
     summary_diag_dir = root / "main/main_full/diagnostics"
-    (summary_diag_dir / "msdc_diagnostic_summary.csv").write_text(
-        "seq_name,tracker,rows\nseq,msdc_elt,1\n",
-        encoding="utf-8",
+    _write_csv(
+        summary_diag_dir / "msdc_diagnostic_summary.csv",
+        [
+            {
+                "seq_name": "seq",
+                "tracker": "msdc_elt",
+                "rows": "1",
+                **{field: "N/A" for field in REQUIRED_DIAGNOSTIC_FIELDS},
+            }
+        ],
+        ["seq_name", "tracker", "rows", *REQUIRED_DIAGNOSTIC_FIELDS],
     )
     eval_dir = root / "main/main_full/eval"
     eval_dir.mkdir(parents=True)
@@ -63,9 +87,25 @@ def _make_valid_run(root):
         ["seq_name", "video_path"],
     )
     _write_csv(
+        root / "slice/slice_metrics/slice_metrics.csv",
+        [{"slice_id": "seq_1", "tracker": "msdc_elt", "MOTA": "80"}],
+        ["slice_id", "tracker", "MOTA"],
+    )
+    _write_csv(
         root / "sensitivity/sensitivity_full/sensitivity_matrix.csv",
         [{"variant": "msdc_v3", "MOTA": "80"}],
         ["variant", "MOTA"],
+    )
+    _write_csv(
+        root / "sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv",
+        [{"tracker": "msdc_v3", "MOTA": "80"}],
+        ["tracker", "MOTA"],
+    )
+    effective_config_dir = root / "main/main_full/effective_config"
+    effective_config_dir.mkdir(parents=True)
+    (effective_config_dir / "msdc_elt.json").write_text(
+        json.dumps({"tracker": "msdc_elt", "MSDC_LOW_CANDIDATE_ENABLE": "1"}) + "\n",
+        encoding="utf-8",
     )
     _write_csv(
         root / "summary/main_results.csv",
@@ -183,6 +223,7 @@ def test_validate_run_rejects_missing_candidate_pool_stats(tmp_path):
 def test_validate_run_rejects_missing_trackeval_summary(tmp_path):
     _make_valid_run(tmp_path)
     (tmp_path / "main/main_full/eval/motchallenge_summary.csv").unlink()
+    (tmp_path / "sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv").unlink()
 
     result = validate_run(tmp_path)
 
@@ -256,6 +297,85 @@ def test_validate_run_rejects_header_only_sensitivity_matrix(tmp_path):
 
     assert result["ok"] is False
     assert any("sensitivity_matrix" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_effective_config(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "main/main_full/effective_config/msdc_elt.json").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("effective_config" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_sensitivity_metrics(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("sensitivity_metrics" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_slice_metrics(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "slice/slice_metrics/slice_metrics.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("slice_metrics" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_missing_diagnostic_required_field(tmp_path):
+    _make_valid_run(tmp_path)
+    fields = ["seq_name", "tracker", "rows", *REQUIRED_DIAGNOSTIC_FIELDS[:-1]]
+    _write_csv(
+        tmp_path / "main/main_full/diagnostics/msdc_diagnostic_summary.csv",
+        [{field: "N/A" for field in fields}],
+        fields,
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("diagnostic_summary_fields" in item for item in result["missing"])
+
+
+def test_validate_run_rejects_one_invalid_diagnostic_summary_even_if_another_is_valid(tmp_path):
+    _make_valid_run(tmp_path)
+    bad_summary = tmp_path / "ablation/ablation_full/diagnostics/msdc_diagnostic_summary.csv"
+    fields = ["seq_name", "tracker", "rows", *REQUIRED_DIAGNOSTIC_FIELDS[:-1]]
+    _write_csv(
+        bad_summary,
+        [{field: "N/A" for field in fields}],
+        fields,
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any(
+        "diagnostic_summary_fields" in item and str(bad_summary) in item
+        for item in result["missing"]
+    )
+
+
+def test_validate_run_rejects_header_only_invalid_diagnostic_summary_even_if_another_is_valid(tmp_path):
+    _make_valid_run(tmp_path)
+    bad_summary = tmp_path / "ablation/ablation_full/diagnostics/msdc_diagnostic_summary.csv"
+    fields = ["seq_name", "tracker", "rows", *REQUIRED_DIAGNOSTIC_FIELDS[:-1]]
+    _write_csv(bad_summary, [], fields)
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any(
+        "diagnostic_summary_fields" in item and str(bad_summary) in item
+        for item in result["missing"]
+    )
 
 
 def test_validate_run_rejects_placeholder_speed_values(tmp_path):

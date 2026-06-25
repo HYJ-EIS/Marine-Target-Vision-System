@@ -5,6 +5,7 @@
 ## 当前状态
 
 - 默认检测模型、阈值、输入输出路径集中在 `target_module/image_detect_module/config.py`。
+- `config.py` 只保留当前检测、跟踪、视频入口和正式评测仍使用的配置项；旧批量抽帧和数据集分类默认参数已移除。
 - 跟踪器选择、正式 MS-DC 变体名、方法展示名、速度字段集中在 `target_module/image_detect_module/constants.py`。
 - 视频运行与 MOT 导出的逐帧 tracking 更新逻辑共用 `target_module/image_detect_module/utils/tracking_update.py`。
 - 当前正式 MS-DC-ELT 变体为 `v3_candidate_topk_no_roi_no_motion`。
@@ -115,7 +116,9 @@ MS-DC-ELT 主要实现文件：
 | `tools/evaluation/msdc_speed_benchmark.py` | 无渲染速度与分阶段耗时评测 |
 | `tools/evaluation/msdc_diagnostic_metrics.py` | 汇总低分候选、继承、重捕获和碎片化诊断指标 |
 | `tools/evaluation/msdc_sensitivity_matrix.py` | 写出 MS-DC-ELT v3 超参数敏感性矩阵 |
+| `tools/evaluation/run_msdc_sensitivity_benchmark.py` | 基于敏感性矩阵和缓存检测框回放生成真实 TrackEval 指标 |
 | `tools/evaluation/msdc_slice_eval.py` | 从 per-GT diagnostics 生成短漏检 slice manifest |
+| `tools/evaluation/msdc_slice_metrics.py` | 基于 slice manifest 裁剪 MOT txt 并计算短漏检片段 TrackEval 指标 |
 | `tools/evaluation/msdc_experiment_summary.py` | 汇总主实验、消融和速度结果 |
 | `tools/evaluation/run_msdc_paper_experiments.py` | 论文 phase-1 实验总入口 |
 | `tools/evaluation/validate_msdc_formal_run.py` | 检查正式 run 产物完整性 |
@@ -161,11 +164,12 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py \
   --run-formal
 ```
 
-正式 v3 论文评测默认使用 replay detections，`run_msdc_paper_experiments.py` 的 main/ablation 阶段会调用 `tools/evaluation/detection_replay_benchmark.py`，smoke 仍调用 `tools/evaluation/msdc_dataset_benchmark.py`。每个序列先以同一 detector 和同一低阈值检测策略生成 high/low 检测缓存，再让 ByteTrack、OC-SORT、BoT-SORT 和 MS-DC-ELT v3 读取同一份 high 检测流；MS-DC-ELT v3 额外读取同一份 low 检测流用于 low_candidate、reacquire、inherit 和 evidence update。报告中必须写明 `replay_detections=true`。
+正式 v3 论文评测默认使用 replay detections，`run_msdc_paper_experiments.py` 的 main/ablation 阶段会调用 `tools/evaluation/detection_replay_benchmark.py`，smoke 仍调用 `tools/evaluation/msdc_dataset_benchmark.py`。每个序列先以同一 detector 和同一低阈值检测策略生成 high/low 检测缓存，再让 ByteTrack、OC-SORT、BoT-SORT 和 MS-DC-ELT v3 读取同一份 high 检测流；MS-DC-ELT v3 额外读取同一份 low 检测流用于 low_candidate、reacquire、inherit 和 evidence update。replay 可视化默认从 detection cache 恢复类别标签，避免渲染阶段再次运行 detector；重复运行同一 run 目录时会跳过已完整的 detection cache、MOT txt 和 MP4。直接运行 `tools/evaluation/detection_replay_benchmark.py` 时，可传 `--source-detection-cache-root <detections_dir>` 复用既有 high/low detection JSONL，脚本会按序列链接 `<seq>_high_low_detections.jsonl` 到本次 run 的 `detections/` 目录；源缓存不完整时会直接报错，不会重新调用 detector dump。MS-DC replay 会在 run 根目录写出 `effective_config/<tracker>.json`，记录该 tracker 实际生效的 MSDC 配置。summary 会识别 `*_replay` tracker 名并映射回对应主实验方法标签；ablation CSV 保留原始 `variant`，并额外写出剥离 `_replay` 的 `variant_key` 用于正式变体开关汇总。报告中必须写明 `replay_detections=true`。
 
-正式 run 会依次规划/执行 main、ablation、slice、speed、sensitivity 和 summary 阶段；`slice/` 阶段产物为 `slice/slice_manifest.csv`，`sensitivity/` 阶段产物为 `sensitivity/sensitivity_full/sensitivity_matrix.csv`，`latest_run.json` 会记录 `slice_manifest_csv` 和 `sensitivity_matrix_csv`。
+正式 run 会依次规划/执行 main、ablation、slice、slice_metrics、speed、sensitivity_matrix、sensitivity_metrics 和 summary 阶段；`slice/` 阶段产物为 `slice/slice_manifest.csv`，`slice_metrics` 阶段默认从正式 run 创建的 `ablation/ablation_full` 裁剪短漏检 MOT 片段并写出 `slice/slice_metrics/slice_metrics.csv` 与 `slice/slice_metrics/eval/motchallenge_summary.csv`；手动补充评测可直接调用 `tools/evaluation/msdc_slice_metrics.py --ablation-root <ablation_cache_full>` 指向缓存消融结果。`sensitivity_matrix` 阶段产物为 `sensitivity/sensitivity_full/sensitivity_matrix.csv`，`sensitivity_metrics` 阶段会调用 `tools/evaluation/run_msdc_sensitivity_benchmark.py`，读取该矩阵并复用 main 阶段 `detections/` 下的 high/low 检测缓存，为每个动态超参数变体输出 `<variant>_replay` 的 MOT txt、TrackEval 指标和 `effective_config/<variant>_replay.json`。`latest_run.json` 会记录 `slice_manifest_csv`、`sensitivity_matrix_csv` 和 `sensitivity_metrics_root`。
 正式 run 必须包含 `main/`、`ablation/`、`slice/`、`speed/`、`sensitivity/`、`summary/`、`visualizations/`、`diagnostics/`，并通过 `tools/evaluation/validate_msdc_formal_run.py --run-root <run_root>`。
-`validate_msdc_formal_run.py` 会检查 `main_results.csv` 和 `speed_results.csv` 每一行必填字段非空且非 `N/A`，并要求 `msdc_diagnostic_summary.csv` 和 `sensitivity_matrix.csv` 至少包含一行数据；`slice_manifest.csv` 在无短漏检片段时允许只有表头。
+formal v3 完成标准要求 `summary/main_results.csv`、`summary/ablation_results.csv`、`summary/speed_results.csv`、`summary/sensitivity_results.csv`、`summary/slice_metrics.csv`、`summary/diagnostic_results.csv` 和 `summary/path_manifest.csv` 同时存在；`ablation_results.csv` 必须保留原始 `variant` 并写出 `variant_key`，run 内还必须有 `**/effective_config/*.json` 记录主实验、消融和敏感性 replay 的实际配置。`sensitivity_results.csv` 只能从 `sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv` 物化，逐点保留真实 TrackEval 指标；`slice_metrics.csv` 只能从 `slice/slice_metrics/slice_metrics.csv` 物化；`diagnostic_results.csv` 只能从 `msdc_diagnostic_summary.csv` 物化，并必须包含 low_candidate、reacquire、inherit 的分母/机会字段，例如 `low_candidate_opportunities`、`reacquire_opportunities`、`inherit_opportunities` 及对应成功/错误/歧义计数。源文件缺失时 summary 写 `status=missing` 和 `failure=<path>`，不得补造指标。
+`validate_msdc_formal_run.py` 会检查 `main_results.csv` 和 `speed_results.csv` 每一行必填字段非空且非 `N/A`，并要求 `msdc_diagnostic_summary.csv`、`sensitivity_matrix.csv`、`sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv` 和 `slice/slice_metrics/slice_metrics.csv` 至少包含一行数据；诊断汇总字段允许值为 `N/A`，但字段本身必须存在；`slice_manifest.csv` 在无短漏检片段时允许只有表头。
 
 常用默认数据集根目录：
 
@@ -183,7 +187,7 @@ conda run -n ship_detect python tools/evaluation/run_msdc_paper_experiments.py \
 - 速度统计，至少包含总处理帧数、总耗时、平均单帧耗时和平均 FPS。
 - 分阶段耗时，至少拆分为读取/解码、低阈值检测、高阈值框筛选、lifecycle tracker、可视化渲染、结果写盘/导出；`speed_results.csv` 需包含 `mean_read_decode_ms`、`mean_low_detection_ms`、`mean_high_split_ms`、`mean_low_filter_budget_ms`、`mean_observation_build_ms`、`mean_evidence_update_ms`、`mean_output_nms_ms`、`mean_render_write_ms`，不适用阶段写 `0` 或 `N/A`。
 - 输出路径清单，包括 MOT txt、TrackEval summary、诊断 JSONL/CSV、可视化 MP4 和速度/耗时统计文件。
-- MS-DC 正式和 replay benchmark 会在 per-GT diagnostics 可用时额外写出 `diagnostics/msdc_diagnostic_summary.csv`，汇总低分候选确认、继承、重捕获、碎片化和轨迹断裂诊断。
+- MS-DC 正式和 replay benchmark 会在 per-GT diagnostics 可用时额外写出 `diagnostics/msdc_diagnostic_summary.csv`，汇总低分候选创建/确认/召回、继承机会/成功率、重捕获尝试/机会/成功率、碎片化和轨迹断裂诊断。
 
 正式测试结果必须写入新的时间戳 run 目录。临时 smoke、失败中断、partial 输出要标清楚或清理，避免和正式结果混在一起。
 
@@ -247,7 +251,11 @@ conda run -n ship_detect pytest \
 
 ## 最近维护
 
+- 2026-06-25：`msdc_diagnostic_summary.csv` 的 low-candidate recall 在缺少候选 gid 连接字段时输出 `N/A`，inherit opportunity 只统计显式 opportunity 事件。
+- 2026-06-25：动态 sensitivity replay 的空/稀疏 env override 先继承正式 `msdc_v3` 配置再叠加覆盖，避免 baseline sensitivity 指标落回内部 replay baseline。
+- 2026-06-25：replay 消融汇总新增 `variant_key`，MS-DC replay 即使跳过已完整 MOT txt 也会导出 `effective_config/<tracker>.json`，并补充复用 detection cache 的 ablation-only 命令构造器。
 - 2026-06-24：`msdc_slice_eval.py` 在 diagnostics 根目录缺失或没有 per-GT diagnostics CSV 时会失败退出，避免正式 slice 阶段静默生成空清单。
+- 2026-06-22：删除 `config.py` 中已无代码引用的旧批量抽帧和数据集分类默认参数。
 - 2026-06-22：集中 tracker choices、formal MS-DC 变体名、method labels、speed fields。
 - 2026-06-22：抽出 tracking update helper，统一 `video_main.py` 与 MOT 导出路径的 tracking 分发逻辑。
 - 2026-06-22：删除默认关闭且评测退化的 MS-DC motion seed、ROI redetect、template lock 辅助模块。

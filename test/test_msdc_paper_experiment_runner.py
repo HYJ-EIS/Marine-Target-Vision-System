@@ -13,10 +13,13 @@ from target_module.image_detect_module.constants import FORMAL_FRAME_LIMIT, FORM
 from tools.experiments.run_msdc_ablation import ABLATION_VARIANTS, FORMAL_V3_ENV
 from tools.evaluation import run_msdc_paper_experiments as runner
 from tools.evaluation.run_msdc_paper_experiments import (
+    build_ablation_cache_only_command,
     build_ablation_command,
     build_main_command,
+    build_sensitivity_matrix_command,
     build_sensitivity_command,
     build_slice_command,
+    build_slice_metrics_command,
     build_speed_command,
 )
 
@@ -167,6 +170,33 @@ def test_ablation_command_uses_formal_frame_limit():
     assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
 
 
+def test_ablation_cache_only_command_reuses_detection_cache_without_rendering():
+    cmd = build_ablation_cache_only_command(
+        dataset_roots=["/data/a", "/data/b"],
+        output_root=Path("results/ablation_cache_only"),
+        run_id="ablation_cache_only",
+        source_detection_cache_root=Path("results/main/main_full/detections"),
+        formal_frame_limit=FORMAL_FRAME_LIMIT,
+        progress_interval=500,
+    )
+
+    assert cmd[1] == str(runner._ROOT / "tools" / "evaluation" / "detection_replay_benchmark.py")
+    assert cmd[cmd.index("--run-id") + 1] == "ablation_cache_only"
+    assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == ["msdc_elt"]
+    variants = cmd[cmd.index("--variants") + 1:cmd.index("--formal-frame-limit")]
+    assert FORMAL_MSDC_VARIANT in variants
+    assert "no_low_candidate" in variants
+    assert "no_direct_reacquire" in variants
+    assert "hits_only_no_evidence" in variants
+    assert "--source-detection-cache-root" in cmd
+    assert cmd[cmd.index("--source-detection-cache-root") + 1] == "results/main/main_full/detections"
+    assert "--render-class-source" in cmd
+    assert cmd[cmd.index("--render-class-source") + 1] == "cache"
+    assert "--formal-frame-limit" in cmd
+    assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
+    assert "--render" not in cmd
+
+
 def test_ablation_command_accepts_selected_variants():
     args = runner.parse_args([
         "--ablation-variants",
@@ -223,8 +253,8 @@ def test_speed_command_records_fixed_frame_count():
     assert "msdc_elt" in cmd
 
 
-def test_sensitivity_command_writes_matrix_under_run_root(tmp_path):
-    cmd = build_sensitivity_command(
+def test_sensitivity_matrix_command_writes_matrix_under_run_root(tmp_path):
+    cmd = build_sensitivity_matrix_command(
         output_root=tmp_path / "sensitivity",
         run_id="sensitivity_full",
     )
@@ -235,6 +265,31 @@ def test_sensitivity_command_writes_matrix_under_run_root(tmp_path):
         "--output",
         str(tmp_path / "sensitivity" / "sensitivity_full" / "sensitivity_matrix.csv"),
     ]
+
+
+def test_sensitivity_command_runs_metrics_from_matrix_and_source_cache(tmp_path):
+    cmd = build_sensitivity_command(
+        dataset_roots=["/data/a", "/data/b"],
+        matrix=tmp_path / "sensitivity" / "sensitivity_full" / "sensitivity_matrix.csv",
+        output_root=tmp_path / "sensitivity",
+        run_id="sensitivity_metrics",
+        source_detection_cache_root=tmp_path / "main" / "main_full" / "detections",
+        formal_frame_limit=FORMAL_FRAME_LIMIT,
+        progress_interval=500,
+        render_class_source="cache",
+    )
+
+    assert cmd[1] == str(runner._ROOT / "tools" / "evaluation" / "run_msdc_sensitivity_benchmark.py")
+    assert cmd[cmd.index("--dataset-root") + 1:cmd.index("--matrix")] == ["/data/a", "/data/b"]
+    assert cmd[cmd.index("--matrix") + 1] == str(
+        tmp_path / "sensitivity" / "sensitivity_full" / "sensitivity_matrix.csv"
+    )
+    assert cmd[cmd.index("--source-detection-cache-root") + 1] == str(
+        tmp_path / "main" / "main_full" / "detections"
+    )
+    assert cmd[cmd.index("--run-id") + 1] == "sensitivity_metrics"
+    assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
+    assert cmd[cmd.index("--render-class-source") + 1] == "cache"
 
 
 def test_slice_command_writes_manifest_under_slice_root(tmp_path):
@@ -252,6 +307,39 @@ def test_slice_command_writes_manifest_under_slice_root(tmp_path):
         str(tmp_path / "slice" / "slice_manifest.csv"),
         "--max-len",
         "30",
+    ]
+
+
+def test_slice_metrics_command_uses_ablation_full_by_default(tmp_path):
+    cmd = build_slice_metrics_command(run_root=tmp_path / "formal")
+
+    assert cmd == [
+        sys.executable,
+        str(runner._ROOT / "tools" / "evaluation" / "msdc_slice_metrics.py"),
+        "--slice-manifest",
+        str(tmp_path / "formal" / "slice" / "slice_manifest.csv"),
+        "--ablation-root",
+        str(tmp_path / "formal" / "ablation" / "ablation_full"),
+        "--output-root",
+        str(tmp_path / "formal" / "slice" / "slice_metrics"),
+    ]
+
+
+def test_slice_metrics_command_can_target_ablation_cache_root(tmp_path):
+    cmd = build_slice_metrics_command(
+        run_root=tmp_path / "formal",
+        ablation_run_id="ablation_cache_full",
+    )
+
+    assert cmd == [
+        sys.executable,
+        str(runner._ROOT / "tools" / "evaluation" / "msdc_slice_metrics.py"),
+        "--slice-manifest",
+        str(tmp_path / "formal" / "slice" / "slice_manifest.csv"),
+        "--ablation-root",
+        str(tmp_path / "formal" / "ablation" / "ablation_cache_full"),
+        "--output-root",
+        str(tmp_path / "formal" / "slice" / "slice_metrics"),
     ]
 
 
@@ -314,7 +402,16 @@ def test_formal_success_writes_latest_after_all_commands(tmp_path, monkeypatch):
 
     runner.main(["--run-formal", "--output-root", str(tmp_path / "runs"), "--run-id", "formal", "--speed-frames", "7"])
 
-    assert [label for label, _ in calls] == ["main", "ablation", "slice", "speed", "sensitivity", "summary"]
+    assert [label for label, _ in calls] == [
+        "main",
+        "ablation",
+        "slice",
+        "slice_metrics",
+        "speed",
+        "sensitivity_matrix",
+        "sensitivity_metrics",
+        "summary",
+    ]
     latest = json.loads((tmp_path / "runs" / "latest_run.json").read_text(encoding="utf-8"))
     assert latest["run_root"] == str(tmp_path / "runs" / "formal")
     assert latest["main_root"] == str(tmp_path / "runs" / "formal" / "main" / "main_full")
@@ -343,7 +440,7 @@ def test_formal_failure_does_not_write_latest(tmp_path, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         runner.main(["--run-formal", "--output-root", str(output_root), "--run-id", "formal"])
 
-    assert [label for label, _ in calls] == ["main", "ablation", "slice", "speed"]
+    assert [label for label, _ in calls] == ["main", "ablation", "slice", "slice_metrics", "speed"]
     assert not (output_root / "latest_run.json").exists()
 
 

@@ -11,6 +11,7 @@ if str(_ROOT) not in sys.path:
 from tools.evaluation.msdc_experiment_summary import (
     METHOD_LABELS,
     SPEED_FIELDS,
+    _ablation_switches,
     build_analysis_text,
     load_metric_rows,
     main as summary_main,
@@ -36,7 +37,12 @@ def _write_summary(path: Path) -> None:
     ])
 
 
-def _run_summary_cli(monkeypatch, tmp_path: Path, speed_csv: Path | None = None) -> tuple[Path, Path, Path]:
+def _run_summary_cli(
+    monkeypatch,
+    tmp_path: Path,
+    speed_csv: Path | None = None,
+    with_optional_sources: bool = False,
+) -> tuple[Path, Path, Path]:
     main_root = tmp_path / "main"
     ablation_root = tmp_path / "ablation"
     output_root = tmp_path / "summary"
@@ -44,6 +50,27 @@ def _run_summary_cli(monkeypatch, tmp_path: Path, speed_csv: Path | None = None)
     docs_output = tmp_path / "docs" / "MSDC_EXPERIMENT_RESULT.md"
     _write_summary(main_root / "eval" / "motchallenge_summary.csv")
     _write_summary(ablation_root / "eval" / "motchallenge_summary.csv")
+    if with_optional_sources:
+        _write_csv(
+            tmp_path / "sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv",
+            [{"tracker": "msdc_v3_replay", "MOTA": "42", "IDF1": "52"}],
+        )
+        _write_csv(
+            tmp_path / "slice/slice_metrics/slice_metrics.csv",
+            [{"slice_id": "short_gap_1", "tracker": "msdc_v3_replay", "MOTA": "41"}],
+        )
+        _write_csv(
+            main_root / "diagnostics/msdc_diagnostic_summary.csv",
+            [
+                {
+                    "seq_name": "seq",
+                    "tracker": "msdc_v3_replay",
+                    "low_candidate_opportunities": "10",
+                    "reacquire_opportunities": "N/A",
+                    "inherit_opportunities": "5",
+                }
+            ],
+        )
 
     argv = [
         "msdc_experiment_summary.py",
@@ -106,6 +133,36 @@ def test_main_results_include_v3_candidate_topk_no_roi_no_motion_as_msdc_v3(tmp_
 
     assert [row["tracker"] for row in rows] == ["ocsort", "botsort", "v3_candidate_topk_no_roi_no_motion"]
     assert rows[2]["method"] == METHOD_LABELS["v3_candidate_topk_no_roi_no_motion"]
+
+
+def test_main_results_include_replay_tracker_names(tmp_path):
+    summary = tmp_path / "eval" / "motchallenge_summary.csv"
+    _write_csv(summary, [
+        {"tracker": "bytetrack_replay", "HOTA": "9", "DetA": "19", "AssA": "29", "MOTA": "39", "IDF1": "49", "IDSW": "7", "FP": "8", "FN": "9", "IDTP": "10", "IDFP": "11", "IDFN": "12"},
+        {"tracker": "ocsort_replay", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
+        {"tracker": "botsort_replay", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
+        {"tracker": "msdc_v3_replay", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
+    ])
+
+    rows = write_main_results(
+        metric_rows=load_metric_rows(summary),
+        output_csv=tmp_path / "main_results.csv",
+        run_name="main_full",
+        benchmark_root=tmp_path,
+    )
+
+    assert [row["tracker"] for row in rows] == [
+        "bytetrack_replay",
+        "ocsort_replay",
+        "botsort_replay",
+        "msdc_v3_replay",
+    ]
+    assert [row["method"] for row in rows] == [
+        METHOD_LABELS["bytetrack"],
+        METHOD_LABELS["ocsort"],
+        METHOD_LABELS["botsort"],
+        METHOD_LABELS["msdc_v3"],
+    ]
 
 
 def test_ablation_results_keeps_variant_names(tmp_path):
@@ -208,6 +265,33 @@ def test_ablation_results_reports_formal_v3_variant_switches(tmp_path):
     assert by_variant["no_output_nms"]["MSDC_OUTPUT_NMS_ENABLE"] == "0"
     assert by_variant["low_budget_topk16"]["MSDC_LOW_OBS_TOPK"] == "16"
     assert by_variant["low_budget_topk16"]["MSDC_LOW_OBS_MAX_PER_FRAME"] == "32"
+
+
+def test_ablation_switches_normalizes_replay_suffix_for_formal_variants():
+    assert _ablation_switches("no_low_candidate_replay")["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
+    assert _ablation_switches("no_direct_reacquire_replay")["MSDC_USE_REACQUIRE"] == "0"
+    assert _ablation_switches("hits_only_no_evidence_replay")["MSDC_EVIDENCE_MODE"] == "hits_only"
+
+
+def test_ablation_results_include_variant_key_after_variant_for_replay_names(tmp_path):
+    summary = tmp_path / "eval" / "motchallenge_summary.csv"
+    _write_csv(summary, [
+        {"tracker": "no_low_candidate_replay", "HOTA": "60", "DetA": "61", "AssA": "62", "MOTA": "63", "IDF1": "64", "IDSW": "1", "FP": "2", "FN": "3", "IDTP": "4", "IDFP": "5", "IDFN": "6"},
+    ])
+
+    output_csv = tmp_path / "ablation_results.csv"
+    rows = write_ablation_results(
+        metric_rows=load_metric_rows(summary),
+        output_csv=output_csv,
+        run_name="ablation_full",
+        benchmark_root=tmp_path,
+    )
+
+    header = output_csv.read_text(encoding="utf-8-sig").splitlines()[0].split(",")
+    assert header[:3] == ["run_name", "variant", "variant_key"]
+    assert rows[0]["variant"] == "no_low_candidate_replay"
+    assert rows[0]["variant_key"] == "no_low_candidate"
+    assert rows[0]["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
 
 
 def test_analysis_text_reports_direction_without_inventing_values():
@@ -327,6 +411,42 @@ def test_cli_manifest_includes_generated_report_artifacts(tmp_path, monkeypatch)
     assert str(output_root / "analysis_main.md") in paths
     assert str(report_output) in paths
     assert str(docs_output) in paths
+
+
+def test_cli_materializes_optional_sensitivity_slice_and_diagnostic_sources(tmp_path, monkeypatch):
+    output_root, report_output, _ = _run_summary_cli(
+        monkeypatch,
+        tmp_path,
+        with_optional_sources=True,
+    )
+
+    sensitivity_rows = load_metric_rows(output_root / "sensitivity_results.csv")
+    slice_rows = load_metric_rows(output_root / "slice_metrics.csv")
+    diagnostic_rows = load_metric_rows(output_root / "diagnostic_results.csv")
+    report_text = report_output.read_text(encoding="utf-8")
+
+    assert sensitivity_rows == [{"tracker": "msdc_v3_replay", "MOTA": "42", "IDF1": "52"}]
+    assert slice_rows == [{"slice_id": "short_gap_1", "tracker": "msdc_v3_replay", "MOTA": "41"}]
+    assert diagnostic_rows[0]["low_candidate_opportunities"] == "10"
+    assert diagnostic_rows[0]["reacquire_opportunities"] == "N/A"
+    assert "## Sensitivity Results" in report_text
+    assert "## Slice Metrics" in report_text
+    assert "## Diagnostic Results" in report_text
+
+
+def test_cli_materializes_missing_rows_for_absent_optional_sources(tmp_path, monkeypatch):
+    output_root, _, _ = _run_summary_cli(monkeypatch, tmp_path)
+
+    sensitivity_rows = load_metric_rows(output_root / "sensitivity_results.csv")
+    slice_rows = load_metric_rows(output_root / "slice_metrics.csv")
+    diagnostic_rows = load_metric_rows(output_root / "diagnostic_results.csv")
+
+    assert sensitivity_rows[0]["status"] == "missing"
+    assert "sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv" in sensitivity_rows[0]["failure"]
+    assert slice_rows[0]["status"] == "missing"
+    assert "slice/slice_metrics/slice_metrics.csv" in slice_rows[0]["failure"]
+    assert diagnostic_rows[0]["status"] == "missing"
+    assert "diagnostics/msdc_diagnostic_summary.csv" in diagnostic_rows[0]["failure"]
 
 
 def test_v2_ablation_switches_are_reported():

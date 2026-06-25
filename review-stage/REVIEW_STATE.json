@@ -1,0 +1,10 @@
+{
+  "round": 1,
+  "thread_id": "0808d833e029499bb8fd7ff0081c81b0",
+  "status": "completed",
+  "last_score": 9.0,
+  "last_verdict": "almost",
+  "pending_experiments": [],
+  "timestamp": "2026-06-25T18:31:39+08:00",
+  "target": "paper-prepare/检测不稳定条件下小目标 MOT 的证据引导轨迹生命周期管理_v1.md"
+}

@@ -10,14 +10,22 @@ from typing import Iterable
 DIAGNOSTIC_FIELDS = [
     "seq_name",
     "tracker",
+    "low_candidate_created",
     "low_candidate_confirmed",
     "low_candidate_precision",
+    "low_candidate_opportunities",
     "low_candidate_recall",
+    "low_candidate_recall_reason",
     "low_candidate_avg_confirm_delay",
+    "inherit_opportunities",
     "inherit_correct",
     "inherit_wrong",
     "inherit_ambiguous",
+    "inherit_success_rate",
+    "reacquire_attempts",
+    "reacquire_opportunities",
     "reacquire_success",
+    "reacquire_success_rate",
     "fragmentation_count",
     "track_break_count",
     "idsw_before_reacquire_inherit",
@@ -33,6 +41,12 @@ _LOW_CONFIRM_EVENTS = {
 }
 _LOW_INHERIT_EVENTS = {"LOW_CANDIDATE_INHERITED", "LOW_CANDIDATE_INHERITED_LOST"}
 _REACQUIRE_EVENTS = {"REACQUIRED", "LOST_REACQUIRED", "REACQUIRE_LOST"}
+_REACQUIRE_ATTEMPT_EVENTS = {"REACQUIRE_ATTEMPT", "LOST_REACQUIRE_ATTEMPT"}
+_REACQUIRE_OPPORTUNITY_EVENTS = {"REACQUIRE_OPPORTUNITY", "LOST_REACQUIRE_OPPORTUNITY"}
+_INHERIT_OPPORTUNITY_EVENTS = {
+    "LOW_INHERIT_OPPORTUNITY",
+    "INHERIT_OPPORTUNITY",
+}
 
 
 def _read_jsonl(path: str | Path) -> list[dict]:
@@ -73,19 +87,22 @@ def summarize_msdc_diagnostics(
     per_gt_diagnostics_path: str | Path,
 ) -> dict:
     events = _read_jsonl(events_path)
-    _read_jsonl(stage_observations_path)
+    stage_rows = _read_jsonl(stage_observations_path)
     per_gt_rows = _read_csv(per_gt_diagnostics_path)
 
     created_frames: dict[int, int] = {}
     confirmed_gids: set[int] = set()
     confirm_delays: list[int] = []
+    inherit_opportunities = 0
     inherit_correct = 0
     inherit_wrong = 0
     inherit_ambiguous = 0
+    reacquire_attempts = 0
+    reacquire_opportunities = 0
     reacquire_success = 0
 
     for event in events:
-        event_type = str(event.get("event_type", ""))
+        event_type = str(event.get("event_type", "")).strip().upper()
         gid = _coerce_int(event.get("gid"))
         frame_idx = _coerce_int(event.get("frame_idx"))
         extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
@@ -109,6 +126,15 @@ def summarize_msdc_diagnostics(
             else:
                 inherit_ambiguous += 1
 
+        if event_type in _INHERIT_OPPORTUNITY_EVENTS:
+            inherit_opportunities += 1
+
+        if event_type in _REACQUIRE_ATTEMPT_EVENTS:
+            reacquire_attempts += 1
+
+        if event_type in _REACQUIRE_OPPORTUNITY_EVENTS:
+            reacquire_opportunities += 1
+
         if event_type in _REACQUIRE_EVENTS:
             reacquire_success += 1
 
@@ -121,18 +147,35 @@ def summarize_msdc_diagnostics(
 
     created_count = len(created_frames)
     confirmed_count = len(confirm_delays)
+    low_opportunities, low_recall, low_recall_reason = _low_candidate_recall(stage_rows, confirmed_gids)
     avg_delay = round(sum(confirm_delays) / confirmed_count, 4) if confirmed_count else 0.0
     return {
         "seq_name": "",
         "tracker": "",
+        "low_candidate_created": int(created_count),
         "low_candidate_confirmed": int(confirmed_count),
         "low_candidate_precision": round(confirmed_count / created_count, 4) if created_count else "N/A",
-        "low_candidate_recall": "N/A",
+        "low_candidate_opportunities": int(low_opportunities),
+        "low_candidate_recall": low_recall,
+        "low_candidate_recall_reason": low_recall_reason,
         "low_candidate_avg_confirm_delay": avg_delay,
+        "inherit_opportunities": int(inherit_opportunities),
         "inherit_correct": int(inherit_correct),
         "inherit_wrong": int(inherit_wrong),
         "inherit_ambiguous": int(inherit_ambiguous),
+        "inherit_success_rate": (
+            round(inherit_correct / inherit_opportunities, 4)
+            if inherit_opportunities
+            else "N/A"
+        ),
+        "reacquire_attempts": int(reacquire_attempts),
+        "reacquire_opportunities": int(reacquire_opportunities),
         "reacquire_success": int(reacquire_success),
+        "reacquire_success_rate": (
+            round(reacquire_success / reacquire_opportunities, 4)
+            if reacquire_opportunities
+            else "N/A"
+        ),
         "fragmentation_count": int(fragmentation_count),
         "track_break_count": int(track_break_count),
         "idsw_before_reacquire_inherit": "N/A",
@@ -153,6 +196,56 @@ def write_msdc_diagnostic_summary(output_path: str | Path, rows: Iterable[dict])
     return output_path
 
 
+def _low_candidate_recall(stage_rows: list[dict], confirmed_gids: set[int]) -> tuple[int, float | str, str]:
+    has_gt_overlap_data = False
+    missing_join_data = False
+    opportunity_gt_ids: set[int] = set()
+    confirmed_gt_ids: set[int] = set()
+
+    for row in stage_rows:
+        for box in _stage_boxes(row):
+            if str(box.get("stage", "")) != "low_only":
+                continue
+            gt_id = _coerce_int(box.get("gt_id"))
+            iou = _coerce_float(box.get("iou"))
+            if gt_id is None or iou is None:
+                continue
+            has_gt_overlap_data = True
+            if iou < 0.3:
+                continue
+            # Count each GT object once across the sequence, avoiding per-frame inflation.
+            opportunity_gt_ids.add(gt_id)
+            low_gid = _stage_low_candidate_gid(box)
+            if low_gid is None:
+                missing_join_data = True
+                continue
+            if low_gid in confirmed_gids:
+                confirmed_gt_ids.add(gt_id)
+
+    if not has_gt_overlap_data:
+        return 0, "N/A", "missing_stage_gt_overlap"
+    if not opportunity_gt_ids:
+        return 0, "N/A", ""
+    if missing_join_data:
+        return len(opportunity_gt_ids), "N/A", "missing_low_candidate_join"
+    return len(opportunity_gt_ids), round(len(confirmed_gt_ids) / len(opportunity_gt_ids), 4), ""
+
+
+def _stage_boxes(row: dict) -> list[dict]:
+    boxes = row.get("boxes")
+    if isinstance(boxes, list):
+        return [box for box in boxes if isinstance(box, dict)]
+    return [row]
+
+
+def _stage_low_candidate_gid(box: dict) -> int | None:
+    for key in ("low_candidate_gid", "gid", "track_gid", "track_id"):
+        value = _coerce_int(box.get(key))
+        if value is not None:
+            return value
+    return None
+
+
 def _event_low_candidate_gid(event: dict) -> int | None:
     extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
     for key in ("low_candidate_gid", "merged_low_candidate_gid"):
@@ -169,6 +262,15 @@ def _inherit_result(value: object) -> str:
     if result in {"wrong", "incorrect", "false", "0", "no"}:
         return "wrong"
     return "ambiguous"
+
+
+def _coerce_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _coerce_int(value: object) -> int | None:

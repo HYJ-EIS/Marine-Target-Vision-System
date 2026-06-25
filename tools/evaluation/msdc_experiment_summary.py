@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -173,8 +174,14 @@ PATH_PATTERNS = [
     ("trackeval_summary", "**/eval/motchallenge_summary.csv"),
     ("summary_csv", "**/main_results.csv"),
     ("summary_csv", "**/ablation_results.csv"),
+    ("summary_csv", "**/sensitivity_results.csv"),
+    ("summary_csv", "**/slice_metrics.csv"),
+    ("summary_csv", "**/diagnostic_results.csv"),
+    ("sensitivity_metrics_csv", "**/sensitivity_metrics/eval/motchallenge_summary.csv"),
+    ("slice_metrics_csv", "**/slice_metrics/slice_metrics.csv"),
     ("diagnostic_csv", "**/diagnostics/**/*.csv"),
     ("diagnostic_jsonl", "**/trackers/*/diagnostics/**/*.jsonl"),
+    ("effective_config_json", "**/effective_config/*.json"),
     ("visualization_mp4", "**/visualizations/**/*.mp4"),
     ("speed_csv", "**/speed_results.csv"),
     ("metadata_json", "**/run_metadata.json"),
@@ -234,6 +241,18 @@ def _artifact_path(root: str | Path, tracker: str, suffix: str) -> str:
     return str(matches[0]) if matches else "N/A"
 
 
+def _main_tracker_key(tracker: str) -> str:
+    if tracker.endswith("_replay"):
+        return tracker[:-len("_replay")]
+    return tracker
+
+
+def _variant_key_from_tracker(tracker: str) -> str:
+    if tracker.endswith("_replay"):
+        return tracker[:-len("_replay")]
+    return tracker
+
+
 def write_main_results(
     metric_rows: list[dict],
     output_csv: str | Path,
@@ -244,11 +263,12 @@ def write_main_results(
     rows = []
     for metric in metric_rows:
         tracker = metric.get("tracker", "")
-        if tracker not in MAIN_TRACKERS:
+        tracker_key = _main_tracker_key(tracker)
+        if tracker_key not in MAIN_TRACKERS:
             continue
         rows.append({
             "run_name": run_name,
-            "method": METHOD_LABELS.get(tracker, tracker),
+            "method": METHOD_LABELS.get(tracker_key, METHOD_LABELS.get(tracker, tracker)),
             "tracker": tracker,
             **{field: _metric_value(metric, field) for field in METRIC_FIELDS},
             "mot_result_path": _artifact_path(benchmark_root, tracker, "data/*.txt"),
@@ -261,17 +281,18 @@ def write_main_results(
 
 
 def _ablation_switches(variant: str) -> dict[str, str]:
+    variant_key = _variant_key_from_tracker(variant)
     switches = {field: "N/A" for field in ABLATION_FIELDS}
-    if variant in FORMAL_ABLATION_VARIANTS:
+    if variant_key in FORMAL_ABLATION_VARIANTS:
         switches.update({
             "MSDC_REUSE_GUARD_ENABLE": "True",
             "MSDC_EVIDENCE_MODE": "score",
         })
-        switches.update({key: str(value) for key, value in FORMAL_ABLATION_VARIANTS[variant].items()})
+        switches.update({key: str(value) for key, value in FORMAL_ABLATION_VARIANTS[variant_key].items()})
         return switches
 
     switches.update(ABLATION_SWITCH_DEFAULTS)
-    switches.update(ABLATION_SWITCH_OVERRIDES.get(variant, {}))
+    switches.update(ABLATION_SWITCH_OVERRIDES.get(variant_key, {}))
     return switches
 
 
@@ -285,9 +306,11 @@ def write_ablation_results(
     rows = []
     for metric in metric_rows:
         variant = metric.get("tracker", "")
+        variant_key = _variant_key_from_tracker(variant)
         rows.append({
             "run_name": run_name,
             "variant": variant,
+            "variant_key": variant_key,
             **_ablation_switches(variant),
             **{field: _metric_value(metric, field) for field in METRIC_FIELDS},
             "mot_result_path": _artifact_path(benchmark_root, variant, "data/*.txt"),
@@ -297,6 +320,7 @@ def write_ablation_results(
     fields = [
         "run_name",
         "variant",
+        "variant_key",
         *ABLATION_FIELDS,
         *METRIC_FIELDS,
         "mot_result_path",
@@ -436,6 +460,50 @@ def _materialize_speed_csv(speed_csv: str | Path | None, output_csv: Path) -> li
     return _write_missing_speed_csv(output_csv, str(source))
 
 
+def _materialize_optional_csv(source_csv: str | Path, output_csv: Path) -> list[dict]:
+    source = Path(source_csv)
+    if not source.is_file():
+        rows = [{"status": "missing", "failure": str(source)}]
+        _write_csv(output_csv, rows, ["status", "failure"])
+        return rows
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, output_csv)
+    return _read_csv(output_csv)
+
+
+def _first_existing_path(candidates: list[Path], fallback: Path) -> Path:
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return fallback
+
+
+def _resolve_sensitivity_metrics_csv(args: argparse.Namespace, run_root: Path) -> Path:
+    if args.sensitivity_root:
+        source = Path(args.sensitivity_root)
+        if source.is_file():
+            return source
+        return source / "sensitivity_metrics" / "eval" / "motchallenge_summary.csv"
+    return run_root / "sensitivity" / "sensitivity_metrics" / "eval" / "motchallenge_summary.csv"
+
+
+def _resolve_slice_metrics_csv(args: argparse.Namespace, run_root: Path) -> Path:
+    if args.slice_metrics_csv:
+        return Path(args.slice_metrics_csv)
+    return run_root / "slice" / "slice_metrics" / "slice_metrics.csv"
+
+
+def _resolve_diagnostic_csv(args: argparse.Namespace, main_root: Path) -> Path:
+    if args.diagnostic_csv:
+        return Path(args.diagnostic_csv)
+    fallback = main_root / "diagnostics" / "msdc_diagnostic_summary.csv"
+    return _first_existing_path(
+        [fallback, *sorted(main_root.glob("**/diagnostics/msdc_diagnostic_summary.csv"))],
+        fallback,
+    )
+
+
 def _markdown_table(rows: list[dict], fields: list[str]) -> str:
     if not rows:
         rows = [{field: "N/A" for field in fields}]
@@ -493,6 +561,14 @@ def _speed_failure_lines(speed_rows: list[dict]) -> list[str]:
     return lines
 
 
+def _optional_failure_lines(label: str, rows: list[dict]) -> list[str]:
+    lines = []
+    for row in rows:
+        if row.get("status") == "missing" and row.get("failure"):
+            lines.append(f"- {label} result failure: {row['failure']}")
+    return lines
+
+
 def _effectiveness_conclusion(main_rows: list[dict]) -> str:
     focus_name = METHOD_LABELS[MAIN_MSDC_TRACKER]
     focus = next((row for row in main_rows if row.get("method") == focus_name), None)
@@ -528,6 +604,9 @@ def build_report(
     main_rows: list[dict],
     ablation_rows: list[dict],
     speed_rows: list[dict],
+    sensitivity_rows: list[dict],
+    slice_rows: list[dict],
+    diagnostic_rows: list[dict],
     manifest_rows: list[dict],
     metadata_rows: list[dict],
     main_root: Path,
@@ -535,8 +614,11 @@ def build_report(
     output_root: Path,
 ) -> str:
     main_fields = ["run_name", "method", "tracker", *METRIC_FIELDS]
-    ablation_fields = ["run_name", "variant", *ABLATION_FIELDS, *METRIC_FIELDS]
+    ablation_fields = ["run_name", "variant", "variant_key", *ABLATION_FIELDS, *METRIC_FIELDS]
     speed_fields = list(speed_rows[0]) if speed_rows else ["status", "failure"]
+    sensitivity_fields = list(sensitivity_rows[0]) if sensitivity_rows else ["status", "failure"]
+    slice_fields = list(slice_rows[0]) if slice_rows else ["status", "failure"]
+    diagnostic_fields = list(diagnostic_rows[0]) if diagnostic_rows else ["status", "failure"]
     manifest_fields = ["kind", "path"]
     metadata_fields = ["path", "metadata"]
 
@@ -544,6 +626,9 @@ def build_report(
         _missing_metric_lines(main_rows, "method")
         + _missing_metric_lines(ablation_rows, "variant")
         + _speed_failure_lines(speed_rows)
+        + _optional_failure_lines("Sensitivity", sensitivity_rows)
+        + _optional_failure_lines("Slice metrics", slice_rows)
+        + _optional_failure_lines("Diagnostic", diagnostic_rows)
         + _failure_lines([main_root, ablation_root, output_root])
     )
     if not missing_lines:
@@ -559,6 +644,9 @@ def build_report(
         "## Main Results\n\n" + _markdown_table(main_rows, main_fields),
         "## Ablation Results\n\n" + _markdown_table(ablation_rows, ablation_fields),
         "## Speed Results\n\n" + _markdown_table(speed_rows, speed_fields),
+        "## Sensitivity Results\n\n" + _markdown_table(sensitivity_rows, sensitivity_fields),
+        "## Slice Metrics\n\n" + _markdown_table(slice_rows, slice_fields),
+        "## Diagnostic Results\n\n" + _markdown_table(diagnostic_rows, diagnostic_fields),
         "## Output Paths\n\n" + _markdown_table(manifest_rows, manifest_fields),
         "## Missing Metrics and Failures\n\n" + "\n".join(missing_lines),
         "## Cautious Effectiveness Conclusion\n\n" + _effectiveness_conclusion(main_rows),
@@ -570,6 +658,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--main-root", required=True, help="Formal main run root")
     parser.add_argument("--ablation-root", required=True, help="Formal ablation run root")
     parser.add_argument("--speed-csv", default="", help="Optional speed_results.csv path")
+    parser.add_argument(
+        "--sensitivity-root",
+        default="",
+        help="Optional sensitivity root or sensitivity motchallenge_summary.csv path",
+    )
+    parser.add_argument("--slice-metrics-csv", default="", help="Optional slice_metrics.csv path")
+    parser.add_argument("--diagnostic-csv", default="", help="Optional msdc_diagnostic_summary.csv path")
     parser.add_argument("--output-root", required=True, help="Directory for summary CSV and analysis files")
     parser.add_argument("--report-output", required=True, help="Markdown report output path")
     parser.add_argument("--docs-output", required=True, help="Docs markdown result output path")
@@ -581,6 +676,7 @@ def main() -> None:
     main_root = Path(args.main_root)
     ablation_root = Path(args.ablation_root)
     output_root = Path(args.output_root)
+    run_root = output_root.parent
 
     try:
         main_metric_rows, ablation_metric_rows = _preflight_metric_rows(
@@ -607,6 +703,18 @@ def main() -> None:
     )
     speed_source = args.speed_csv or None
     speed_rows = _materialize_speed_csv(speed_source, output_root / "speed_results.csv")
+    sensitivity_source = _resolve_sensitivity_metrics_csv(args, run_root)
+    slice_source = _resolve_slice_metrics_csv(args, run_root)
+    diagnostic_source = _resolve_diagnostic_csv(args, main_root)
+    sensitivity_rows = _materialize_optional_csv(
+        sensitivity_source,
+        output_root / "sensitivity_results.csv",
+    )
+    slice_rows = _materialize_optional_csv(slice_source, output_root / "slice_metrics.csv")
+    diagnostic_rows = _materialize_optional_csv(
+        diagnostic_source,
+        output_root / "diagnostic_results.csv",
+    )
 
     main_baselines = [METHOD_LABELS["ocsort"], METHOD_LABELS["botsort"]]
     analysis_main = build_analysis_text(main_rows, METHOD_LABELS[MAIN_MSDC_TRACKER], main_baselines)
@@ -625,6 +733,7 @@ def main() -> None:
     manifest_roots = [main_root, ablation_root, output_root, report_output.parent, docs_output.parent]
     if speed_source:
         manifest_roots.append(Path(speed_source).parent)
+    manifest_roots.extend([sensitivity_source.parent, slice_source.parent, diagnostic_source.parent])
     report_manifest_rows = _collect_manifest_rows(manifest_roots)
     _append_manifest_path(report_manifest_rows, "report_markdown", report_output, require_exists=False)
     _append_manifest_path(report_manifest_rows, "docs_markdown", docs_output, require_exists=False)
@@ -632,6 +741,9 @@ def main() -> None:
         main_rows=main_rows,
         ablation_rows=ablation_rows,
         speed_rows=speed_rows,
+        sensitivity_rows=sensitivity_rows,
+        slice_rows=slice_rows,
+        diagnostic_rows=diagnostic_rows,
         manifest_rows=report_manifest_rows,
         metadata_rows=metadata_rows,
         main_root=main_root,

@@ -33,6 +33,7 @@ from target_module.image_detect_module.utils.msdc_detection import (
     split_msdc_high_from_low_boxes,
 )
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
+from tools.evaluation.cache_reuse import detection_cache_name, link_detection_cache_for_sequence
 from tools.evaluation.export_mot_results import format_mot_result_line
 from tools.evaluation.motchallenge_eval import run_motchallenge_eval
 from tools.evaluation.msdc_dataset_benchmark import (
@@ -202,6 +203,25 @@ def is_detection_cache_complete(path: str | Path, max_frames: int) -> bool:
         return False
 
 
+def is_detection_cache_contiguous(path: str | Path, max_frames: int) -> bool:
+    path = Path(path)
+    if max_frames <= 0 or not path.is_file():
+        return False
+    try:
+        seen_frames: set[int] = set()
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                frame_id = int(json.loads(line).get("frame_id", 0))
+                if 1 <= frame_id <= max_frames:
+                    seen_frames.add(frame_id)
+        return len(seen_frames) == max_frames
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def is_mot_result_complete(path: str | Path, max_frames: int) -> bool:
     path = Path(path)
     if max_frames <= 0 or not path.is_file():
@@ -327,6 +347,20 @@ def _snapshot_msdc_config() -> dict[str, object]:
     }
 
 
+def write_effective_msdc_config(
+    output_root: str | Path,
+    tracker_name: str,
+    config_snapshot: dict[str, object],
+) -> Path:
+    output_path = Path(output_root) / "effective_config" / f"{tracker_name}.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(config_snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def _apply_config_env(env_delta: dict[str, str]) -> dict[str, object]:
     old_values: dict[str, object] = {}
     for key, value in env_delta.items():
@@ -354,8 +388,12 @@ def _complete_msdc_variant_env(variant: str) -> dict[str, str]:
 
 
 @contextmanager
-def msdc_variant_context(variant: str):
-    env_delta = _complete_msdc_variant_env(variant)
+def msdc_variant_context(variant: str, env_override: dict[str, str] | None = None):
+    if env_override is not None:
+        env_delta = _complete_msdc_variant_env(FORMAL_MSDC_VARIANT)
+        env_delta.update(env_override)
+    else:
+        env_delta = _complete_msdc_variant_env(variant)
     old_config = _snapshot_msdc_config()
     try:
         with temporary_env(env_delta, isolate_msdc=True):
@@ -364,6 +402,26 @@ def msdc_variant_context(variant: str):
             yield
     finally:
         _restore_config(old_config)
+
+
+def write_effective_msdc_variant_config(
+    run_root: str | Path,
+    tracker_name: str,
+    variant: str = "",
+    env_override: dict[str, str] | None = None,
+) -> Path:
+    if variant:
+        with msdc_variant_context(variant, env_override=env_override):
+            return write_effective_msdc_config(run_root, tracker_name, _snapshot_msdc_config())
+
+    old_config: dict[str, object] = {}
+    try:
+        with temporary_env({"MSDC_DEBUG_EVENTS": "1"}):
+            old_config = _apply_config_env({"MSDC_DEBUG_EVENTS": "1"})
+            return write_effective_msdc_config(run_root, tracker_name, _snapshot_msdc_config())
+    finally:
+        if old_config:
+            _restore_config(old_config)
 
 
 def effective_max_frames(args: argparse.Namespace) -> int:
@@ -391,10 +449,11 @@ def replay_tracker_from_cache(
     frame_rate: float,
     max_frames: int,
     progress_interval: int = 0,
+    env_override: dict[str, str] | None = None,
 ) -> Path:
     if tracker_type not in DATASET_EXPORT_TRACKER_CHOICES:
         raise ValueError(f"Unsupported replay tracker: {tracker_type}")
-    if tracker_type == "msdc_elt" and variant and variant not in ABLATION_VARIANTS:
+    if tracker_type == "msdc_elt" and variant and variant not in ABLATION_VARIANTS and env_override is None:
         raise ValueError(f"Unsupported MS-DC replay variant: {variant}")
 
     input_video = Path(input_video)
@@ -416,7 +475,7 @@ def replay_tracker_from_cache(
     old_config: dict[str, object] = {}
     replay_context = nullcontext()
     if tracker_type == "msdc_elt" and variant:
-        replay_context = msdc_variant_context(variant)
+        replay_context = msdc_variant_context(variant, env_override=env_override)
     elif tracker_type == "msdc_elt":
         replay_context = temporary_env({"MSDC_DEBUG_EVENTS": "1"})
     try:
@@ -433,6 +492,11 @@ def replay_tracker_from_cache(
                     file_type=file_type,
                     debug_dir=diagnostics_dir,
                     processor=None,
+                )
+                write_effective_msdc_config(
+                    Path(output_root).parent,
+                    tracker_name,
+                    _snapshot_msdc_config(),
                 )
             else:
                 tracker = MultiObjectTracker(frame_rate=frame_rate, tracker_type=tracker_type)
@@ -484,9 +548,11 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
 
     sequences: list[str] = []
     planned_trackers: list[tuple[str, str, str]] = []
+    dynamic_variant_envs = dict(getattr(args, "dynamic_variant_envs", {}) or {})
     for tracker in args.trackers:
         if tracker == "msdc_elt":
-            for variant in args.variants:
+            variants = list(dynamic_variant_envs) if dynamic_variant_envs else list(args.variants)
+            for variant in variants:
                 planned_trackers.append((tracker, variant, tracker_output_name(tracker, variant)))
         else:
             planned_trackers.append((tracker, "", tracker_output_name(tracker)))
@@ -504,10 +570,28 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
         expected_frames = expected_replay_frames(max_frames, int(info.frame_count))
         sequences.append(spec.seq_name)
         write_motchallenge_gt_sequence(spec, gt_root, info, max_frames=max_frames)
-        cache_path = detections_root / f"{spec.seq_name}_high_low_detections.jsonl"
-        if is_detection_cache_complete(cache_path, expected_frames):
+        source_detection_cache_root = str(getattr(args, "source_detection_cache_root", "") or "")
+        if source_detection_cache_root:
+            cache_path = link_detection_cache_for_sequence(
+                source_detection_cache_root,
+                detections_root,
+                spec.seq_name,
+            )
+        else:
+            cache_path = detections_root / detection_cache_name(spec.seq_name)
+        cache_complete = (
+            is_detection_cache_contiguous(cache_path, expected_frames)
+            if source_detection_cache_root
+            else is_detection_cache_complete(cache_path, expected_frames)
+        )
+        if cache_complete:
             print(f"[SKIP] detection cache complete: {cache_path}", flush=True)
         else:
+            if source_detection_cache_root:
+                raise RuntimeError(
+                    "Incomplete source detection cache for "
+                    f"{spec.seq_name}: {cache_path} does not cover {expected_frames} frames"
+                )
             dump_video_detections(
                 input_video=spec.video_path,
                 output_cache=cache_path,
@@ -516,7 +600,10 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
                 progress_interval=int(args.progress_interval),
             )
         for tracker_type, variant, tracker_name in planned_trackers:
+            env_override = dynamic_variant_envs.get(variant) if variant in dynamic_variant_envs else None
             tracker_file = trackers_root / tracker_name / "data" / f"{spec.seq_name}.txt"
+            if tracker_type == "msdc_elt":
+                write_effective_msdc_variant_config(run_root, tracker_name, variant, env_override=env_override)
             if is_mot_result_complete(tracker_file, expected_frames):
                 print(f"[SKIP] replay MOT complete: {tracker_file}", flush=True)
             else:
@@ -531,6 +618,7 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
                     frame_rate=info.fps,
                     max_frames=max_frames,
                     progress_interval=int(args.progress_interval),
+                    env_override=env_override,
                 )
             diag_dir = diagnostics_root / spec.seq_name
             eval_gt_file = gt_root / spec.seq_name / "gt" / "gt.txt"
@@ -578,6 +666,38 @@ def run_detection_replay_benchmark(args: argparse.Namespace) -> Path:
     return write_replay_summary(run_root, summary)
 
 
+def run_dynamic_msdc_replay_benchmark(
+    *,
+    dataset_root: list[str],
+    output_root: str | Path,
+    run_id: str,
+    dynamic_variant_envs: dict[str, dict[str, str]],
+    source_detection_cache_root: str | Path,
+    formal_frame_limit: int = FORMAL_FRAME_LIMIT,
+    progress_interval: int = 0,
+    render_class_source: str = "cache",
+    render: bool = False,
+) -> Path:
+    args = argparse.Namespace(
+        dataset_root=list(dataset_root),
+        output_root=str(output_root),
+        run_id=run_id,
+        max_frames=300,
+        formal_frame_limit=int(formal_frame_limit),
+        trackers=["msdc_elt"],
+        variants=[],
+        dynamic_variant_envs=dynamic_variant_envs,
+        progress_interval=int(progress_interval),
+        render=bool(render),
+        render_class_source=render_class_source,
+        input="",
+        seq_name="",
+        file_type="",
+        source_detection_cache_root=str(source_detection_cache_root),
+    )
+    return run_detection_replay_benchmark(args)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Replay cached detector boxes through trackers")
     parser.add_argument("--dataset-root", nargs="+", required=True, help="Single-sequence annotation roots")
@@ -603,6 +723,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--input", default="", help="Optional direct input video path for a single dataset")
     parser.add_argument("--seq-name", default="", help="Optional sequence name override for a single dataset")
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
+    parser.add_argument(
+        "--source-detection-cache-root",
+        default="",
+        help="Optional directory containing <seq>_high_low_detections.jsonl caches to reuse",
+    )
     args = parser.parse_args(argv)
     if int(args.max_frames) < 0:
         parser.error("--max-frames must be >= 0")

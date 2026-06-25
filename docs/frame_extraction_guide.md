@@ -1,6 +1,6 @@
 # 抽帧原理、处理流程与参数说明
 
-本文说明当前仓库中批量抽帧脚本 `tools/dataset/extract_tracking_frames.py` 的实际工作方式，重点回答以下问题：
+本文是旧批量抽帧脚本的历史说明。对应的 `tools/dataset/extract_tracking_frames.py` 当前不在仓库中，以下流程只作为旧链路参考，重点回答以下问题：
 
 - 抽帧入口在哪里，处理什么数据
 - 视频是如何被扫描、分组和逐帧处理的
@@ -9,11 +9,11 @@
 - 最终会输出哪些文件
 - 相关参数从哪里来，默认值是什么，调大调小会有什么影响
 
-本文以当前源码真实行为为准，不扩展设计，也不推测未实现功能。
+当前仓库的正式链路以 `video_main.py` 和 `tools/evaluation/` 为准。
 
 ## 1. 功能定位与入口脚本
 
-当前仓库里和“抽帧”直接相关的主入口是 `tools/dataset/extract_tracking_frames.py`。
+历史抽帧主入口是 `tools/dataset/extract_tracking_frames.py`。
 
 它处理的是离线批量视频抽帧，目标是从 `_V` / `_T` 视频中筛出更适合训练或标注的关键帧，并同步导出：
 
@@ -27,7 +27,7 @@
 - `tools/dataset/extract_tracking_frames.py` 面向离线批处理和数据集构建
 - `video_main.py` 面向实时/准实时视频检测与跟踪输出
 
-因此，讨论“当前代码的抽帧原理”时，应以 `tools/dataset/extract_tracking_frames.py` 为准。
+因此，本文只记录旧抽帧链路的设计与参数含义。
 
 ## 2. 输入扫描与视频分组规则
 
@@ -107,10 +107,10 @@
 
 - `ImageProcessor.process_frame(frame, job.file_type, conf_override=...)`
 
-检测置信度不是写死在脚本里，而是由模态决定：
+检测置信度由模态决定：
 
-- 可见光用 `Config.EXTERNAL_FRAMES_VISIBLE_CONF_THRESH`
-- 红外用 `Config.EXTERNAL_FRAMES_INFRARED_CONF_THRESH`
+- 可见光历史默认值为 `0.45`
+- 红外历史默认值为 `0.45`
 
 ### 3.3 目标跟踪
 
@@ -118,11 +118,11 @@
 
 - 跟踪器类型由 `--tracker` 指定
 - 当前可选 `bytetrack`、`ocsort`、`botsort`、`dist_tracker`、`official_ocsort`、`official_botsort`
-- 默认值来自 `Config.EXTERNAL_FRAMES_TRACKER`
+- 历史默认值为 `botsort`
 
-跟踪器初始化时会使用原始视频 FPS：
+跟踪器初始化时会使用原始视频 FPS，历史最小确认次数默认值为 `1`：
 
-- `MultiObjectTracker(frame_rate=fps, tracker_type=args.tracker, min_hits=Config.EXTERNAL_FRAMES_TRACKER_MIN_HITS)`
+- `MultiObjectTracker(frame_rate=fps, tracker_type=args.tracker, min_hits=1)`
 
 ### 3.4 检测框与跟踪框合并
 
@@ -137,7 +137,7 @@
 
 如果当前帧没有检测框，脚本会尝试从跟踪器最近仍有效的轨迹中补出 `recent_tracks`：
 
-- 容忍丢失时间由 `Config.EXTERNAL_FRAMES_TRACKER_MAX_MISSED` 控制
+- 容忍丢失时间历史默认值为 `2` 帧
 
 如果补到了框，本帧会被标记为：
 
@@ -200,12 +200,12 @@
 - 先试 `minAreaRect`
 - 如果形状不够细长，再用 PCA 主方向估计
 
-为避免噪声误触发，姿态角估计还受以下配置约束：
+为避免噪声误触发，姿态角估计还受以下历史默认约束：
 
-- `EXTERNAL_FRAMES_POSE_MIN_PIXELS`
-- `EXTERNAL_FRAMES_POSE_MIN_POINTS`
-- `EXTERNAL_FRAMES_POSE_MIN_ASPECT_RATIO`
-- `EXTERNAL_FRAMES_POSE_MIN_AREA_RATIO`
+- ROI 最小边长 `12`
+- 最少有效点数 `20`
+- 目标最小长宽比 `1.15`
+- 轮廓或边缘点最小面积占比 `0.01`
 
 如果目标太小、太接近方形或有效点太少，则本帧姿态角返回 `None`，不会触发 `pose_angle_change`。
 
@@ -218,11 +218,11 @@
 - `first_detection` 或 `new_track` 直接认为足够新颖
 - 否则要求目标变化达到更强的“新颖性阈值”
 
-这里使用的不是命令行参数，而是更严格的内部配置：
+这里使用的历史默认阈值更严格：
 
-- `EXTERNAL_FRAMES_DETECTION_NOVELTY_MOTION_THRESHOLD`
-- `EXTERNAL_FRAMES_DETECTION_NOVELTY_AREA_THRESHOLD`
-- `EXTERNAL_FRAMES_DETECTION_NOVELTY_POSE_THRESHOLD_DEG`
+- 位移变化阈值 `0.30`
+- 面积变化阈值 `0.20`
+- 姿态角变化阈值 `18.0` 度
 
 这层逻辑的作用是：避免一些轻微运动虽然跨过了基础阈值，但仍频繁触发抽帧。
 
@@ -239,7 +239,7 @@
 
 - 只有满足最小间隔后，才考虑保留 `empty_scene_distinct`
 - 最小间隔按帧数计算：
-  - `fps * EXTERNAL_FRAMES_EMPTY_SCENE_MIN_GAP_SEC`
+  - `fps * 1.0`
 - 同时还要通过空场景 pHash 去重
 
 此外，脚本会把最近一帧空场景保存到 `last_empty_candidate`。如果后续重新检测到目标，且当前不是纯 `tracker_fill`，则会把这张“恢复前最后的空场景”补记为：
@@ -287,9 +287,9 @@
   - `paired_alignment`
 - 如果没有上一张已保留检测帧，也直接保留
 - 否则先比全图 pHash：
-  - 大于 `EXTERNAL_FRAMES_ACTIVE_SCENE_GLOBAL_HASH_THRESHOLD` 则保留
+  - 大于历史阈值 `10` 则保留
 - 如果全图变化不够大，再比目标 ROI pHash：
-  - 大于 `EXTERNAL_FRAMES_ACTIVE_SCENE_TARGET_HASH_THRESHOLD` 才保留
+  - 大于历史阈值 `8` 才保留
 - 如果两者都不够大，则丢弃
 
 空场景使用 `should_keep_by_phash()`：
@@ -507,19 +507,16 @@ class_id x_center y_center width height
 - 定义在 `parse_args()`
 - 适合按任务临时覆盖
 
-2. 配置默认值
+2. 脚本内默认值
 
-- 定义在 `target_module/image_detect_module/config.py`
-- 主要使用 `Config.EXTERNAL_FRAMES_*`
-
-命令行参数如果不显式传入，就会回退到 `Config` 中的默认值。
+旧抽帧脚本不在当前仓库中，对应默认参数也已从 `target_module/image_detect_module/config.py` 删除。
 
 ## 8.2 当前命令行参数
 
 | 参数名 | 默认值 | 作用 | 调大 / 调小影响 |
 | --- | --- | --- | --- |
-| `--input-root` | `Config.EXTERNAL_FRAMES_INPUT_ROOT` | 输入视频根目录 | 只改变扫描范围，不改变抽帧逻辑 |
-| `--output-root` | `Config.EXTERNAL_FRAMES_OUTPUT_ROOT` | 输出目录 | 只影响输出位置 |
+| `--input-root` | 无当前仓库默认值 | 输入视频根目录 | 只改变扫描范围，不改变抽帧逻辑 |
+| `--output-root` | 无当前仓库默认值 | 输出目录 | 只影响输出位置 |
 | `--tracker` | `botsort` | 跟踪器类型 | 更换跟踪器可能改变 `track_id` 稳定性和 `new_track` 触发频率 |
 | `--motion-threshold` | `0.15` | 目标位移触发阈值 | 调大后更不容易触发 `motion_change`；调小后更容易保留运动帧 |
 | `--pose-angle-threshold-deg` | `12.0` | 姿态角变化触发阈值 | 调大后姿态变化更不敏感；调小后更容易保留姿态变化帧 |
@@ -535,55 +532,9 @@ class_id x_center y_center width height
 | `--max-videos` | `0` | 最多处理多少组视频 | 0 表示不限制；调小便于局部试跑 |
 | `--max-frames-per-video` | `0` | 每段视频最多处理多少帧 | 0 表示不限制；调小便于快速验证参数 |
 
-## 8.3 当前关键默认配置
+## 8.3 历史默认配置说明
 
-### 检测与跟踪
-
-| 参数名 | 默认值 | 作用 | 调大 / 调小影响 |
-| --- | --- | --- | --- |
-| `EXTERNAL_FRAMES_VISIBLE_CONF_THRESH` | `0.45` | 可见光检测置信度阈值 | 调大后检测更保守；调小后候选框更多 |
-| `EXTERNAL_FRAMES_INFRARED_CONF_THRESH` | `0.45` | 红外检测置信度阈值 | 调大后红外检测更保守；调小后更容易出框 |
-| `EXTERNAL_FRAMES_TRACKER_MIN_HITS` | `1` | 跟踪器最小确认次数 | 调大后轨迹更稳但更慢出现；调小后更快赋予 `track_id` |
-| `EXTERNAL_FRAMES_TRACKER_MAX_MISSED` | `2` | 最近轨迹补帧可容忍的丢失帧数 | 调大后更容易触发 `tracker_fill`；调小后补帧更少 |
-
-### 活跃目标帧去重
-
-| 参数名 | 默认值 | 作用 | 调大 / 调小影响 |
-| --- | --- | --- | --- |
-| `EXTERNAL_FRAMES_ACTIVE_SCENE_GLOBAL_HASH_THRESHOLD` | `10` | 活跃场景全图 pHash 阈值 | 调大后更难因全图变化保留；调小后更容易保留 |
-| `EXTERNAL_FRAMES_ACTIVE_SCENE_TARGET_HASH_THRESHOLD` | `8` | 活跃场景目标 ROI pHash 阈值 | 调大后目标区域必须变化更明显；调小后更容易保留局部变化 |
-| `EXTERNAL_FRAMES_DETECTION_NOVELTY_MOTION_THRESHOLD` | `0.30` | 强新颖性位移阈值 | 调大后小运动更难保留；调小后更敏感 |
-| `EXTERNAL_FRAMES_DETECTION_NOVELTY_AREA_THRESHOLD` | `0.20` | 强新颖性面积阈值 | 调大后尺度变化更难通过；调小后更易通过 |
-| `EXTERNAL_FRAMES_DETECTION_NOVELTY_POSE_THRESHOLD_DEG` | `18.0` | 强新颖性姿态阈值 | 调大后姿态变化更不敏感；调小后更敏感 |
-
-### 空场景与配对
-
-| 参数名 | 默认值 | 作用 | 调大 / 调小影响 |
-| --- | --- | --- | --- |
-| `EXTERNAL_FRAMES_EMPTY_SCENE_MIN_GAP_SEC` | `1.0` | 空场景保留最小间隔 | 调大后空场景更稀疏；调小后空场景更多 |
-| `EXTERNAL_FRAMES_PAIRED_RGB_REFERENCE` | `True` | 是否默认以 RGB 为 IR 参考 | 打开后双模态时间点更统一；关闭后 IR 更独立 |
-| `EXTERNAL_FRAMES_PAIRED_REFERENCE_INCLUDE_EMPTY_TARGET` | `True` | 配对时是否允许目标模态为空 | 打开后双模态更完整；关闭后更偏向只保留有框样本 |
-
-### 代表帧剪枝
-
-| 参数名 | 默认值 | 作用 | 调大 / 调小影响 |
-| --- | --- | --- | --- |
-| `EXTERNAL_FRAMES_ENABLE_REPRESENTATIVE_PRUNING` | `True` | 是否启用代表帧剪枝 | 打开后输出更少更精；关闭后保留更多候选帧 |
-| `EXTERNAL_FRAMES_REPRESENTATIVE_GLOBAL_HASH_THRESHOLD` | `14` | 代表帧聚类时的全图 pHash 阈值 | 调大后更多帧会被视为相似；调小后 cluster 更容易拆开 |
-| `EXTERNAL_FRAMES_REPRESENTATIVE_TARGET_HASH_THRESHOLD` | `14` | 代表帧聚类时的 ROI pHash 阈值 | 调大后目标局部更容易被视为相似；调小后更容易拆开 |
-| `EXTERNAL_FRAMES_REPRESENTATIVE_MOTION_THRESHOLD` | `0.55` | 代表帧聚类时的位置变化阈值 | 调大后更多近邻帧会聚在一起；调小后会保留更多位移差异帧 |
-| `EXTERNAL_FRAMES_REPRESENTATIVE_AREA_THRESHOLD` | `0.35` | 代表帧聚类时的面积变化阈值 | 调大后更多尺度变化被认为相似；调小后更容易拆 cluster |
-| `EXTERNAL_FRAMES_REPRESENTATIVE_MAX_CLUSTER_SPAN_SEC` | `6.0` | 单个相似 cluster 最大时间跨度 | 调大后更长时间段会被压缩；调小后代表帧更密集 |
-| `EXTERNAL_FRAMES_REPRESENTATIVE_MIN_TIME_GAP_SEC` | `0.6` | 代表帧之间的最小时间间隔 | 调大后最终样本更稀疏；调小后会保留更多相邻关键帧 |
-
-### 姿态角估计质量控制
-
-| 参数名 | 默认值 | 作用 | 调大 / 调小影响 |
-| --- | --- | --- | --- |
-| `EXTERNAL_FRAMES_POSE_MIN_PIXELS` | `12` | ROI 最小边长要求 | 调大后小目标更少参与姿态判断；调小后更容易引入噪声 |
-| `EXTERNAL_FRAMES_POSE_MIN_POINTS` | `20` | 最少有效点数要求 | 调大后姿态估计更保守；调小后更容易从弱轮廓估角 |
-| `EXTERNAL_FRAMES_POSE_MIN_ASPECT_RATIO` | `1.15` | 形状细长度要求 | 调大后更偏向细长目标；调小后更多近方形目标也会尝试估角 |
-| `EXTERNAL_FRAMES_POSE_MIN_AREA_RATIO` | `0.01` | 轮廓或边缘点的最小面积占比 | 调大后更抗噪；调小后更容易从小碎片中估角 |
+旧批量抽帧参数没有当前可执行入口，默认值不再作为 `Config` 属性维护。需要恢复这条链路时，应在新脚本参数或独立配置中重新定义，并同步更新本文。
 
 ## 9. 常见组合配置建议
 

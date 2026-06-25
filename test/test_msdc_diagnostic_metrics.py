@@ -58,13 +58,20 @@ def test_summarize_msdc_diagnostics_reads_events_and_per_gt_rows(tmp_path):
     row = summarize_msdc_diagnostics(events_path, stage_path, per_gt_path)
 
     assert row["low_candidate_confirmed"] == 2
+    assert row["low_candidate_created"] == 3
     assert row["low_candidate_precision"] == round(2 / 3, 4)
     assert row["low_candidate_recall"] == "N/A"
+    assert row["low_candidate_recall_reason"] == "missing_stage_gt_overlap"
     assert row["low_candidate_avg_confirm_delay"] == 3.5
     assert row["inherit_correct"] == 1
     assert row["inherit_wrong"] == 0
     assert row["inherit_ambiguous"] == 0
+    assert row["inherit_opportunities"] == 0
+    assert row["inherit_success_rate"] == "N/A"
     assert row["reacquire_success"] == 1
+    assert row["reacquire_attempts"] == 0
+    assert row["reacquire_opportunities"] == 0
+    assert row["reacquire_success_rate"] == "N/A"
     assert row["fragmentation_count"] == 2
     assert row["track_break_count"] == 2
     assert row["idsw_before_reacquire_inherit"] == "N/A"
@@ -99,6 +106,142 @@ def test_summarize_msdc_diagnostics_supports_current_event_aliases(tmp_path):
     assert row["low_candidate_avg_confirm_delay"] == 3.0
     assert row["inherit_ambiguous"] == 1
     assert row["reacquire_success"] == 2
+
+
+def test_summarize_msdc_diagnostics_reports_low_candidate_recall_and_attempts(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    stage_path = tmp_path / "stage_observations.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(
+        events_path,
+        [
+            {"frame_idx": 0, "gid": 30, "event_type": "NEW_LOW_CANDIDATE"},
+            {
+                "frame_idx": 1,
+                "gid": 30,
+                "event_type": "LOW_CANDIDATE_CONFIRMED",
+                "extra": {"low_candidate_gid": 30},
+            },
+            {"frame_idx": 2, "gid": 99, "event_type": "REACQUIRE_ATTEMPT"},
+        ],
+    )
+    _write_jsonl(
+        stage_path,
+        [
+            {
+                "frame_idx": 0,
+                "boxes": [
+                    {"stage": "low_only", "gid": 30, "gt_id": 7, "iou": 0.45},
+                    {"stage": "low_only", "gid": 31, "gt_id": 8, "iou": 0.29},
+                ],
+            },
+        ],
+    )
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    summary = summarize_msdc_diagnostics(events_path, stage_path, per_gt_path)
+
+    assert summary["low_candidate_created"] == 1
+    assert summary["low_candidate_opportunities"] == 1
+    assert summary["low_candidate_recall"] == 1.0
+    assert summary["low_candidate_recall_reason"] == ""
+    assert summary["reacquire_attempts"] == 1
+
+
+def test_summarize_msdc_diagnostics_marks_missing_stage_gt_overlap(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    stage_path = tmp_path / "stage_observations.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(events_path, [{"frame_idx": 0, "gid": 3, "event_type": "NEW_LOW_CANDIDATE"}])
+    _write_jsonl(stage_path, [{"frame_idx": 0, "boxes": [{"stage": "low_only", "gid": 3, "iou": 0.6}]}])
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    summary = summarize_msdc_diagnostics(events_path, stage_path, per_gt_path)
+
+    assert summary["low_candidate_opportunities"] == 0
+    assert summary["low_candidate_recall"] == "N/A"
+    assert summary["low_candidate_recall_reason"] == "missing_stage_gt_overlap"
+
+
+def test_summarize_msdc_diagnostics_marks_missing_low_candidate_join(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    stage_path = tmp_path / "stage_observations.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(
+        events_path,
+        [
+            {"frame_idx": 0, "gid": 3, "event_type": "NEW_LOW_CANDIDATE"},
+            {"frame_idx": 1, "gid": 3, "event_type": "LOW_CANDIDATE_CONFIRMED"},
+        ],
+    )
+    _write_jsonl(
+        stage_path,
+        [{"frame_idx": 0, "boxes": [{"stage": "low_only", "gt_id": 7, "iou": 0.6}]}],
+    )
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    summary = summarize_msdc_diagnostics(events_path, stage_path, per_gt_path)
+
+    assert summary["low_candidate_opportunities"] == 1
+    assert summary["low_candidate_recall"] == "N/A"
+    assert summary["low_candidate_recall_reason"] == "missing_low_candidate_join"
+
+
+def test_summarize_msdc_diagnostics_does_not_count_ready_low_candidate_as_inherit_opportunity(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(events_path, [{"frame_idx": 1, "gid": 9, "event_type": "READY_LOW_CANDIDATE"}])
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    summary = summarize_msdc_diagnostics(events_path, tmp_path / "missing_stage.jsonl", per_gt_path)
+
+    assert summary["inherit_opportunities"] == 0
+    assert summary["inherit_success_rate"] == "N/A"
+
+
+def test_summarize_msdc_diagnostics_preserves_zero_success_with_positive_opportunities(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(
+        events_path,
+        [
+            {"frame_idx": 1, "gid": 10, "event_type": "REACQUIRE_OPPORTUNITY"},
+            {"frame_idx": 2, "gid": 11, "event_type": "LOW_INHERIT_OPPORTUNITY"},
+        ],
+    )
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    summary = summarize_msdc_diagnostics(events_path, tmp_path / "missing_stage.jsonl", per_gt_path)
+
+    assert summary["reacquire_opportunities"] == 1
+    assert summary["reacquire_success_rate"] == 0.0
+    assert summary["inherit_opportunities"] == 1
+    assert summary["inherit_success_rate"] == 0.0
+
+
+def test_summarize_msdc_diagnostics_reports_opportunity_success_rates(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(
+        events_path,
+        [
+            {"frame_idx": 1, "gid": 10, "event_type": "REACQUIRE_OPPORTUNITY"},
+            {"frame_idx": 2, "gid": 10, "event_type": "REACQUIRED"},
+            {"frame_idx": 3, "gid": 20, "event_type": "INHERIT_OPPORTUNITY"},
+            {
+                "frame_idx": 4,
+                "gid": 21,
+                "event_type": "LOW_CANDIDATE_INHERITED",
+                "extra": {"inherit_result": "correct"},
+            },
+        ],
+    )
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    summary = summarize_msdc_diagnostics(events_path, tmp_path / "missing_stage.jsonl", per_gt_path)
+
+    assert summary["reacquire_success_rate"] == 1.0
+    assert summary["inherit_success_rate"] == 1.0
 
 
 def test_summarize_msdc_diagnostics_skips_malformed_jsonl_lines(tmp_path):

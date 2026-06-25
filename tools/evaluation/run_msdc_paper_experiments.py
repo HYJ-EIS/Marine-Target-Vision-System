@@ -54,8 +54,16 @@ def _sensitivity_matrix_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_sensitivity_matrix.py")
 
 
+def _sensitivity_benchmark_script() -> str:
+    return str(_ROOT / "tools" / "evaluation" / "run_msdc_sensitivity_benchmark.py")
+
+
 def _slice_eval_script() -> str:
     return str(_ROOT / "tools" / "evaluation" / "msdc_slice_eval.py")
+
+
+def _slice_metrics_script() -> str:
+    return str(_ROOT / "tools" / "evaluation" / "msdc_slice_metrics.py")
 
 
 def _summary_script() -> str:
@@ -134,6 +142,38 @@ def build_ablation_command(
     return cmd
 
 
+def build_ablation_cache_only_command(
+    dataset_roots: list[str],
+    output_root: Path,
+    run_id: str,
+    source_detection_cache_root: str | Path,
+    formal_frame_limit: int,
+    progress_interval: int,
+) -> list[str]:
+    return [
+        sys.executable,
+        _detection_replay_script(),
+        "--dataset-root",
+        *[str(path) for path in dataset_roots],
+        "--output-root",
+        str(output_root),
+        "--run-id",
+        run_id,
+        "--trackers",
+        "msdc_elt",
+        "--variants",
+        *ABLATION_VARIANTS,
+        "--formal-frame-limit",
+        str(int(formal_frame_limit)),
+        "--progress-interval",
+        str(progress_interval),
+        "--source-detection-cache-root",
+        str(source_detection_cache_root),
+        "--render-class-source",
+        "cache",
+    ]
+
+
 def build_speed_command(
     dataset_root: str,
     output_root: Path,
@@ -162,12 +202,44 @@ def build_speed_command(
     ]
 
 
-def build_sensitivity_command(output_root: Path, run_id: str) -> list[str]:
+def build_sensitivity_matrix_command(output_root: Path, run_id: str) -> list[str]:
     return [
         sys.executable,
         _sensitivity_matrix_script(),
         "--output",
         str(output_root / run_id / "sensitivity_matrix.csv"),
+    ]
+
+
+def build_sensitivity_command(
+    dataset_roots: list[str],
+    matrix: str | Path,
+    output_root: Path,
+    run_id: str,
+    source_detection_cache_root: str | Path,
+    formal_frame_limit: int,
+    progress_interval: int,
+    render_class_source: str = "cache",
+) -> list[str]:
+    return [
+        sys.executable,
+        _sensitivity_benchmark_script(),
+        "--dataset-root",
+        *[str(path) for path in dataset_roots],
+        "--matrix",
+        str(matrix),
+        "--output-root",
+        str(output_root),
+        "--run-id",
+        run_id,
+        "--formal-frame-limit",
+        str(int(formal_frame_limit)),
+        "--progress-interval",
+        str(progress_interval),
+        "--render-class-source",
+        render_class_source,
+        "--source-detection-cache-root",
+        str(source_detection_cache_root),
     ]
 
 
@@ -181,6 +253,19 @@ def build_slice_command(diagnostics_root: Path, output_root: Path) -> list[str]:
         str(output_root / "slice_manifest.csv"),
         "--max-len",
         "30",
+    ]
+
+
+def build_slice_metrics_command(run_root: Path, ablation_run_id: str = "ablation_full") -> list[str]:
+    return [
+        sys.executable,
+        _slice_metrics_script(),
+        "--slice-manifest",
+        str(run_root / "slice" / "slice_manifest.csv"),
+        "--ablation-root",
+        str(run_root / "ablation" / ablation_run_id),
+        "--output-root",
+        str(run_root / "slice" / "slice_metrics"),
     ]
 
 
@@ -328,6 +413,7 @@ def build_latest_payload(
     slice_manifest_csv = slice_output_root / "slice_manifest.csv"
     speed_root = speed_output_root / f"speed_{frames}"
     sensitivity_csv = sensitivity_output_root / "sensitivity_full" / "sensitivity_matrix.csv"
+    sensitivity_metrics_root = sensitivity_output_root / "sensitivity_metrics"
     return {
         "run_root": _absolute_path(run_root),
         "main_results_csv": _absolute_path(summary_output_root / "main_results.csv"),
@@ -335,6 +421,7 @@ def build_latest_payload(
         "speed_results_csv": _absolute_path(summary_output_root / "speed_results.csv"),
         "slice_manifest_csv": _absolute_path(slice_manifest_csv),
         "sensitivity_matrix_csv": _absolute_path(sensitivity_csv),
+        "sensitivity_metrics_root": _absolute_path(sensitivity_metrics_root),
         "report_path": _absolute_path(run_root / "MSDC_EXPERIMENT_REPORT.md"),
         "docs_result_path": _absolute_path(_ROOT / "docs" / "MSDC_EXPERIMENT_RESULT.md"),
         "main_root": _absolute_path(main_root),
@@ -447,14 +534,28 @@ def main(argv: list[str] | None = None) -> None:
         frames=int(args.speed_frames),
         progress_interval=int(args.progress_interval),
     )
-    sensitivity_cmd = build_sensitivity_command(
+    sensitivity_matrix_run_id = "sensitivity_full"
+    sensitivity_metrics_run_id = "sensitivity_metrics"
+    sensitivity_matrix_path = sensitivity_output_root / sensitivity_matrix_run_id / "sensitivity_matrix.csv"
+    sensitivity_matrix_cmd = build_sensitivity_matrix_command(
         output_root=sensitivity_output_root,
-        run_id="sensitivity_full",
+        run_id=sensitivity_matrix_run_id,
+    )
+    sensitivity_cmd = build_sensitivity_command(
+        dataset_roots=list(args.dataset_root),
+        matrix=sensitivity_matrix_path,
+        output_root=sensitivity_output_root,
+        run_id=sensitivity_metrics_run_id,
+        source_detection_cache_root=main_output_root / "main_full" / "detections",
+        formal_frame_limit=int(args.formal_frame_limit),
+        progress_interval=int(args.progress_interval),
+        render_class_source=str(args.render_class_source),
     )
     slice_cmd = build_slice_command(
         diagnostics_root=ablation_output_root / "ablation_full" / "diagnostics",
         output_root=slice_output_root,
     )
+    slice_metrics_cmd = build_slice_metrics_command(run_root)
 
     summary_cmd = build_summary_command(
         main_root=main_output_root / "main_full",
@@ -469,8 +570,10 @@ def main(argv: list[str] | None = None) -> None:
         ("main", main_cmd),
         ("ablation", ablation_cmd),
         ("slice", slice_cmd),
+        ("slice_metrics", slice_metrics_cmd),
         ("speed", speed_cmd),
-        ("sensitivity", sensitivity_cmd),
+        ("sensitivity_matrix", sensitivity_matrix_cmd),
+        ("sensitivity_metrics", sensitivity_cmd),
         ("summary", summary_cmd),
     ]
     if not args.run_formal:

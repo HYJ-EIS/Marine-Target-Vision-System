@@ -13,12 +13,7 @@ conda run -n ship_detect python <script> ...
 
 ## dataset
 
-`tools/dataset/` 放数据集整理工具，面向“生成、清理、检查训练数据”的离线流程。
-
-- `extract_tracking_frames.py`：从 `_V` / `_T` 视频抽代表帧并导出 YOLO 标签
-- `video_dataset_classify.py`：按时间窗分析原始视频数据质量、场景和目标分布
-
-详细用法见 `tools/dataset/README.md`。
+旧 `tools/dataset/` 离线数据集整理脚本当前不在仓库中。新增数据整理工具时再恢复该目录，并在脚本内维护对应默认参数。
 
 ## validation
 
@@ -35,21 +30,20 @@ conda run -n ship_detect python <script> ...
 - `export_mot_results.py`：把项目 tracker 输出导出为 `<tracker>/data/<seq>.txt`
 - `motchallenge_eval.py`：调用 vendored TrackEval 计算 HOTA、MOTA、IDF1
 - `msdc_dataset_benchmark.py`：解析双单序列标注数据集，编排 MOT 导出、TrackEval、诊断和可选可视化
-- `detection_replay_benchmark.py`：先缓存 high/low detector 输出，再回放给 baseline 与 MS-DC-ELT，保证主实验和消融使用同一 detector 输入。
+- `detection_replay_benchmark.py`：先缓存 high/low detector 输出，再回放给 baseline 与 MS-DC-ELT，保证主实验和消融使用同一 detector 输入；replay 可视化默认从缓存取类别并可跳过已完整产物以恢复中断 run。
 - `msdc_speed_benchmark.py`：在不渲染、不发 MQ、不跑 TrackEval 的条件下，对 OC-SORT、BoT-SORT、MS-DC-ELT 做固定帧数速度统计
 - `msdc_diagnostic_metrics.py`：汇总 low_candidate、inherit、reacquire、fragmentation 和 track break 诊断指标。
-- `msdc_experiment_summary.py`：把 TrackEval summary、速度结果和输出路径汇总为论文实验 CSV 与 Markdown 报告
+- `msdc_experiment_summary.py`：把 TrackEval summary、速度、敏感性、slice、诊断结果和输出路径汇总为论文实验 CSV 与 Markdown 报告；缺失的可选源文件只写 `status=missing`/`failure=<path>`，不补造指标。
 - `msdc_slice_eval.py`：从 per-GT diagnostics 生成短时漏检/低置信片段切片清单。
 - `msdc_sensitivity_matrix.py`：输出 v3 超参数敏感性扫描矩阵。
 - `validate_msdc_formal_run.py`：校验正式 run 的 MOT、TrackEval、诊断、slice、速度、敏感性和 summary/manifest 产物
 - `run_msdc_paper_experiments.py`：编排 MS-DC-ELT 论文第一阶段 main、ablation、slice、speed、sensitivity 与 summary/validation 流程；默认只打印计划命令，正式运行需显式传 `--run-formal`
 
+formal v3 完成标准：`summary/` 必须物化 `main_results.csv`、`ablation_results.csv`、`speed_results.csv`、`sensitivity_results.csv`、`slice_metrics.csv`、`diagnostic_results.csv` 和 `path_manifest.csv`。`ablation_results.csv` 必须包含 `variant_key`，run 内必须存在 `**/effective_config/*.json`；`sensitivity_results.csv` 来自 `sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv` 且保留每个 sensitivity point 的真实指标；`slice_metrics.csv` 来自 `slice/slice_metrics/slice_metrics.csv`；`diagnostic_results.csv` 来自 `msdc_diagnostic_summary.csv`，并包含 low_candidate、reacquire、inherit 的 denominators/opportunities 字段及对应成功/错误/歧义计数。
+
 ## tests
 
-自动化单元测试保留在仓库根目录的 `test/` 下。当前主要是：
-
-- `test/test_extract_tracking_frames.py`
-- `test/test_video_dataset_classify.py`
+自动化单元测试保留在仓库根目录的 `test/` 下，当前主要覆盖正式评测、MS-DC 变体常量和 benchmark 编排逻辑。
 
 运行：
 

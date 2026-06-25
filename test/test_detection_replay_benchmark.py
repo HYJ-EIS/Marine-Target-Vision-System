@@ -2,10 +2,12 @@ import csv
 import json
 import os
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -18,6 +20,7 @@ from tools.evaluation.detection_replay_benchmark import (
     effective_max_frames,
     expected_replay_frames,
     high_boxes_from_cache_row,
+    is_detection_cache_contiguous,
     is_detection_cache_complete,
     is_mot_result_complete,
     is_render_video_complete,
@@ -28,6 +31,7 @@ from tools.evaluation.detection_replay_benchmark import (
     temporary_env,
     tracker_output_name,
     write_detection_cache,
+    write_effective_msdc_config,
     write_replay_summary,
 )
 
@@ -75,6 +79,15 @@ def test_detection_cache_complete_requires_last_requested_frame(tmp_path):
     assert is_detection_cache_complete(cache_path, max_frames=3)
     assert not is_detection_cache_complete(cache_path, max_frames=4)
     assert not is_detection_cache_complete(tmp_path / "missing.jsonl", max_frames=3)
+
+
+def test_detection_cache_contiguous_requires_every_requested_frame(tmp_path):
+    cache_path = tmp_path / "detections.jsonl"
+    write_detection_cache(cache_path, [{"frame_id": 1}, {"frame_id": 3}])
+
+    assert not is_detection_cache_contiguous(cache_path, max_frames=3)
+    assert is_detection_cache_contiguous(cache_path, max_frames=1)
+    assert not is_detection_cache_contiguous(tmp_path / "missing.jsonl", max_frames=3)
 
 
 def test_mot_result_complete_requires_last_requested_frame(tmp_path):
@@ -150,11 +163,269 @@ def test_write_replay_summary_writes_trackeval_fields(tmp_path):
     assert rows[1]["tracker"] == "ocsort_replay"
 
 
+def test_write_effective_msdc_config_writes_sorted_json_under_run_root(tmp_path):
+    path = write_effective_msdc_config(
+        tmp_path,
+        "no_low_candidate_replay",
+        {"MSDC_USE_REACQUIRE": True, "MSDC_LOW_CANDIDATE_ENABLE": False},
+    )
+
+    assert path == tmp_path / "effective_config" / "no_low_candidate_replay.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "MSDC_LOW_CANDIDATE_ENABLE": False,
+        "MSDC_USE_REACQUIRE": True,
+    }
+    assert path.read_text(encoding="utf-8").splitlines()[1].startswith('  "MSDC_LOW_CANDIDATE_ENABLE"')
+
+
 def test_max_frames_controls_debug_replay_when_formal_limit_is_omitted():
     args = parse_args(["--dataset-root", "dataset_a", "--max-frames", "10"])
 
     assert args.formal_frame_limit == 0
     assert effective_max_frames(args) == 10
+
+
+def test_parse_args_accepts_source_detection_cache_root():
+    args = parse_args([
+        "--dataset-root",
+        "dataset_a",
+        "--source-detection-cache-root",
+        "previous_run/detections",
+    ])
+
+    assert args.source_detection_cache_root == "previous_run/detections"
+
+
+def _patch_replay_run_dependencies(monkeypatch, video_path, expected_tracker_root):
+    def fake_replay_tracker_from_cache(**kwargs):
+        tracker_file = expected_tracker_root / "bytetrack_replay" / "data" / f"{kwargs['seq_name']}.txt"
+        tracker_file.parent.mkdir(parents=True, exist_ok=True)
+        tracker_file.write_text("1,1,10,10,20,20,0.9,-1,-1,-1\n", encoding="utf-8")
+        return tracker_file
+
+    monkeypatch.setattr(
+        drb,
+        "resolve_single_sequence_dataset",
+        lambda dataset_root, video=None, seq_name=None: SimpleNamespace(
+            dataset_root=Path(dataset_root),
+            video_path=video_path,
+            seq_name=seq_name or "seq_a",
+        ),
+    )
+    monkeypatch.setattr(drb, "read_video_info", lambda path: SimpleNamespace(frame_count=3, fps=30.0))
+    monkeypatch.setattr(drb, "write_motchallenge_gt_sequence", lambda *args, **kwargs: None)
+    monkeypatch.setattr(drb, "replay_tracker_from_cache", fake_replay_tracker_from_cache)
+    monkeypatch.setattr(
+        drb,
+        "write_diagnostics_for_tracker",
+        lambda *args, **kwargs: (Path(args[2]) / f"{args[3]}.csv", None),
+    )
+    monkeypatch.setattr(drb, "write_stage_coverage_csv", lambda *args, **kwargs: None)
+    monkeypatch.setattr(drb, "summarize_msdc_diagnostics", lambda *args, **kwargs: {})
+    monkeypatch.setattr(drb, "write_msdc_diagnostic_summary", lambda *args, **kwargs: Path(args[0]))
+    monkeypatch.setattr(
+        drb,
+        "run_motchallenge_eval",
+        lambda **kwargs: {"bytetrack_replay": {"MOTA": 1.0, "IDF1": 1.0, "IDSW": 0, "FP": 0, "FN": 0}},
+    )
+
+
+def test_run_reuses_complete_source_detection_cache_without_dumping(monkeypatch, tmp_path):
+    video_path = tmp_path / "seq_a.mp4"
+    video_path.write_bytes(b"placeholder")
+    source_root = tmp_path / "source_detections"
+    source_root.mkdir()
+    write_detection_cache(
+        source_root / "seq_a_high_low_detections.jsonl",
+        [{"frame_id": 1}, {"frame_id": 2}, {"frame_id": 3}],
+    )
+    output_root = tmp_path / "runs"
+    run_id = "reuse_complete"
+    _patch_replay_run_dependencies(monkeypatch, video_path, output_root / run_id / "trackers")
+    monkeypatch.setattr(
+        drb,
+        "dump_video_detections",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("detector dump should not be called")),
+    )
+
+    summary_path = drb.run_detection_replay_benchmark(
+        parse_args([
+            "--dataset-root",
+            str(tmp_path / "dataset"),
+            "--input",
+            str(video_path),
+            "--seq-name",
+            "seq_a",
+            "--output-root",
+            str(output_root),
+            "--run-id",
+            run_id,
+            "--max-frames",
+            "3",
+            "--trackers",
+            "bytetrack",
+            "--source-detection-cache-root",
+            str(source_root),
+        ])
+    )
+
+    linked_cache = output_root / run_id / "detections" / "seq_a_high_low_detections.jsonl"
+    assert linked_cache.is_symlink()
+    assert linked_cache.resolve() == (source_root / "seq_a_high_low_detections.jsonl").resolve()
+    assert summary_path.is_file()
+
+
+def test_run_with_incomplete_source_detection_cache_raises_before_dumping(monkeypatch, tmp_path):
+    video_path = tmp_path / "seq_a.mp4"
+    video_path.write_bytes(b"placeholder")
+    source_root = tmp_path / "source_detections"
+    source_root.mkdir()
+    write_detection_cache(source_root / "seq_a_high_low_detections.jsonl", [{"frame_id": 1}, {"frame_id": 2}])
+    output_root = tmp_path / "runs"
+    run_id = "reuse_incomplete"
+    _patch_replay_run_dependencies(monkeypatch, video_path, output_root / run_id / "trackers")
+    monkeypatch.setattr(
+        drb,
+        "dump_video_detections",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("detector dump should not be called")),
+    )
+
+    with pytest.raises(RuntimeError, match="Incomplete source detection cache"):
+        drb.run_detection_replay_benchmark(
+            parse_args([
+                "--dataset-root",
+                str(tmp_path / "dataset"),
+                "--input",
+                str(video_path),
+                "--seq-name",
+                "seq_a",
+                "--output-root",
+                str(output_root),
+                "--run-id",
+                run_id,
+                "--max-frames",
+                "3",
+                "--trackers",
+                "bytetrack",
+                "--source-detection-cache-root",
+                str(source_root),
+            ])
+        )
+
+
+def test_run_with_sparse_source_detection_cache_raises_before_dumping(monkeypatch, tmp_path):
+    video_path = tmp_path / "seq_a.mp4"
+    video_path.write_bytes(b"placeholder")
+    source_root = tmp_path / "source_detections"
+    source_root.mkdir()
+    write_detection_cache(source_root / "seq_a_high_low_detections.jsonl", [{"frame_id": 1}, {"frame_id": 3}])
+    output_root = tmp_path / "runs"
+    run_id = "reuse_sparse"
+    _patch_replay_run_dependencies(monkeypatch, video_path, output_root / run_id / "trackers")
+    monkeypatch.setattr(
+        drb,
+        "dump_video_detections",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("detector dump should not be called")),
+    )
+
+    with pytest.raises(RuntimeError, match="Incomplete source detection cache"):
+        drb.run_detection_replay_benchmark(
+            parse_args([
+                "--dataset-root",
+                str(tmp_path / "dataset"),
+                "--input",
+                str(video_path),
+                "--seq-name",
+                "seq_a",
+                "--output-root",
+                str(output_root),
+                "--run-id",
+                run_id,
+                "--max-frames",
+                "3",
+                "--trackers",
+                "bytetrack",
+                "--source-detection-cache-root",
+                str(source_root),
+            ])
+        )
+
+
+def test_run_exports_effective_config_when_msdc_replay_mot_is_skipped(monkeypatch, tmp_path):
+    video_path = tmp_path / "seq_a.mp4"
+    video_path.write_bytes(b"placeholder")
+    output_root = tmp_path / "runs"
+    run_id = "skip_complete_mot"
+    run_root = output_root / run_id
+    write_detection_cache(
+        run_root / "detections" / "seq_a_high_low_detections.jsonl",
+        [{"frame_id": 1}, {"frame_id": 2}, {"frame_id": 3}],
+    )
+    tracker_file = run_root / "trackers" / "no_low_candidate_replay" / "data" / "seq_a.txt"
+    tracker_file.parent.mkdir(parents=True)
+    tracker_file.write_text("3,1,10,10,20,20,0.9,-1,-1,-1\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        drb,
+        "resolve_single_sequence_dataset",
+        lambda dataset_root, video=None, seq_name=None: SimpleNamespace(
+            dataset_root=Path(dataset_root),
+            video_path=video_path,
+            seq_name="seq_a",
+        ),
+    )
+    monkeypatch.setattr(drb, "read_video_info", lambda path: SimpleNamespace(frame_count=3, fps=30.0))
+    monkeypatch.setattr(drb, "write_motchallenge_gt_sequence", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        drb,
+        "dump_video_detections",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("detector dump should not be called")),
+    )
+    monkeypatch.setattr(
+        drb,
+        "replay_tracker_from_cache",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("replay should not be called")),
+    )
+    monkeypatch.setattr(
+        drb,
+        "write_diagnostics_for_tracker",
+        lambda *args, **kwargs: (Path(args[2]) / f"{args[3]}.csv", None),
+    )
+    monkeypatch.setattr(drb, "write_stage_coverage_csv", lambda *args, **kwargs: None)
+    monkeypatch.setattr(drb, "write_msdc_diagnostic_summary", lambda *args, **kwargs: Path(args[0]))
+    monkeypatch.setattr(
+        drb,
+        "run_motchallenge_eval",
+        lambda **kwargs: {
+            "no_low_candidate_replay": {"MOTA": 1.0, "IDF1": 1.0, "IDSW": 0, "FP": 0, "FN": 0},
+        },
+    )
+
+    drb.run_detection_replay_benchmark(
+        parse_args([
+            "--dataset-root",
+            str(tmp_path / "dataset"),
+            "--input",
+            str(video_path),
+            "--seq-name",
+            "seq_a",
+            "--output-root",
+            str(output_root),
+            "--run-id",
+            run_id,
+            "--max-frames",
+            "3",
+            "--trackers",
+            "msdc_elt",
+            "--variants",
+            "no_low_candidate",
+        ])
+    )
+
+    effective_config = json.loads(
+        (run_root / "effective_config" / "no_low_candidate_replay.json").read_text(encoding="utf-8")
+    )
+    assert effective_config["MSDC_LOW_CANDIDATE_ENABLE"] is False
 
 
 def test_expected_replay_frames_caps_formal_limit_to_video_length():
@@ -218,3 +489,18 @@ def test_msdc_variant_context_resets_removed_guard_alias(monkeypatch):
 
     assert Config.MSDC_REMOVED_GUARD_FRAMES == 44
     assert Config.MSDC_removed_GUARD_FRAMES == 44
+
+
+def test_dynamic_empty_msdc_env_override_uses_formal_v3_baseline(tmp_path):
+    path = drb.write_effective_msdc_variant_config(
+        tmp_path,
+        "msdc_v3_replay",
+        "msdc_v3",
+        env_override={},
+    )
+
+    effective_config = json.loads(path.read_text(encoding="utf-8"))
+    assert effective_config["MSDC_MAX_ACTIVE_TRACKS"] == 128
+    assert effective_config["MSDC_MAX_TOTAL_TRACKS"] == 256
+    assert effective_config["MSDC_DEBUG_EVENTS"] is True
+    assert effective_config["MSDC_LOW_CANDIDATE_ENABLE"] is True
