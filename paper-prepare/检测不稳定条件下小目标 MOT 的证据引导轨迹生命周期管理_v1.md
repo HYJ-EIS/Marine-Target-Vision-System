@@ -4,7 +4,7 @@
 
 ## 1. Introduction
 
-无人机和无人船平台获取的海空视频为远距离目标监测提供了重要数据来源，但也给在线多目标跟踪（MOT）带来了持续的检测不稳定问题。远距离船只、无人机或其他小目标在图像中通常只占据少量像素，目标边界容易受到海天线、浪花、反光、云层和平台运动带来的背景变化影响。对于 tracking-by-detection 系统而言，这类目标并不总是形成连续、稳定的高置信检测；同一目标可能在相邻帧中表现为高置信检测、低置信检测或短期漏检。此时，跟踪器不仅需要完成当前帧检测框与轨迹之间的匹配，还需要在不完整观测下维持可解释的轨迹生命周期。
+无人机和无人船平台获取的海空视频为远距离目标监测提供了重要数据来源，但也给在线多目标跟踪（MOT）带来了持续的检测不稳定问题。远距离船只或空中小目标在图像中通常只占据少量像素，目标边界容易受到海天线、浪花、反光、云层和平台运动带来的背景变化影响。对于 tracking-by-detection 系统而言，这类目标并不总是形成连续、稳定的高置信检测；同一目标可能在相邻帧中表现为高置信检测、低置信检测或短期漏检。此时，跟踪器不仅需要完成当前帧检测框与轨迹之间的匹配，还需要在不完整观测下维持可解释的轨迹生命周期。
 
 Tracking-by-detection 是在线 MOT 中广泛使用的范式。SORT 使用卡尔曼滤波和 IoU 匹配建立了高效的在线跟踪流程 [Bewley et al., 2016]；DeepSORT 在此基础上加入外观度量以改善遮挡后的身份保持 [Wojke et al., 2017]；OC-SORT 通过 observation-centric 的运动更新缓解短期缺测后的状态误差 [Cao et al., 2023]；BoT-SORT 进一步结合运动、外观和相机运动补偿线索增强关联 [Aharon et al., 2022]。同时，ByteTrack 证明低置信检测并不应被简单丢弃，其二阶段关联能够利用低分框恢复部分真实目标 [Zhang et al., 2022]；ConfTrack、BoostTrack 和 Hybrid-SORT 等方法也从置信度惩罚、相似度调整和多线索关联角度研究了检测分数的作用 [Jung et al., 2024; Stanojevic and Todorovic, 2024; Yang et al., 2024]。
 
@@ -48,249 +48,101 @@ ELTTrack 与上述方法的区别在于研究对象从单次检测关联转向�
 
 ## 3. Method
 
+本文提出 ELTTrack，一个基于 tracking-by-detection 范式的在线多目标跟踪方法。其核心设计是在检测器输出之后增加一个证据引导的轨迹生命周期层。该层将高置信检测、低置信检测和短期漏检统一转化为轨迹状态转换依据，用于决定候选生成、候选确认、活跃轨迹保留、丢失轨迹恢复和轨迹移除。
+
 ### 3.1 Overview of ELTTrack
 
-ELTTrack 是一个用于 tracking-by-detection 的在线轨迹生命周期层。给定第 \(t\) 帧检测器输出，ELTTrack 首先通过双阈值筛选得到高置信检测集合和低置信检测集合，并对低置信独有检测执行去重、邻近门控和预算控制。随后，保留的检测被转换为带来源标签的 observation group，用于更新已有轨迹或生成候选轨迹。最后，证据驱动的状态转换决定每条轨迹处于 `LOW_CANDIDATE`、`CANDIDATE`、`ACTIVE`、`LOST` 或 `REMOVED` 状态；只有 `ACTIVE` 轨迹作为公开 MOT 输出。
+给定第 $t$ 帧检测结果，ELTTrack 首先采用双阈值策略将检测划分为高置信检测和低置信检测。高置信检测直接作为可靠观测进入跟踪器；低置信检测仅在满足去重、空间邻近和数量预算约束后进入候选池。随后，有效观测与已有轨迹进行几何关联，并根据匹配结果更新轨迹证据。轨迹是否输出不由单帧检测分数直接决定，而由生命周期状态决定。
 
-ELTTrack 的轨迹状态由以下变量描述：
-
-$$
-\mathcal{T}_i^t=
-\left(
-z_i^t,\ b_i^t,\ v_i^t,\ \hat{b}_i^t,\ e_i^t,\ h_i^t,\ m_i^t,\ a_i^t,\ t_i^{last},\ r_i^t,\ \mathcal{S}_i^t,\ \mathcal{L}_i^t,\ \rho_i^t
-\right),
-$$
-
-其中 \(z_i^t\) 是生命周期状态，\(b_i^t\) 是当前轨迹框，\(v_i^t\) 是由相邻匹配框中心位移得到的短期速度，\(\hat{b}_i^t\) 是由 \(b_i^{t-1}\) 和 \(v_i^{t-1}\) 得到的一步预测框，\(e_i^t\) 是证据得分，\(h_i^t\) 是命中次数，\(m_i^t\) 是漏检次数，\(a_i^t\) 是轨迹年龄，\(t_i^{last}\) 是最近一次实际检测命中的帧索引，\(r_i^t\) 是真实检测命中次数，\(\mathcal{S}_i^t\) 是观测来源历史，\(\mathcal{L}_i^t\) 是近期低置信检测历史，\(\rho_i^t\) 是移除态轨迹的短期签名。预测框由边界框和短期位移直接维护。生命周期状态集合为：
+ELTTrack 维护五类轨迹状态：
 
 $$
-z_i^t \in
-\{\text{LOW\_CANDIDATE},\text{CANDIDATE},\text{ACTIVE},\text{LOST},\text{REMOVED}\}.
+z_i^t \in \{\text{LOW\_CANDIDATE},\text{CANDIDATE},\text{ACTIVE},\text{LOST},\text{REMOVED}\}.
 $$
 
-`LOW_CANDIDATE` 表示由低置信观测生成、尚未公开输出的候选轨迹；`CANDIDATE` 表示普通候选轨迹；`ACTIVE` 表示已确认并可输出的轨迹；`LOST` 表示短期缺测后仍可恢复的已确认轨迹；`REMOVED` 表示已退出公开生命周期的轨迹。`REMOVED` 轨迹的短期签名仍用于 removed-track guard，以避免新候选在几何上接近刚移除轨迹时立即复用其 ID 语义。
+- `LOW_CANDIDATE`：由低置信观测生成、尚未确认的候选轨迹。
+- `CANDIDATE`：由可靠观测生成的普通候选轨迹。
+- `ACTIVE`：已确认并参与输出的轨迹。
+- `LOST`：短时漏检后仍保留重关联机会的轨迹。
+- `REMOVED`：已终止维护的轨迹。
+
+最终输出仅包含 `ACTIVE` 轨迹。除生命周期状态外，每条轨迹还维护证据得分、命中次数、漏检次数、真实检测命中次数、观测来源历史和低置信观测历史。这些变量用于支撑状态转换，但不需要在正文中逐项展开为完整状态向量。
 
 ### 3.2 Dual-Threshold Detection Screening
 
-**设计动机。** 小目标检测流中的低置信框既可能包含真实目标，也可能包含背景杂波和重复检测。直接丢弃低置信框会增加漏检，直接使用所有低置信框又会增加候选噪声。因此，ELTTrack 将双阈值检测作为受控观测入口：高置信检测作为可靠输入，低置信检测必须经过去重、邻近筛选和预算控制后才能进入生命周期层。
+小目标场景中，低置信检测往往同时包含真实目标和背景杂波。若直接丢弃低置信检测，容易造成断轨；若全部保留，则会引入大量虚假候选。因此，ELTTrack 采用受控观测入口机制：高置信检测作为可靠输入，低置信检测必须经过去重、邻近筛选和预算控制。
 
-**输入输出。** 输入为第 \(t\) 帧检测集合 \(D_t\)，每个检测 \(d\) 包含边界框 \(b(d)\)、置信度 \(s(d)\) 和类别标签。输出为带来源标签的 observation groups。检测筛选阶段的来源集合为 \(\mathcal{Q}_{det}=\{\text{high\_det}, \text{low\_det}\}\)，其中高置信观测主要用于普通候选生成和可靠状态更新，低置信观测用于弱证据累积、低置信候选生成和丢失轨迹重关联。3.4 节的重关联阶段会在恢复成功时追加 \(\text{reacquire}\) 来源标记；因此完整生命周期来源集合记为 \(\mathcal{Q}=\{\text{high\_det},\text{low\_det},\text{reacquire}\}\)。
-
-**机制描述。** 给定低阈值 \(\tau_L\) 和高阈值 \(\tau_H\)，ELTTrack 首先保留低阈值以上检测，并从中划分高置信集合：
+给定第 $t$ 帧检测集合 $D_t$，每个检测 $d$ 包含边界框 $b(d)$、置信度 $s(d)$ 和类别标签。给定低阈值 $\tau_L$ 和高阈值 $\tau_H$，检测集合被划分为：
 
 $$
 D_t^L=\{d\in D_t\mid s(d)\geq \tau_L\},\qquad
 D_t^H=\{d\in D_t^L\mid s(d)\geq \tau_H\}.
 $$
 
-低置信独有集合排除与高置信检测高度重叠的框，以减少同一目标的重复弱观测：
+其中，$D_t^H$ 是高置信检测集合。低置信独有检测从 $D_t^L\setminus D_t^H$ 中获得，并去除与高置信检测高度重叠的框：
 
 $$
-D_t^{lo}=
-\left\{
-d\in D_t^L\setminus D_t^H
-\mid
+D_t^{lo}= \left\{ d\in D_t^L\setminus D_t^H \mid
 \max_{d'\in D_t^H}\operatorname{IoU}(b(d),b(d')) < \eta_{HL}
 \right\}.
 $$
 
-随后，ELTTrack 对 \(D_t^{lo}\) 执行预算控制。低置信检测需满足最低低观测分数，并在已有 `ACTIVE` 或 `LOST` 轨迹附近；邻近关系由 IoU 或中心距离判定：
+随后，ELTTrack 对低置信独有检测执行三类筛选：
 
-$$
-\max_i \operatorname{IoU}(b(d),\hat{b}_i^t)\geq \eta_{prox}
-\quad \text{or} \quad
-\min_i \operatorname{dist}(b(d),\hat{b}_i^t)\leq \delta_{prox},
-$$
+- **最低分数筛选**：去除分数过低的弱响应。
+- **轨迹邻近筛选**：仅保留靠近已有 `ACTIVE` 或 `LOST` 轨迹的低置信框。
+- **预算控制**：保留全局 Top-$K$ 低置信框，并限制每帧最大低置信观测数。
 
-其中 \(\hat{b}_i^t\) 是轨迹 \(i\) 在当前帧的一步预测框。通过筛选的低置信框按置信度排序，保留全局 Top-\(K\) 以及每条近邻轨迹附近的少量候选，并限制每帧最大低置信观测数。该预算避免密集背景弱响应主导候选池。
-
-为形式化该预算，记通过最低分数和邻近门控的低置信集合为 \(\widetilde{D}_t^{lo}\)，轨迹 \(i\) 附近的低置信检测子集为 \(\mathcal{N}_t(i)\)。最终进入生命周期层的低置信输入为：
-
-$$
-B_t^{lo}=
-\operatorname{Cap}_{K_{frame}}
-\left(
-\operatorname{TopK}_{K_g}(\widetilde{D}_t^{lo})
-\cup
-\bigcup_{i:z_i^t\in\{\text{ACTIVE},\text{LOST}\}}
-\operatorname{TopK}_{K_i}(\mathcal{N}_t(i))
-\right),
-$$
-
-其中 \(K_g\) 是全局预算，\(K_i\) 是每条近邻轨迹的预算，\(K_{frame}\) 是每帧低置信观测上限。
-
-保留的高、低置信检测会被合并为 observation groups。若两个观测框的 IoU 超过合并阈值，则归入同一 group，并记录其来源历史和来源分数：
-
-$$
-G_t=\{g_j^t\},\qquad
-Q_{det}(g_j^t)\subseteq \mathcal{Q}_{det}.
-$$
-
-Observation group 与 `LOW_CANDIDATE`、`CANDIDATE` 和 `ACTIVE` 轨迹进行几何匹配。有效配对需满足：
-
-$$
-\operatorname{IoU}(\hat{b}_i^t,g_j^t)\geq \eta_{assoc}
-\quad \text{or} \quad
-\operatorname{dist}(\hat{b}_i^t,g_j^t)\leq \delta_{assoc}.
-$$
-
-候选配对按几何分数排序并贪心匹配：
-
-$$
-A(i,j)=\operatorname{IoU}(\hat{b}_i^t,g_j^t)
-+\lambda_c
-\max\left(0,1-\frac{\operatorname{dist}(\hat{b}_i^t,g_j^t)}{\delta_{assoc}}\right).
-$$
-
-未匹配且包含高置信来源的 group 生成 `CANDIDATE`。未匹配且只包含低置信来源的 group 只有在达到低置信生成阈值时才生成 `LOW_CANDIDATE`，并且不会立即作为公开轨迹输出。
+通过筛选的检测被合并为有效观测集合 $G_t=\{g_j^t\}$。检测阶段的观测来源为 `high_det` 和 `low_det`；若某个观测在后续重关联阶段恢复了 `LOST` 轨迹，则额外记录 `reacquire` 来源。有效观测与 `LOW_CANDIDATE`、`CANDIDATE` 和 `ACTIVE` 轨迹通过 IoU 或中心距离进行关联。未匹配的高置信观测生成 `CANDIDATE`，未匹配且满足生成条件的低置信观测生成 `LOW_CANDIDATE`，但不会立即输出为公开轨迹。
 
 ### 3.3 Evidence-Driven State Transition
 
-**设计动机。** 在检测不稳定场景中，单帧置信度不足以决定轨迹是否可靠。一个真实小目标可能连续数帧只有低置信检测，也可能在短期内完全漏检；一个背景弱响应也可能偶然出现高分。因此，ELTTrack 使用跨帧证据累积和漏检衰减驱动状态转换，使候选确认、活跃至丢失转换、丢失保留和移除决策依赖历史观测。
+ELTTrack 的状态转换按帧执行。每一帧结束时，跟踪器先判断轨迹是否获得了实际观测，再根据证据、命中次数和漏检次数更新轨迹状态。这里的实际观测包括高置信检测、低置信检测，以及重关联成功后的 `reacquire` 观测。
 
-**输入输出。** 输入为上一帧轨迹集合 \(\{\mathcal{T}_i^{t-1}\}\)、当前帧 observation groups \(G_t\) 以及匹配结果。输出为更新后的轨迹集合及生命周期事件，包括候选确认、活跃至丢失转换、丢失轨迹恢复、候选剪枝和移除。
+对一条轨迹而言，当前帧只有两类更新结果：
 
-**机制描述。** 对于被匹配的轨迹，ELTTrack 根据 observation group 中不同来源的置信度计算正证据增量。检测筛选阶段的 group 只包含 \(Q_{det}\) 来源；若 group 在重关联阶段恢复 `LOST` 轨迹，则其来源集合可扩展为 \(Q(g_j^t)\subseteq\mathcal{Q}\)：
+- **匹配成功**：轨迹获得一个观测，证据得分增加，命中次数增加，漏检次数清零，并记录观测来源。
+- **匹配失败**：轨迹没有观测，证据得分衰减，漏检次数增加。
 
-$$
-\Delta(g_j^t)=\sum_{q\in Q(g_j^t)}w_q s_q(g_j^t),
-$$
-
-其中 \(w_q\) 为来源权重，\(s_q(g_j^t)\) 为该来源对应的检测分数。证据得分采用衰减后的历史证据加当前正证据；未匹配轨迹则增加漏检次数，并施加负证据项：
+证据得分的更新写作：
 
 $$
 e_i^t=
 \begin{cases}
-\alpha e_i^{t-1}+\Delta(g_j^t), & \text{if track } i \text{ is matched},\\
-\max(0,\alpha e_i^{t-1}-w_{neg}), & \text{otherwise}.
+\alpha e_i^{t-1}+\Delta(g_j^t), & \text{matched},\\
+\max(0,\alpha e_i^{t-1}-w_{neg}), & \text{unmatched},
 \end{cases}
 $$
 
-匹配到实际检测观测时，轨迹命中次数 \(h_i\) 增加，漏检次数 \(m_i\) 归零，真实检测命中次数 \(r_i\) 增加，并将 observation source 写入 \(\mathcal{S}_i\)。这里的实际检测观测指来源属于 \(\{\text{high\_det},\text{low\_det},\text{reacquire}\}\) 的 observation group，用于区别于未匹配帧中的预测保留。未匹配时，\(m_i\) 增加，证据随 \(\alpha\) 和 \(w_{neg}\) 衰减。观测来源历史用于区分候选是否曾获得高置信检测支持，低置信检测历史 \(\mathcal{L}_i\) 则记录低置信框的分数、面积和中心位置，用于低置信候选确认。
+其中 $e_i^t$ 为轨迹证据得分，$\alpha$ 为历史衰减系数，$w_{neg}$ 为漏检惩罚项。$\Delta(g_j^t)$ 表示当前观测带来的正证据；高置信观测的权重更高，低置信观测只提供弱证据。因此，单个低分框不会直接决定轨迹状态，它只能在多帧内逐步累积影响。
 
-普通候选确认要求证据、总命中、真实检测命中和高置信来源同时满足条件，并且候选在当前帧被匹配：
+在此基础上，五类状态按以下规则转换：
 
-$$
-e_i^t\geq \theta_{conf},\quad
-h_i^t\geq H_{conf},\quad
-r_i^t\geq R_{conf},\quad
-\text{high\_det}\in \mathcal{S}_i^t,\quad
-m_i^t=0.
-$$
+- `CANDIDATE -> ACTIVE`：普通候选需要同时满足证据得分、命中次数、真实检测命中次数和高置信来源约束。该规则保证公开输出的轨迹至少得到过可靠检测支持。
+- `LOW_CANDIDATE -> ACTIVE`：低置信候选需要先在短时间窗口内反复出现，并满足平均分数、漏检次数、面积变化和中心位移约束。达标后，它先尝试继承某条 `LOST` 轨迹；继承成功则沿用旧 ID，继承失败且不与现有 `ACTIVE` 轨迹冲突时，才作为新 ID 输出。
+- `ACTIVE -> LOST`：已确认轨迹连续漏检超过容忍窗口后，不立即删除，而是进入 `LOST`，等待后续重关联。
+- `LOST -> ACTIVE`：丢失轨迹若在保留窗口内重新匹配到可信观测，则恢复为 `ACTIVE` 并沿用原 ID。
+- `CANDIDATE/LOW_CANDIDATE/LOST -> REMOVED`：候选长期无法确认，或丢失轨迹超过保留窗口，都会转为 `REMOVED`。
 
-`LOW_CANDIDATE` 使用更严格的确认条件。设 \(\mathcal{L}_i^t\) 为最近 \(W_{low}\) 帧内的低置信检测历史，则低置信候选需要满足低置信命中数量、平均分数、漏检次数、面积稳定性和中心步长稳定性：
-
-$$
-|\mathcal{L}_i^t|\geq H_{low},\quad
-\frac{1}{|\mathcal{L}_i^t|}
-\sum_{o\in \mathcal{L}_i^t}s(o)\geq \theta_{low},\quad
-m_i^t\leq M_{low},
-$$
-
-$$
-\frac{\max_{o\in\mathcal{L}_i^t}\operatorname{area}(o)}
-{\min_{o\in\mathcal{L}_i^t}\operatorname{area}(o)}
-\leq \rho_{area},\qquad
-\max_k \|c(o_k)-c(o_{k-1})\|_2
-\leq
-\max(\delta_{assoc},\rho_{step}\cdot \operatorname{median}_k \|c(o_k)-c(o_{k-1})\|_2).
-$$
-
-其中 \(c(o)\) 为观测中心。该确认路径防止孤立低分框直接生成公开 track ID。
-
-上述确认规则对应如下候选到活跃轨迹的状态转换：
-
-$$
-z_i^t=
-\begin{cases}
-\text{ACTIVE}, &
-z_i^{t-1}=\text{CANDIDATE}
-\land e_i^t\geq \theta_{conf}
-\land h_i^t\geq H_{conf}
-\land r_i^t\geq R_{conf}
-\land \text{high\_det}\in \mathcal{S}_i^t
-\land m_i^t=0,\\
-\text{ACTIVE}, &
-z_i^{t-1}=\text{LOW\_CANDIDATE}
-\land C_{low}(i,t)
-\land \neg A_{active}(i,t)
-\land \neg I_{lost}(i,t).
-\end{cases}
-$$
-
-其中 \(C_{low}(i,t)\) 表示上述低置信历史数量、平均分数、漏检、面积和中心步长条件同时满足；\(A_{active}(i,t)\) 表示该低置信候选与已有 `ACTIVE` 轨迹发生几何冲突；\(I_{lost}(i,t)\) 表示该低置信候选已在 3.4 节的继承机制中并入某条 `LOST` 轨迹。ELTTrack 的执行顺序是：先处理普通匹配和证据更新，再对满足 \(C_{low}\) 的 `LOW_CANDIDATE` 尝试 `LOST` 继承；继承成功时低置信候选被合并并转为 `REMOVED`，对应的 `LOST` 轨迹恢复为 `ACTIVE` 且沿用原 public ID；只有未继承、未与 `ACTIVE` 冲突且仍满足确认条件的 `LOW_CANDIDATE`，才独立晋升为新的 `ACTIVE` 并获得新的 public ID。因此，低置信候选的“继承旧 ID”和“独立生成新 ID”是按顺序判定的互斥路径。
-
-已确认轨迹在连续漏检后进入 `LOST`。当 `ACTIVE` 轨迹的漏检次数超过容忍窗口 \(M_{active}\) 时，ELTTrack 将其转为 `LOST` 并保留有限帧数：
-
-$$
-z_i^t=
-\begin{cases}
-\text{LOST}, & z_i^{t-1}=\text{ACTIVE}\ \land\ m_i^t>M_{active},\\
-\text{REMOVED}, & z_i^{t-1}=\text{LOST}\ \land\ t-t_i^{last}>T_{lost}.
-\end{cases}
-$$
-
-`CANDIDATE` 和 `LOW_CANDIDATE` 若年龄超过候选窗口或证据低于剪枝阈值，则转为 `REMOVED`。`LOST` 若超过最大保留时间仍未恢复，也转为 `REMOVED`。进入 `REMOVED` 时，ELTTrack 保存短期 removed signature；后续新候选若与该签名满足冲突门控，则不会复用被移除轨迹的 public ID。
+上述顺序使低置信候选在生成新 ID 之前先接受旧轨迹继承检查。只有无法继承 `LOST` 轨迹时，它才可能成为新的 `ACTIVE` 轨迹，从而减少短期漏检造成的 ID 断裂。
 
 ### 3.4 Geometry-Gated Track Reassociation
 
-**设计动机。** 小目标短期漏检后可能重新出现，但在弱观测条件下直接重关联容易造成错误 ID 延续。ELTTrack 因此只允许满足几何和时间约束的 observation group 或已准备确认的低置信候选恢复 `LOST` 轨迹，并将恢复过程限制在在线保留窗口内。
+重关联用于判断一条 `LOST` 轨迹是否应恢复为原来的 ID。ELTTrack 先用几何关系筛除位置明显不合理的候选，再评估观测证据。
 
-**输入输出。** 输入为当前帧未匹配 observation groups、`LOST` 轨迹集合和已达到低置信确认条件的 `LOW_CANDIDATE` 集合。输出为恢复为 `ACTIVE` 的轨迹、被合并或移除的低置信候选，以及相应生命周期事件。
-
-**机制描述。** 对于直接重关联，ELTTrack 按固定帧间隔检查 `LOST` 轨迹与未匹配 observation group。设 \(\hat{b}_i^t\) 为 `LOST` 轨迹预测框，\(g_j^t\) 为当前 observation group。候选配对必须满足 IoU 或中心距离门控：
+对于 `LOST` 轨迹的预测框 $\hat{b}_i^t$ 和当前未匹配观测 $g_j^t$，只有满足下列条件之一时，二者才会进入重关联候选集合：
 
 $$
 \operatorname{IoU}(\hat{b}_i^t,g_j^t)\geq \eta_{re}
 \quad \text{or} \quad
-\operatorname{dist}(\hat{b}_i^t,g_j^t)\leq \delta_{re}(i).
+\operatorname{dist}(\hat{b}_i^t,g_j^t)\leq \delta_{re}.
 $$
 
-中心距离阈值随轨迹框尺度受限放宽：
+通过几何门控后，ELTTrack 按观测证据对候选进行排序。几何关系决定候选是否可被接受，证据得分决定多个候选之间的优先级，从而避免仅凭一个低分检测恢复旧 ID。
 
-$$
-\delta_{re}(i)=
-\min\left(
-\delta_{re}^{max},
-\max(\delta_{re}^{base},\gamma_{scale}\max(w_i,h_i))
-\right).
-$$
+重关联包含两条路径：
 
-候选重关联得分由 observation group 的证据增量给出：
+- **直接恢复**：当前帧的未匹配观测与某条 `LOST` 轨迹通过几何门控，并且证据足够，则该 `LOST` 轨迹恢复为 `ACTIVE`，沿用原 ID。
+- **低置信候选继承**：一个已经积累多帧弱证据的 `LOW_CANDIDATE`，如果与某条 `LOST` 轨迹在时间、类别、尺度、位置和运动方向上都一致，则该候选并入旧轨迹，旧轨迹恢复为 `ACTIVE`，候选本身转为 `REMOVED`。
 
-$$
-R(i,j)=\Delta(g_j^t).
-$$
-
-当 \(R(i,j)\geq \theta_{re}\) 时，`LOST` 轨迹可恢复为 `ACTIVE`，并保留原 public ID。若多个候选同时满足条件，按重关联得分从高到低贪心选择，保证一个 observation group 不同时恢复多条轨迹。
-
-直接重关联采用“几何硬门控、证据排序”的规则。其原因是 \(g_j^t\) 是当前帧的实际 observation group，IoU 和中心距离已经用于排除几何不可信的配对；通过门控后，排序只使用 \(\Delta(g_j^t)\)，避免在单帧检测上重复放大几何项。相比之下，下面的低置信候选继承面对的是一个已累积多帧弱观测的候选轨迹，候选本身具有独立历史和运动趋势，因此需要在继承得分中同时考虑几何位置、运动一致性、低置信历史分数和 lost age。
-
-对于低置信候选继承，ELTTrack 只考虑已经满足低置信确认条件的 `LOW_CANDIDATE`。给定 `LOST` 轨迹 \(i\) 和低置信候选 \(k\)，首先检查丢失时间：
-
-$$
-0\leq t-t_i^{last}\leq T_{inherit}.
-$$
-
-随后检查预测框与低置信候选框之间的 IoU 或中心距离门控。类别一致性和尺度一致性作为硬门控使用：当配置要求类别匹配时，类别不一致的候选被拒绝；尺度一致性由 IoU 门控和尺度相关的中心距离阈值共同约束。通过这些门控后，继承得分定义为：
-
-$$
-I(i,k)=
-\beta_{iou}\operatorname{IoU}(\hat{b}_i^t,b_k^t)
-+\beta_c\left(1-\frac{\operatorname{dist}(\hat{b}_i^t,b_k^t)}{\delta_{inherit}}\right)_+
-+\beta_v V(i,k)
-+\beta_s \bar{s}_k
-+\beta_r\left(1-\frac{t-t_i^{last}}{T_{inherit}}\right)_+,
-$$
-
-其中 \(V(i,k)\) 为中心位移方向一致性，\(\bar{s}_k\) 为低置信候选近期平均检测分数，\((x)_+=\max(0,x)\)。若 \(I(i,k)\geq \theta_{inherit}\)，该低置信候选合并到 `LOST` 轨迹，后者恢复为 `ACTIVE` 并沿用原 public ID；被合并的低置信候选转为 `REMOVED`。
-
-Removed-track guard 用于处理已移除轨迹附近的新候选。设 \(\mathcal{R}_t\) 为最近 \(T_{guard}\) 帧内的 removed signatures。若新候选 \(u\) 与某个 removed signature \(r\) 满足：
-
-$$
-\operatorname{IoU}(b(u),b(r))\geq \eta_{guard}
-\quad \text{or} \quad
-\operatorname{dist}(b(u),b(r))\leq \delta_{guard},
-$$
-
-则 ELTTrack 记录冲突并分配新的内部候选身份，不让该候选直接复用被移除轨迹的 public ID。该守护机制把重关联限制在 `LOST` 保留窗口内，避免已经退出生命周期的轨迹在背景弱响应附近被反复恢复。
+若一条轨迹已经进入 `REMOVED`，ELTTrack 不再允许它被普通重关联恢复。系统只保留其短期空间签名，用于阻止附近的弱响应马上复用旧 ID。这一 removed-track guard 将 ID 继承限制在 `LOST` 保留窗口内，避免已终止轨迹被反复激活。
