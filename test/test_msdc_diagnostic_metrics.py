@@ -115,7 +115,12 @@ def test_summarize_msdc_diagnostics_reports_removed_recovery_events(tmp_path):
     _write_jsonl(
         events_path,
         [
-            {"frame_idx": 10, "gid": 2, "event_type": "REMOVED_ID_RECOVERY_CANDIDATE"},
+            {
+                "frame_idx": 10,
+                "gid": 2,
+                "event_type": "REMOVED_ID_RECOVERY_CANDIDATE",
+                "extra": {"recovered_public_id": 4},
+            },
             {"frame_idx": 20, "gid": 5, "event_type": "PREVENT_removed_ID_REUSE"},
             {
                 "frame_idx": 20,
@@ -140,6 +145,29 @@ def test_summarize_msdc_diagnostics_reports_removed_recovery_events(tmp_path):
     assert row["removed_recovery_success"] == 1
     assert row["removed_recovery_success_rate"] == 0.5
     assert row["removed_guard_fallback_new_id"] == 1
+
+
+def test_summarize_msdc_diagnostics_counts_track_only_recovery_as_attempt_not_success(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(
+        events_path,
+        [
+            {
+                "frame_idx": 10,
+                "gid": 2,
+                "event_type": "REMOVED_ID_RECOVERY_CANDIDATE",
+                "extra": {"recovered_public_id": None},
+            },
+        ],
+    )
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    row = summarize_msdc_diagnostics(events_path, tmp_path / "missing_stage.jsonl", per_gt_path)
+
+    assert row["removed_recovery_attempts"] == 1
+    assert row["removed_recovery_success"] == 0
+    assert row["removed_recovery_success_rate"] == 0.0
 
 
 def test_summarize_msdc_diagnostics_reports_no_removed_recovery_attempts(tmp_path):

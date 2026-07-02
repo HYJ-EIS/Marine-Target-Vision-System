@@ -542,10 +542,14 @@ def test_formal_v3_ablation_variants_are_available():
     assert formal_env["MSDC_LOW_OBS_GLOBAL_TOPK"] == "32"
     assert formal_env["MSDC_LOW_OBS_MIN_CONF"] == "0.25"
     assert formal_env["MSDC_DEBUG_EVENTS"] == "1"
+    assert formal_env["MSDC_REMOVED_GUARD_IOU_THRESH"] == "0.3"
+    assert formal_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
     assert formal_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
     assert formal_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
 
     recovery_off_env = _variant_env("removed_recovery_off")
+    assert recovery_off_env["MSDC_REMOVED_GUARD_IOU_THRESH"] == "0.3"
+    assert recovery_off_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
 

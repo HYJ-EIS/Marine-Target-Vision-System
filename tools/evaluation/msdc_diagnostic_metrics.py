@@ -147,7 +147,10 @@ def summarize_msdc_diagnostics(
 
         if event_type == "REMOVED_ID_RECOVERY_CANDIDATE":
             removed_recovery_attempts += 1
-            removed_recovery_success += 1
+            extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+            recovered_public_id = extra.get("recovered_public_id")
+            if recovered_public_id not in (None, ""):
+                removed_recovery_success += 1
 
         if event_type == "PREVENT_REMOVED_ID_REUSE":
             removed_recovery_attempts += 1

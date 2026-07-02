@@ -482,13 +482,19 @@ def test_msdc_variant_context_resets_missing_env_backed_config_key(monkeypatch):
 def test_msdc_variant_context_resets_removed_guard_alias(monkeypatch):
     monkeypatch.setattr(Config, "MSDC_REMOVED_GUARD_FRAMES", 44)
     monkeypatch.setattr(Config, "MSDC_removed_GUARD_FRAMES", 44)
+    monkeypatch.setattr(Config, "MSDC_REMOVED_GUARD_IOU_THRESH", 0.9)
+    monkeypatch.setattr(Config, "MSDC_REMOVED_GUARD_CENTER_DIST", 12.0)
 
     with msdc_variant_context("msdc_v3"):
         assert Config.MSDC_REMOVED_GUARD_FRAMES == 80
         assert Config.MSDC_removed_GUARD_FRAMES == 80
+        assert Config.MSDC_REMOVED_GUARD_IOU_THRESH == 0.3
+        assert Config.MSDC_REMOVED_GUARD_CENTER_DIST == 80.0
 
     assert Config.MSDC_REMOVED_GUARD_FRAMES == 44
     assert Config.MSDC_removed_GUARD_FRAMES == 44
+    assert Config.MSDC_REMOVED_GUARD_IOU_THRESH == 0.9
+    assert Config.MSDC_REMOVED_GUARD_CENTER_DIST == 12.0
 
 
 def test_dynamic_empty_msdc_env_override_uses_formal_v3_baseline(tmp_path):
