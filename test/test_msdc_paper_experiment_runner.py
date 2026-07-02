@@ -148,6 +148,7 @@ def test_ablation_command_includes_required_variants():
         "low_budget_off",
         "low_budget_topk16",
         "low_budget_topk64",
+        "removed_recovery_off",
     }
     variants = cmd[cmd.index("--variants") + 1:cmd.index("--formal-frame-limit")]
     assert variants[0] == FORMAL_MSDC_VARIANT
@@ -526,6 +527,7 @@ def test_formal_v3_ablation_variants_are_available():
         "low_budget_off",
         "low_budget_topk16",
         "low_budget_topk64",
+        "removed_recovery_off",
     }
     assert expected <= set(ABLATION_VARIANTS)
 
@@ -540,6 +542,12 @@ def test_formal_v3_ablation_variants_are_available():
     assert formal_env["MSDC_LOW_OBS_GLOBAL_TOPK"] == "32"
     assert formal_env["MSDC_LOW_OBS_MIN_CONF"] == "0.25"
     assert formal_env["MSDC_DEBUG_EVENTS"] == "1"
+    assert formal_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
+    assert formal_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+
+    recovery_off_env = _variant_env("removed_recovery_off")
+    assert recovery_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
+    assert recovery_off_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
 
 
 def test_formal_v3_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):

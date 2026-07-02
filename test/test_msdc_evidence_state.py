@@ -11,7 +11,7 @@ from target_module.image_detect_module.utils.evidence_state import EvidenceState
 from target_module.image_detect_module.utils.msdc_types import EvidenceTrack, Observation, TrackState
 
 
-def _obs(frame_idx, source="low_det", score=1.0, box=None, class_name="UAV"):
+def _obs(frame_idx, source="low_det", score=1.0, box=None, class_id=2, class_name="UAV"):
     return Observation(
         box=box or [10, 10, 20, 20],
         source=source,
@@ -19,7 +19,7 @@ def _obs(frame_idx, source="low_det", score=1.0, box=None, class_name="UAV"):
         reliability=1.0,
         modality="visible",
         frame_idx=frame_idx,
-        class_id=2,
+        class_id=class_id,
         class_name=class_name,
     )
 
@@ -43,6 +43,34 @@ class GuardLifecycleConfig(Config):
     MSDC_removed_GUARD_FRAMES = 120
     MSDC_REMOVED_GUARD_CENTER_DIST = 50.0
     MSDC_REMOVED_GUARD_IOU_THRESH = 0.1
+
+
+class RemovedRecoveryConfig(GuardLifecycleConfig):
+    MSDC_REUSE_GUARD_ENABLE = True
+    MSDC_REMOVED_GUARD_FRAMES = 80
+    MSDC_removed_GUARD_FRAMES = 80
+    MSDC_REMOVED_GUARD_CENTER_DIST = 80.0
+    MSDC_REMOVED_RECOVERY_ENABLE = True
+    MSDC_REMOVED_RECOVERY_REQUIRE_CLASS_MATCH = True
+    MSDC_REMOVED_RECOVERY_MAX_AGE = 80
+    MSDC_REMOVED_RECOVERY_MIN_IOU = 0.20
+    MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST = 80.0
+    MSDC_REMOVED_RECOVERY_MIN_SCORE = 0.35
+
+
+class WiderIouRecoveryConfig(RemovedRecoveryConfig):
+    MSDC_REMOVED_GUARD_IOU_THRESH = 0.30
+    MSDC_REMOVED_GUARD_CENTER_DIST = 20.0
+    MSDC_REMOVED_RECOVERY_MIN_IOU = 0.20
+    MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST = 20.0
+
+
+class SaturatedCandidateRecoveryConfig(RemovedRecoveryConfig):
+    MSDC_MAX_CANDIDATES = 1
+
+
+class RecoveryDisabledGuardConfig(RemovedRecoveryConfig):
+    MSDC_REMOVED_RECOVERY_ENABLE = False
 
 
 class GuardDisabledConfig(GuardLifecycleConfig):
@@ -745,10 +773,11 @@ def test_scale_expanded_lost_gate_suppresses_low_spawn_on_skipped_reacquire_fram
     assert updater.last_reacquire_debug["num_suppressed_spawn_groups"] == 1
 
 
-def test_removed_guard_prevents_old_gid_reuse_and_creates_new_id():
-    updater = EvidenceStateUpdater(GuardLifecycleConfig)
+def test_removed_guard_recovers_old_public_id_when_match_is_safe():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
     removed = EvidenceTrack(
         gid=9,
+        public_id=4,
         state=TrackState.REMOVED,
         box=[40, 40, 60, 60],
         velocity=[1.0, 0.0],
@@ -762,6 +791,8 @@ def test_removed_guard_prevents_old_gid_reuse_and_creates_new_id():
             "last_seen": 5,
             "removed_frame_idx": 5,
             "last_velocity": [1.0, 0.0],
+            "class_id": 2,
+            "class_name": "UAV",
         },
         class_id=2,
         class_name="UAV",
@@ -774,13 +805,484 @@ def test_removed_guard_prevents_old_gid_reuse_and_creates_new_id():
     )
 
     event_types = [event.event_type for event in events]
+    recovered = next(track for track in tracks if track.gid == 9)
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "PREVENT_removed_ID_REUSE" not in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert recovered.public_id == 4
+    assert recovered.state == TrackState.LOW_CANDIDATE
+    assert recovered.last_seen == 6
+    assert recovered.retired_signature is None
+    assert len(tracks) == 1
+    assert updater.last_removed_guard_debug["num_recoveries"] == 1
+
+
+def test_removed_guard_recovery_suppresses_nearby_same_frame_spawn():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [
+            _obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV"),
+            _obs(6, source="low_det", score=1.0, box=[64, 40, 84, 60], class_id=2, class_name="UAV"),
+        ],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert [track.gid for track in tracks] == [9]
+    assert updater.last_removed_guard_debug["num_recoveries"] == 1
+    assert updater.last_removed_guard_debug["num_vetoes"] == 0
+    assert updater.last_removed_guard_debug["vetoes"] == []
+
+
+def test_removed_guard_recovery_suppresses_second_group_matching_original_signature():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[100, 40, 120, 60],
+        retired_signature={
+            "last_box": [100.0, 40.0, 120.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [
+            _obs(6, source="low_det", score=1.0, box=[25, 40, 45, 60], class_id=2, class_name="UAV"),
+            _obs(6, source="low_det", score=1.0, box=[175, 40, 195, 60], class_id=2, class_name="UAV"),
+        ],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "NEW_LOW_CANDIDATE" not in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert [track.gid for track in tracks] == [9]
+
+
+def test_removed_guard_recovery_allows_distinct_nearby_same_frame_recoveries():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    first = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+    second = EvidenceTrack(
+        gid=10,
+        public_id=5,
+        state=TrackState.REMOVED,
+        box=[80, 40, 100, 60],
+        retired_signature={
+            "last_box": [80.0, 40.0, 100.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [first, second],
+        [
+            _obs(6, source="low_det", score=1.0, box=[39, 40, 59, 60], class_id=2, class_name="UAV"),
+            _obs(6, source="low_det", score=1.0, box=[81, 40, 101, 60], class_id=2, class_name="UAV"),
+        ],
+        frame_idx=6,
+    )
+
+    recovery_events = [event for event in events if event.event_type == "REMOVED_ID_RECOVERY_CANDIDATE"]
+    assert [event.gid for event in recovery_events] == [9, 10]
+    assert "NEW_ID_CREATED" not in [event.event_type for event in events]
+    assert "NEW_LOW_CANDIDATE" not in [event.event_type for event in events]
+    assert [(track.gid, track.public_id, track.state) for track in tracks] == [
+        (9, 4, TrackState.LOW_CANDIDATE),
+        (10, 5, TrackState.LOW_CANDIDATE),
+    ]
+
+
+def test_removed_guard_recovery_debug_survives_later_non_conflicting_spawn():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [
+            _obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV"),
+            _obs(6, source="low_det", score=1.0, box=[300, 300, 320, 320], class_id=2, class_name="UAV"),
+        ],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "NEW_LOW_CANDIDATE" in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert [track.gid for track in tracks] == [9, 10]
+    assert updater.last_removed_guard_debug["num_recoveries"] == 1
+    assert updater.last_removed_guard_debug["num_vetoes"] == 0
+    assert updater.last_removed_guard_debug["vetoes"] == []
+
+
+def test_removed_guard_recovers_nearest_signature_when_iou_ties_at_zero():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    farther = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[45, 40, 65, 60],
+        retired_signature={
+            "last_box": [45.0, 40.0, 65.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+    nearer = EvidenceTrack(
+        gid=10,
+        public_id=5,
+        state=TrackState.REMOVED,
+        box=[65, 40, 85, 60],
+        retired_signature={
+            "last_box": [65.0, 40.0, 85.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [farther, nearer],
+        [_obs(6, source="low_det", score=1.0, box=[90, 40, 110, 60], class_id=2, class_name="UAV")],
+        frame_idx=6,
+    )
+
+    recovered_event = next(event for event in events if event.event_type == "REMOVED_ID_RECOVERY_CANDIDATE")
+    recovered = next(track for track in tracks if track.gid == 10)
+    assert recovered_event.gid == 10
+    assert recovered.public_id == 5
+    assert recovered.state == TrackState.LOW_CANDIDATE
+    assert next(track for track in tracks if track.gid == 9).state == TrackState.REMOVED
+
+
+def test_removed_guard_recovery_uses_wider_recovery_iou_gate():
+    updater = EvidenceStateUpdater(WiderIouRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[0, 0, 100, 100],
+        retired_signature={
+            "last_box": [0.0, 0.0, 100.0, 100.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [_obs(6, source="low_det", score=1.0, box=[60, 0, 160, 100], class_id=2, class_name="UAV")],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    recovered = next(track for track in tracks if track.gid == 9)
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "PREVENT_removed_ID_REUSE" not in event_types
+    assert recovered.public_id == 4
+    assert recovered.state == TrackState.LOW_CANDIDATE
+    assert len(tracks) == 1
+
+
+def test_removed_guard_recovery_ignores_full_new_candidate_pool():
+    updater = EvidenceStateUpdater(SaturatedCandidateRecoveryConfig)
+    candidate = EvidenceTrack(
+        gid=3,
+        state=TrackState.LOW_CANDIDATE,
+        box=[200, 200, 220, 220],
+        evidence_score=1.0,
+        hits=1,
+        age=1,
+        last_seen=5,
+        class_id=2,
+        class_name="UAV",
+    )
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [candidate, removed],
+        [_obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV")],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    recovered = next(track for track in tracks if track.gid == 9)
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "NEW_LOW_CANDIDATE" not in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert recovered.public_id == 4
+    assert recovered.state == TrackState.LOW_CANDIDATE
+    assert sorted(track.gid for track in tracks) == [3, 9]
+
+
+def test_removed_guard_recovery_counts_against_later_spawn_budget():
+    updater = EvidenceStateUpdater(SaturatedCandidateRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [
+            _obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV"),
+            _obs(6, source="low_det", score=1.0, box=[300, 300, 320, 320], class_id=2, class_name="UAV"),
+        ],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    recovered = next(track for track in tracks if track.gid == 9)
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "NEW_LOW_CANDIDATE" not in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert recovered.public_id == 4
+    assert recovered.state == TrackState.LOW_CANDIDATE
+    assert [track.gid for track in tracks] == [9]
+
+
+def test_removed_guard_recovery_tries_next_conflict_after_class_mismatch():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    mismatched = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 7,
+            "class_name": "USV",
+        },
+        class_id=7,
+        class_name="USV",
+    )
+    matching = EvidenceTrack(
+        gid=10,
+        public_id=5,
+        state=TrackState.REMOVED,
+        box=[45, 40, 65, 60],
+        retired_signature={
+            "last_box": [45.0, 40.0, 65.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [mismatched, matching],
+        [_obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV")],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    recovered = next(track for track in tracks if track.gid == 10)
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" in event_types
+    assert "PREVENT_removed_ID_REUSE" not in event_types
+    assert "NEW_ID_CREATED" not in event_types
+    assert recovered.public_id == 5
+    assert recovered.state == TrackState.LOW_CANDIDATE
+    assert next(track for track in tracks if track.gid == 9).state == TrackState.REMOVED
+
+
+def test_removed_guard_recovery_disabled_keeps_legacy_new_id_fallback():
+    updater = EvidenceStateUpdater(RecoveryDisabledGuardConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [_obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV")],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" not in event_types
     assert "PREVENT_removed_ID_REUSE" in event_types
     assert "NEW_ID_CREATED" in event_types
-    assert "NEW_LOW_CANDIDATE" in event_types
     assert tracks[0].gid == 9
     assert tracks[1].gid == 10
-    assert tracks[1].state == TrackState.LOW_CANDIDATE
+
+
+def test_removed_guard_keeps_new_id_when_recovery_class_mismatches():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [_obs(6, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=7, class_name="USV")],
+        frame_idx=6,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" not in event_types
+    assert "PREVENT_removed_ID_REUSE" in event_types
+    assert "NEW_ID_CREATED" in event_types
+    assert tracks[0].gid == 9
+    assert tracks[1].gid == 10
+    assert tracks[1].public_id is None
+    assert updater.last_removed_guard_debug["num_recoveries"] == 0
     assert updater.last_removed_guard_debug["num_vetoes"] == 1
+
+
+def test_removed_guard_keeps_new_id_when_recovery_signature_is_too_old():
+    updater = EvidenceStateUpdater(RemovedRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [removed],
+        [_obs(90, source="low_det", score=1.0, box=[41, 40, 61, 60], class_id=2, class_name="UAV")],
+        frame_idx=90,
+    )
+
+    event_types = [event.event_type for event in events]
+    assert "REMOVED_ID_RECOVERY_CANDIDATE" not in event_types
+    assert "NEW_LOW_CANDIDATE" in event_types
+    assert tracks[0].gid == 10
+    assert updater.last_removed_guard_debug["num_recent_signatures"] == 0
 
 
 def test_removed_guard_can_be_disabled():

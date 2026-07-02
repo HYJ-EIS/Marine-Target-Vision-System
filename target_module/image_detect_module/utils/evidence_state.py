@@ -348,12 +348,65 @@ class EvidenceStateUpdater:
 
         tracks: list[EvidenceTrack] = []
         events: list[LifecycleEvent] = []
+        recovered_tracks: list[EvidenceTrack] = []
+        recovered_signature_conflicts: list[dict] = []
+        recovered_gids: set[int] = set()
+        removed_guard_debug = None
         for group in observation_groups:
             if not self._group_can_spawn_candidate(group):
                 continue
-            if active_candidates + len(tracks) >= max_candidates:
-                break
+            recovered_track_conflict = self._recovered_spawn_conflict(recovered_tracks, group)
             evidence_score = self._spawn_evidence_score(group)
+            removed_conflicts = self._removed_guard_conflicts(group, existing_tracks, frame_idx)
+            group_guard_debug = dict(self.last_removed_guard_debug)
+            recovered_track = None
+            recovery_event = None
+            recovered_conflict = None
+            for conflict in removed_conflicts:
+                if int(conflict["removed_gid"]) in recovered_gids:
+                    continue
+                recovered_track, recovery_event = self._recover_removed_track(
+                    group=group,
+                    existing_tracks=existing_tracks,
+                    frame_idx=frame_idx,
+                    conflict=conflict,
+                )
+                if recovered_track is not None and recovery_event is not None:
+                    recovered_conflict = conflict
+                    break
+            if recovered_track is not None and recovery_event is not None and recovered_conflict is not None:
+                recovered_tracks.append(recovered_track)
+                recovered_signature_conflicts.append(dict(recovered_conflict))
+                recovered_gids.add(int(recovered_conflict["removed_gid"]))
+                removed_guard_debug = self._merge_removed_guard_debug(
+                    removed_guard_debug,
+                    group_guard_debug,
+                    count_vetoes=False,
+                    count_recovery=True,
+                )
+                events.append(recovery_event)
+                continue
+
+            recovered_signature_conflict = self._recovered_signature_spawn_conflict(
+                recovered_signature_conflicts,
+                group,
+            )
+            if recovered_track_conflict is not None or recovered_signature_conflict is not None:
+                continue
+
+            removed_conflict = next(
+                (conflict for conflict in removed_conflicts if int(conflict["removed_gid"]) not in recovered_gids),
+                None,
+            )
+            if active_candidates + len(tracks) + len(recovered_tracks) >= max_candidates:
+                break
+            removed_guard_debug = self._merge_removed_guard_debug(
+                removed_guard_debug,
+                group_guard_debug,
+                count_vetoes=removed_conflict is not None,
+                count_recovery=False,
+            )
+
             gid = self.next_gid
             self.next_gid += 1
             real_det_hits = 1 if self._group_has_real_detection(group) else 0
@@ -376,7 +429,6 @@ class EvidenceStateUpdater:
                 class_id=int(group.class_id),
                 class_name=str(group.class_name),
             )
-            removed_conflict = self._removed_guard_conflict(group, existing_tracks, frame_idx)
             tracks.append(track)
             if removed_conflict is not None:
                 events.append(self._make_removed_guard_event(
@@ -406,6 +458,8 @@ class EvidenceStateUpdater:
                 to_state=state,
                 reason="spawn_from_observation",
             ))
+        if removed_guard_debug is not None:
+            self.last_removed_guard_debug = removed_guard_debug
         return tracks, events
 
     def active_tracks_to_project_boxes(self, tracks: list[EvidenceTrack]) -> list[dict]:
@@ -929,6 +983,46 @@ class EvidenceStateUpdater:
                 best = conflict
         return best
 
+    def _recovered_spawn_conflict(
+        self,
+        recovered_tracks: list[EvidenceTrack],
+        group: _ObservationGroup,
+    ) -> dict | None:
+        if not bool(self._cfg("MSDC_SPAWN_SUPPRESS_ENABLE", True)) or not recovered_tracks:
+            return None
+        return self._active_search_conflict(recovered_tracks, group)
+
+    def _recovered_signature_spawn_conflict(
+        self,
+        recovered_signature_conflicts: list[dict],
+        group: _ObservationGroup,
+    ) -> dict | None:
+        if not recovered_signature_conflicts:
+            return None
+
+        min_iou = float(self._cfg("MSDC_REMOVED_RECOVERY_MIN_IOU", 0.20))
+        max_center = float(self._cfg("MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST", 80.0))
+        group_box = group.box.reshape(1, 4)
+        best = None
+        for conflict in recovered_signature_conflicts:
+            signature = conflict.get("removed_signature") if isinstance(conflict.get("removed_signature"), dict) else {}
+            if not self._removed_recovery_class_compatible(signature, int(group.class_id)):
+                continue
+            sig_box = _box_array(signature.get("last_box", conflict.get("candidate_box", group.box))).reshape(1, 4)
+            iou_score = float(_iou_batch(group_box, sig_box)[0, 0])
+            center_dist = float(_center_distance_batch(group_box, sig_box)[0, 0])
+            if iou_score < min_iou and center_dist > max_center:
+                continue
+            candidate = {
+                "gid": int(conflict["removed_gid"]),
+                "iou": float(round(iou_score, 4)),
+                "center_distance": float(round(center_dist, 4)),
+                "sources": list(group.source_history),
+            }
+            if best is None or (iou_score, -center_dist) > (float(best["iou"]), -float(best["center_distance"])):
+                best = candidate
+        return best
+
     @staticmethod
     def _real_detection_sources() -> set[str]:
         return {"high_det", "low_det", "reacquire"}
@@ -1106,9 +1200,18 @@ class EvidenceStateUpdater:
         existing_tracks: list[EvidenceTrack],
         frame_idx: int,
     ) -> dict | None:
+        conflicts = self._removed_guard_conflicts(group, existing_tracks, frame_idx)
+        return conflicts[0] if conflicts else None
+
+    def _removed_guard_conflicts(
+        self,
+        group: _ObservationGroup,
+        existing_tracks: list[EvidenceTrack],
+        frame_idx: int,
+    ) -> list[dict]:
         if not bool(self._cfg("MSDC_REUSE_GUARD_ENABLE", True)):
             self.last_removed_guard_debug = self._empty_removed_guard_debug(enabled=False)
-            return None
+            return []
 
         guard_frames = int(self._cfg(
             "MSDC_removed_GUARD_FRAMES",
@@ -1116,10 +1219,13 @@ class EvidenceStateUpdater:
         ))
         if guard_frames <= 0:
             self.last_removed_guard_debug = self._empty_removed_guard_debug(enabled=False)
-            return None
+            return []
 
         iou_thresh = float(self._cfg("MSDC_REMOVED_GUARD_IOU_THRESH", 0.3))
         center_thresh = float(self._cfg("MSDC_REMOVED_GUARD_CENTER_DIST", self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0)))
+        if bool(self._cfg("MSDC_REMOVED_RECOVERY_ENABLE", True)):
+            iou_thresh = min(iou_thresh, float(self._cfg("MSDC_REMOVED_RECOVERY_MIN_IOU", 0.20)))
+            center_thresh = max(center_thresh, float(self._cfg("MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST", 80.0)))
         group_box = group.box
         guard_data = self._removed_guard_data(existing_tracks, frame_idx, guard_frames)
         sig_boxes = guard_data["boxes"]
@@ -1129,37 +1235,44 @@ class EvidenceStateUpdater:
                 "guard_frames": int(guard_frames),
                 "num_recent_signatures": 0,
                 "num_vetoes": 0,
+                "num_recoveries": 0,
                 "vetoes": [],
             }
-            return None
+            return []
 
         ious = _iou_batch(group_box.reshape(1, 4), sig_boxes).reshape(-1)
         distances = _center_distance_batch(group_box.reshape(1, 4), sig_boxes).reshape(-1)
         matched_indices = np.where((ious >= iou_thresh) | (distances <= center_thresh))[0]
+        ranked_indices = sorted(
+            (int(idx) for idx in matched_indices),
+            key=lambda idx: (float(ious[idx]), -float(distances[idx])),
+            reverse=True,
+        )
         debug_limit = int(self._cfg("MSDC_DEBUG_DETAIL_LIMIT", 8))
         vetoes = [
             self._removed_guard_payload(guard_data, int(idx), group_box, float(ious[idx]), float(distances[idx]))
-            for idx in matched_indices[:max(0, debug_limit)]
+            for idx in ranked_indices[:max(0, debug_limit)]
         ]
-        best_conflict = None
-        if matched_indices.size > 0:
-            best_idx = int(matched_indices[int(np.argmax(ious[matched_indices]))])
-            best_conflict = self._removed_guard_payload(
+        conflicts = [
+            self._removed_guard_payload(
                 guard_data,
-                best_idx,
+                idx,
                 group_box,
-                float(ious[best_idx]),
-                float(distances[best_idx]),
+                float(ious[idx]),
+                float(distances[idx]),
             )
+            for idx in ranked_indices
+        ]
 
         self.last_removed_guard_debug = {
             "enabled": True,
             "guard_frames": int(guard_frames),
             "num_recent_signatures": int(len(guard_data["gids"])),
             "num_vetoes": int(matched_indices.size),
+            "num_recoveries": 0,
             "vetoes": vetoes,
         }
-        return best_conflict
+        return conflicts
 
     def _removed_guard_data(
         self,
@@ -1173,10 +1286,11 @@ class EvidenceStateUpdater:
 
         boxes = []
         gids = []
+        track_indices = []
         removed_frame_indices = []
         ages = []
         signatures = []
-        for track in existing_tracks:
+        for track_index, track in enumerate(existing_tracks):
             if _as_state(track.state) != TrackState.REMOVED:
                 continue
             signature = track.retired_signature or self._make_removed_signature(track, int(frame_idx))
@@ -1188,6 +1302,7 @@ class EvidenceStateUpdater:
                 continue
             boxes.append(_box_array(signature.get("last_box", track.box)))
             gids.append(int(track.gid))
+            track_indices.append(int(track_index))
             removed_frame_indices.append(int(removed_frame_idx))
             ages.append(int(age))
             signatures.append(signature)
@@ -1195,6 +1310,7 @@ class EvidenceStateUpdater:
         payload = {
             "boxes": np.vstack(boxes) if boxes else np.zeros((0, 4), dtype=np.float64),
             "gids": gids,
+            "track_indices": track_indices,
             "removed_frame_indices": removed_frame_indices,
             "ages": ages,
             "signatures": signatures,
@@ -1213,6 +1329,7 @@ class EvidenceStateUpdater:
     ) -> dict:
         return {
             "removed_gid": int(guard_data["gids"][index]),
+            "track_index": int(guard_data["track_indices"][index]),
             "removed_frame_idx": int(guard_data["removed_frame_indices"][index]),
             "signature_age": int(guard_data["ages"][index]),
             "iou": float(round(iou_score, 4)),
@@ -1220,6 +1337,129 @@ class EvidenceStateUpdater:
             "candidate_box": [float(v) for v in group_box.tolist()],
             "removed_signature": guard_data["signatures"][index],
         }
+
+    def _merge_removed_guard_debug(
+        self,
+        aggregate: dict | None,
+        group_debug: dict,
+        *,
+        count_vetoes: bool,
+        count_recovery: bool,
+    ) -> dict:
+        if aggregate is None:
+            aggregate = {
+                "enabled": bool(group_debug.get("enabled", True)),
+                "guard_frames": int(group_debug.get("guard_frames", 0)),
+                "num_recent_signatures": 0,
+                "num_vetoes": 0,
+                "num_recoveries": 0,
+                "vetoes": [],
+            }
+
+        aggregate["enabled"] = bool(aggregate.get("enabled", False) or group_debug.get("enabled", False))
+        aggregate["guard_frames"] = int(group_debug.get("guard_frames", aggregate.get("guard_frames", 0)))
+        aggregate["num_recent_signatures"] = max(
+            int(aggregate.get("num_recent_signatures", 0)),
+            int(group_debug.get("num_recent_signatures", 0)),
+        )
+        if count_vetoes:
+            aggregate["num_vetoes"] = int(aggregate.get("num_vetoes", 0)) + int(group_debug.get("num_vetoes", 0))
+            aggregate["vetoes"] = list(aggregate.get("vetoes", [])) + list(group_debug.get("vetoes", []))
+        if count_recovery:
+            aggregate["num_recoveries"] = int(aggregate.get("num_recoveries", 0)) + 1
+        return aggregate
+
+    def _removed_recovery_allowed(self, group: _ObservationGroup, conflict: dict) -> tuple[bool, str]:
+        if not bool(self._cfg("MSDC_REMOVED_RECOVERY_ENABLE", True)):
+            return False, "recovery_disabled"
+
+        max_age = int(self._cfg("MSDC_REMOVED_RECOVERY_MAX_AGE", self._cfg("MSDC_REMOVED_GUARD_FRAMES", 80)))
+        if int(conflict["signature_age"]) > max_age:
+            return False, "signature_too_old"
+
+        min_iou = float(self._cfg("MSDC_REMOVED_RECOVERY_MIN_IOU", 0.20))
+        max_center = float(self._cfg("MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST", 80.0))
+        if float(conflict["iou"]) < min_iou and float(conflict["center_distance"]) > max_center:
+            return False, "geometry_below_recovery_gate"
+
+        min_score = float(self._cfg("MSDC_REMOVED_RECOVERY_MIN_SCORE", 0.35))
+        if float(self._spawn_evidence_score(group)) < min_score:
+            return False, "score_below_recovery_gate"
+
+        signature = conflict.get("removed_signature") if isinstance(conflict.get("removed_signature"), dict) else {}
+        if not self._removed_recovery_class_compatible(signature, int(group.class_id)):
+            return False, "class_mismatch"
+
+        return True, "safe_removed_signature_match"
+
+    def _removed_recovery_class_compatible(self, signature: dict, group_class_id: int) -> bool:
+        if not bool(self._cfg("MSDC_REMOVED_RECOVERY_REQUIRE_CLASS_MATCH", True)):
+            return True
+        removed_class_id = int(signature.get("class_id", -1))
+        if removed_class_id < 0 or int(group_class_id) < 0:
+            return True
+        return removed_class_id == int(group_class_id)
+
+    def _recover_removed_track(
+        self,
+        group: _ObservationGroup,
+        existing_tracks: list[EvidenceTrack],
+        frame_idx: int,
+        conflict: dict,
+    ) -> tuple[EvidenceTrack | None, LifecycleEvent | None]:
+        ok, reason = self._removed_recovery_allowed(group, conflict)
+        if not ok:
+            conflict["recovery_block_reason"] = reason
+            return None, None
+
+        track_index = int(conflict["track_index"])
+        if track_index < 0 or track_index >= len(existing_tracks):
+            conflict["recovery_block_reason"] = "track_index_out_of_range"
+            return None, None
+        track = existing_tracks[track_index]
+        if _as_state(track.state) != TrackState.REMOVED:
+            conflict["recovery_block_reason"] = "track_not_removed"
+            return None, None
+
+        evidence_score = self._spawn_evidence_score(group)
+        real_det_hits = 1 if self._group_has_real_detection(group) else 0
+        state = TrackState.LOW_CANDIDATE if self._group_should_spawn_low_candidate(group) else TrackState.CANDIDATE
+        track.state = state
+        track.box = group.box.copy()
+        track.velocity = [0.0, 0.0]
+        track.evidence_score = evidence_score
+        track.hits = 1
+        track.misses = 0
+        track.age = 1
+        track.last_seen = int(frame_idx)
+        track.last_real_det_frame = int(frame_idx) if real_det_hits else -1
+        track.real_det_hits = real_det_hits
+        track.last_real_det_box = group.box.copy() if real_det_hits else None
+        track.low_det_history = self._low_history_from_group(group, frame_idx)
+        track.source_history = list(group.source_history)
+        track.class_id = int(group.class_id)
+        track.class_name = str(group.class_name)
+        track.retired_signature = None
+        self._removed_guard_cache_key = None
+        self._removed_guard_cache = None
+
+        event = self._make_event(
+            frame_idx=frame_idx,
+            track=track,
+            event_type="REMOVED_ID_RECOVERY_CANDIDATE",
+            from_state=TrackState.REMOVED,
+            to_state=state,
+            reason=reason,
+            extra={
+                "recovered_gid": int(track.gid),
+                "recovered_public_id": int(track.public_id) if track.public_id is not None else None,
+                "guard_iou": float(conflict["iou"]),
+                "guard_center_distance": float(conflict["center_distance"]),
+                "signature_age": int(conflict["signature_age"]),
+                "removed_signature": conflict["removed_signature"],
+            },
+        )
+        return track, event
 
     def _prune_stale_removed_tracks(self, tracks: list[EvidenceTrack], frame_idx: int) -> list[EvidenceTrack]:
         guard_frames = int(self._cfg(
@@ -1757,6 +1997,7 @@ class EvidenceStateUpdater:
             )),
             "num_recent_signatures": 0,
             "num_vetoes": 0,
+            "num_recoveries": 0,
             "vetoes": [],
         }
 
