@@ -44,6 +44,10 @@ REQUIRED_DIAGNOSTIC_SUMMARY_FIELDS = [
     "inherit_correct",
     "inherit_wrong",
     "inherit_ambiguous",
+    "removed_recovery_attempts",
+    "removed_recovery_success",
+    "removed_recovery_success_rate",
+    "removed_guard_fallback_new_id",
 ]
 
 
@@ -150,6 +154,16 @@ def validate_run(run_root: str | Path) -> dict[str, object]:
     speed_results = root / "summary" / "speed_results.csv"
     if not _csv_has_fields(speed_results, REQUIRED_SPEED):
         missing.append(f"speed:{speed_results}")
+
+    diagnostic_results = root / "summary" / "diagnostic_results.csv"
+    if not _csv_has_rows(diagnostic_results):
+        missing.append(f"diagnostic_results:{diagnostic_results}")
+    elif not _csv_has_columns(diagnostic_results, REQUIRED_DIAGNOSTIC_SUMMARY_FIELDS):
+        missing.append(
+            "diagnostic_results_fields:"
+            f"{diagnostic_results}:"
+            f"{','.join(REQUIRED_DIAGNOSTIC_SUMMARY_FIELDS)}"
+        )
 
     return {"ok": not missing, "missing": missing, "run_root": str(root)}
 

@@ -24,6 +24,10 @@ REQUIRED_DIAGNOSTIC_FIELDS = [
     "inherit_correct",
     "inherit_wrong",
     "inherit_ambiguous",
+    "removed_recovery_attempts",
+    "removed_recovery_success",
+    "removed_recovery_success_rate",
+    "removed_guard_fallback_new_id",
 ]
 
 
@@ -60,6 +64,18 @@ def _make_valid_run(root):
     summary_diag_dir = root / "main/main_full/diagnostics"
     _write_csv(
         summary_diag_dir / "msdc_diagnostic_summary.csv",
+        [
+            {
+                "seq_name": "seq",
+                "tracker": "msdc_elt",
+                "rows": "1",
+                **{field: "N/A" for field in REQUIRED_DIAGNOSTIC_FIELDS},
+            }
+        ],
+        ["seq_name", "tracker", "rows", *REQUIRED_DIAGNOSTIC_FIELDS],
+    )
+    _write_csv(
+        root / "summary/diagnostic_results.csv",
         [
             {
                 "seq_name": "seq",
@@ -251,6 +267,16 @@ def test_validate_run_rejects_missing_diagnostic_summary(tmp_path):
     assert any("diagnostic_summary" in item for item in result["missing"])
 
 
+def test_validate_run_rejects_missing_summary_diagnostic_results(tmp_path):
+    _make_valid_run(tmp_path)
+    (tmp_path / "summary/diagnostic_results.csv").unlink()
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any("diagnostic_results:" in item for item in result["missing"])
+
+
 def test_validate_run_rejects_missing_slice_manifest(tmp_path):
     _make_valid_run(tmp_path)
     (tmp_path / "slice/slice_manifest.csv").unlink()
@@ -341,7 +367,30 @@ def test_validate_run_rejects_missing_diagnostic_required_field(tmp_path):
     result = validate_run(tmp_path)
 
     assert result["ok"] is False
-    assert any("diagnostic_summary_fields" in item for item in result["missing"])
+    assert any(
+        "diagnostic_summary_fields" in item
+        and "removed_guard_fallback_new_id" in item
+        for item in result["missing"]
+    )
+
+
+def test_validate_run_rejects_summary_diagnostic_results_missing_removed_field(tmp_path):
+    _make_valid_run(tmp_path)
+    fields = ["seq_name", "tracker", "rows", *REQUIRED_DIAGNOSTIC_FIELDS[:-1]]
+    _write_csv(
+        tmp_path / "summary/diagnostic_results.csv",
+        [{field: "N/A" for field in fields}],
+        fields,
+    )
+
+    result = validate_run(tmp_path)
+
+    assert result["ok"] is False
+    assert any(
+        "diagnostic_results_fields" in item
+        and "removed_guard_fallback_new_id" in item
+        for item in result["missing"]
+    )
 
 
 def test_validate_run_rejects_one_invalid_diagnostic_summary_even_if_another_is_valid(tmp_path):

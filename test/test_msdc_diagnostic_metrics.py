@@ -108,6 +108,54 @@ def test_summarize_msdc_diagnostics_supports_current_event_aliases(tmp_path):
     assert row["reacquire_success"] == 2
 
 
+def test_summarize_msdc_diagnostics_reports_removed_recovery_events(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    stage_path = tmp_path / "stage_observations.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(
+        events_path,
+        [
+            {"frame_idx": 10, "gid": 2, "event_type": "REMOVED_ID_RECOVERY_CANDIDATE"},
+            {"frame_idx": 20, "gid": 5, "event_type": "PREVENT_removed_ID_REUSE"},
+            {
+                "frame_idx": 20,
+                "gid": 8,
+                "event_type": "NEW_ID_CREATED",
+                "reason": "removed_guard_conflict_new_gid",
+            },
+            {
+                "frame_idx": 21,
+                "gid": 9,
+                "event_type": "NEW_ID_CREATED",
+                "reason": "ordinary_candidate_spawn",
+            },
+        ],
+    )
+    _write_jsonl(stage_path, [])
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    row = summarize_msdc_diagnostics(events_path, stage_path, per_gt_path)
+
+    assert row["removed_recovery_attempts"] == 2
+    assert row["removed_recovery_success"] == 1
+    assert row["removed_recovery_success_rate"] == 0.5
+    assert row["removed_guard_fallback_new_id"] == 1
+
+
+def test_summarize_msdc_diagnostics_reports_no_removed_recovery_attempts(tmp_path):
+    events_path = tmp_path / "lifecycle_events.jsonl"
+    per_gt_path = tmp_path / "per_gt.csv"
+    _write_jsonl(events_path, [{"frame_idx": 1, "gid": 9, "event_type": "READY_LOW_CANDIDATE"}])
+    per_gt_path.write_text("gt_id,predicted_id_count,matched_segments\n", encoding="utf-8")
+
+    row = summarize_msdc_diagnostics(events_path, tmp_path / "missing_stage.jsonl", per_gt_path)
+
+    assert row["removed_recovery_attempts"] == 0
+    assert row["removed_recovery_success"] == 0
+    assert row["removed_recovery_success_rate"] == "N/A"
+    assert row["removed_guard_fallback_new_id"] == 0
+
+
 def test_summarize_msdc_diagnostics_reports_low_candidate_recall_and_attempts(tmp_path):
     events_path = tmp_path / "lifecycle_events.jsonl"
     stage_path = tmp_path / "stage_observations.jsonl"

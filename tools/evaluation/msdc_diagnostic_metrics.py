@@ -30,6 +30,10 @@ DIAGNOSTIC_FIELDS = [
     "track_break_count",
     "idsw_before_reacquire_inherit",
     "idsw_after_reacquire_inherit",
+    "removed_recovery_attempts",
+    "removed_recovery_success",
+    "removed_recovery_success_rate",
+    "removed_guard_fallback_new_id",
 ]
 
 _LOW_CONFIRM_EVENTS = {
@@ -100,6 +104,9 @@ def summarize_msdc_diagnostics(
     reacquire_attempts = 0
     reacquire_opportunities = 0
     reacquire_success = 0
+    removed_recovery_attempts = 0
+    removed_recovery_success = 0
+    removed_guard_fallback_new_id = 0
 
     for event in events:
         event_type = str(event.get("event_type", "")).strip().upper()
@@ -137,6 +144,19 @@ def summarize_msdc_diagnostics(
 
         if event_type in _REACQUIRE_EVENTS:
             reacquire_success += 1
+
+        if event_type == "REMOVED_ID_RECOVERY_CANDIDATE":
+            removed_recovery_attempts += 1
+            removed_recovery_success += 1
+
+        if event_type == "PREVENT_REMOVED_ID_REUSE":
+            removed_recovery_attempts += 1
+
+        if (
+            event_type == "NEW_ID_CREATED"
+            and event.get("reason") == "removed_guard_conflict_new_gid"
+        ):
+            removed_guard_fallback_new_id += 1
 
     fragmentation_count = 0
     track_break_count = 0
@@ -176,6 +196,14 @@ def summarize_msdc_diagnostics(
             if reacquire_opportunities
             else "N/A"
         ),
+        "removed_recovery_attempts": int(removed_recovery_attempts),
+        "removed_recovery_success": int(removed_recovery_success),
+        "removed_recovery_success_rate": (
+            round(removed_recovery_success / removed_recovery_attempts, 4)
+            if removed_recovery_attempts
+            else "N/A"
+        ),
+        "removed_guard_fallback_new_id": int(removed_guard_fallback_new_id),
         "fragmentation_count": int(fragmentation_count),
         "track_break_count": int(track_break_count),
         "idsw_before_reacquire_inherit": "N/A",
