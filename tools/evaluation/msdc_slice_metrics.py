@@ -16,7 +16,7 @@ if str(_ROOT) not in sys.path:
 from target_module.image_detect_module.constants import METRIC_FIELDS  # noqa: E402
 from tools.evaluation.motchallenge_eval import run_motchallenge_eval  # noqa: E402
 
-SLICE_METRIC_FIELDS = ["seq_name", "tracker", "num_slices", "total_slice_frames", *METRIC_FIELDS]
+SLICE_RESULT_FIELDS = ["seq_name", "tracker", "num_slices", "total_slice_frames", *METRIC_FIELDS]
 EVAL_SUMMARY_FIELDS = ["seq_name", "tracker", *METRIC_FIELDS]
 
 
@@ -67,7 +67,7 @@ def write_slice_metric_rows(output_csv, rows) -> Path:
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SLICE_METRIC_FIELDS, extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=SLICE_RESULT_FIELDS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
     return output_csv
