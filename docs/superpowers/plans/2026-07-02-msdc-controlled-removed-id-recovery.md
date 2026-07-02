@@ -457,7 +457,9 @@ Inside the event loop after the reacquire counting block, add:
 ```python
         if event_type == "REMOVED_ID_RECOVERY_CANDIDATE":
             removed_recovery_attempts += 1
-            removed_recovery_success += 1
+            recovered_public_id = extra.get("recovered_public_id")
+            if recovered_public_id not in (None, ""):
+                removed_recovery_success += 1
 
         if event_type == "PREVENT_REMOVED_ID_REUSE":
             removed_recovery_attempts += 1
@@ -491,7 +493,18 @@ def test_removed_recovery_diagnostics_count_success_and_fallback(tmp_path):
     _write_jsonl(
         events_path,
         [
-            {"frame_idx": 10, "gid": 2, "event_type": "REMOVED_ID_RECOVERY_CANDIDATE"},
+            {
+                "frame_idx": 10,
+                "gid": 2,
+                "event_type": "REMOVED_ID_RECOVERY_CANDIDATE",
+                "extra": {"recovered_public_id": 4},
+            },
+            {
+                "frame_idx": 11,
+                "gid": 3,
+                "event_type": "REMOVED_ID_RECOVERY_CANDIDATE",
+                "extra": {"recovered_public_id": None},
+            },
             {"frame_idx": 20, "gid": 5, "event_type": "PREVENT_removed_ID_REUSE"},
             {
                 "frame_idx": 20,
@@ -506,9 +519,9 @@ def test_removed_recovery_diagnostics_count_success_and_fallback(tmp_path):
 
     row = summarize_msdc_diagnostics(events_path, stage_path, per_gt_path)
 
-    assert row["removed_recovery_attempts"] == 2
+    assert row["removed_recovery_attempts"] == 3
     assert row["removed_recovery_success"] == 1
-    assert row["removed_recovery_success_rate"] == 0.5
+    assert row["removed_recovery_success_rate"] == 0.3333
     assert row["removed_guard_fallback_new_id"] == 1
 ```
 
