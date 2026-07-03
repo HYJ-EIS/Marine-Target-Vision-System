@@ -528,6 +528,7 @@ def test_formal_v3_ablation_variants_are_available():
         "low_budget_topk16",
         "low_budget_topk64",
         "removed_recovery_off",
+        "reacquire_every_frame_low_score",
     }
     assert expected <= set(ABLATION_VARIANTS)
 
@@ -552,6 +553,11 @@ def test_formal_v3_ablation_variants_are_available():
     assert recovery_off_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+
+    every_frame_env = _variant_env("reacquire_every_frame_low_score")
+    assert every_frame_env["MSDC_REACQUIRE_INTERVAL"] == "1"
+    assert every_frame_env["MSDC_REACQUIRE_SCORE"] == "1.0"
+    assert every_frame_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
 
 
 def test_formal_v3_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):

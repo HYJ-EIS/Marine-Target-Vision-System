@@ -33,7 +33,11 @@ from target_module.image_detect_module.constants import (  # noqa: E402
     PAPER_TRACKER_CHOICES,
     SPEED_FIELDS,
 )
-from tools.experiments.run_msdc_ablation import V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV  # noqa: E402
+from tools.experiments.run_msdc_ablation import (  # noqa: E402
+    ABLATION_VARIANTS,
+    FORMAL_MSDC_VARIANT,
+    V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV,
+)
 
 
 _FORMAL_V3_BOOL_KEYS = {
@@ -62,6 +66,7 @@ _FORMAL_V3_INT_KEYS = {
 }
 _FORMAL_V3_FLOAT_KEYS = {
     "MSDC_LOW_OBS_MIN_CONF",
+    "MSDC_REACQUIRE_SCORE",
     "MSDC_REACQUIRE_CENTER_DIST",
     "MSDC_REACQUIRE_MAX_CENTER_DIST",
 }
@@ -82,6 +87,18 @@ FORMAL_V3_CONFIG_OVERRIDES = {
     for key in [*_FORMAL_V3_BOOL_KEYS, *_FORMAL_V3_INT_KEYS, *_FORMAL_V3_FLOAT_KEYS]
 }
 FORMAL_V3_CONFIG_OVERRIDES["MSDC_DEBUG_EVENTS"] = False
+
+
+def _config_overrides_for_variant(variant: str) -> dict[str, bool | int | float]:
+    if variant not in ABLATION_VARIANTS:
+        raise ValueError(f"Unknown MS-DC variant: {variant}")
+    overrides = dict(FORMAL_V3_CONFIG_OVERRIDES)
+    supported_keys = _FORMAL_V3_BOOL_KEYS | _FORMAL_V3_INT_KEYS | _FORMAL_V3_FLOAT_KEYS
+    for key, value in ABLATION_VARIANTS[variant].items():
+        if key in supported_keys:
+            overrides[key] = _coerce_formal_v3_value(key, value)
+    overrides["MSDC_DEBUG_EVENTS"] = False
+    return overrides
 
 
 def percentile(values: list[float] | tuple[float, ...], q: float) -> float:
@@ -453,7 +470,8 @@ def run_speed_benchmark(args: argparse.Namespace) -> tuple[Path, Path]:
     timings_path = output_dir / "speed_timings.jsonl"
     results_path = output_dir / "speed_results.csv"
 
-    with _temporary_config_overrides(Config, FORMAL_V3_CONFIG_OVERRIDES):
+    variant = getattr(args, "msdc_variant", FORMAL_MSDC_VARIANT) or FORMAL_MSDC_VARIANT
+    with _temporary_config_overrides(Config, _config_overrides_for_variant(str(variant))):
         with timings_path.open("w", encoding="utf-8") as timing_fh:
             rows = [
                 _run_tracker_benchmark(
@@ -487,6 +505,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--commit-hash", default="", help="Commit hash recorded in speed_results.csv")
     parser.add_argument("--frames", type=int, default=1000, help="Requested frame count")
     parser.add_argument("--trackers", nargs="+", choices=PAPER_TRACKER_CHOICES, default=list(PAPER_TRACKER_CHOICES))
+    parser.add_argument("--msdc-variant", choices=list(ABLATION_VARIANTS), default=FORMAL_MSDC_VARIANT)
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
     args = parser.parse_args(argv)

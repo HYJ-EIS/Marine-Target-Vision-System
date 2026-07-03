@@ -95,6 +95,11 @@ ABLATION_VARIANTS = {
         "MSDC_LOW_OBS_MAX_PER_FRAME": "96",
     },
     "removed_recovery_off": {**FORMAL_V3_ENV, "MSDC_REMOVED_RECOVERY_ENABLE": "0"},
+    "reacquire_every_frame_low_score": {
+        **FORMAL_V3_ENV,
+        "MSDC_REACQUIRE_INTERVAL": "1",
+        "MSDC_REACQUIRE_SCORE": "1.0",
+    },
 }
 
 
