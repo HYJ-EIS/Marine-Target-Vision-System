@@ -1640,17 +1640,10 @@ class EvidenceStateUpdater:
             track.class_name = str(group.class_name)
 
     def _matched_group_refreshes_primary_box(self, track: EvidenceTrack, group: _ObservationGroup) -> bool:
-        sources = set(group.source_scores)
-        if sources & {"high_det", "reacquire"}:
+        if _as_state(track.state) != TrackState.ACTIVE:
             return True
-        if "low_det" not in sources:
-            return _as_state(track.state) != TrackState.ACTIVE
-        state = _as_state(track.state)
-        if state == TrackState.ACTIVE:
-            return bool(self._cfg("MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE", False))
-        if state == TrackState.LOST:
-            return bool(self._cfg("MSDC_LOW_UPDATE_LOST_BOX_ENABLE", True))
-        return True
+        sources = set(group.source_scores)
+        return bool(sources & {"high_det", "reacquire"})
 
     def _apply_negative_evidence(self, track: EvidenceTrack) -> None:
         track.misses = int(track.misses) + 1

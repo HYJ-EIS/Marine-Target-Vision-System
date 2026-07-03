@@ -198,8 +198,6 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
                 "debug": Config.MSDC_DEBUG_EVENTS,
                 "topk": Config.MSDC_LOW_OBS_TOPK,
                 "min_conf": Config.MSDC_LOW_OBS_MIN_CONF,
-                "low_update_active": Config.MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE,
-                "low_update_lost": Config.MSDC_LOW_UPDATE_LOST_BOX_ENABLE,
             }
         )
         return {
@@ -243,8 +241,6 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
     monkeypatch.setattr(Config, "MSDC_DEBUG_EVENTS", True, raising=False)
     monkeypatch.setattr(Config, "MSDC_LOW_OBS_TOPK", 0, raising=False)
     monkeypatch.setattr(Config, "MSDC_LOW_OBS_MIN_CONF", 0.0, raising=False)
-    monkeypatch.setattr(Config, "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE", True, raising=False)
-    monkeypatch.setattr(Config, "MSDC_LOW_UPDATE_LOST_BOX_ENABLE", False, raising=False)
 
     args = argparse.Namespace(
         output_root=str(tmp_path / "out"),
@@ -261,91 +257,11 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
             "debug": False,
             "topk": 32,
             "min_conf": 0.25,
-            "low_update_active": False,
-            "low_update_lost": True,
         }
     ]
     assert Config.MSDC_DEBUG_EVENTS is True
     assert Config.MSDC_LOW_OBS_TOPK == 0
     assert Config.MSDC_LOW_OBS_MIN_CONF == 0.0
-    assert Config.MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE is True
-    assert Config.MSDC_LOW_UPDATE_LOST_BOX_ENABLE is False
-
-
-def test_run_speed_benchmark_applies_selected_msdc_variant(tmp_path, monkeypatch):
-    from target_module.image_detect_module.config import Config
-
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"not a real video")
-    seen_config = []
-
-    def fake_run_tracker_benchmark(**kwargs):
-        seen_config.append(
-            {
-                "low_update_active": Config.MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE,
-                "low_update_lost": Config.MSDC_LOW_UPDATE_LOST_BOX_ENABLE,
-            }
-        )
-        return {
-            "run_id": kwargs["run_id"],
-            "commit_hash": kwargs["commit_hash"],
-            "video_path": str(kwargs["input_video"]),
-            "seq_name": kwargs["seq_name"],
-            "tracker": kwargs["tracker_type"],
-            "method": "fake",
-            "resolution": "0x0",
-            "requested_frames": 0,
-            "processed_frames": 0,
-            "total_time_s": "0.000000",
-            "mean_fps": "0.000000",
-            "mean_latency_ms": "0.000000",
-            "p50_latency_ms": "0.000000",
-            "p95_latency_ms": "0.000000",
-            "peak_memory_mb": "N/A",
-            "detector_calls_total": 0,
-            "detector_calls_high_det": 0,
-            "detector_calls_low_det": 0,
-            "detector_calls_tracker_update": 0,
-            "mean_read_decode_ms": "0.000000",
-            "mean_low_detection_ms": "0.000000",
-            "mean_high_split_ms": "0.000000",
-            "mean_low_filter_budget_ms": "0.000000",
-            "mean_observation_build_ms": "0.000000",
-            "mean_evidence_update_ms": "0.000000",
-            "mean_output_nms_ms": "0.000000",
-            "mean_render_write_ms": "0.000000",
-            "mean_read_ms": "0.000000",
-            "mean_high_det_ms": "0.000000",
-            "mean_low_det_ms": "0.000000",
-            "mean_tracker_ms": "0.000000",
-            "mean_render_ms": "0.000000",
-            "mean_write_ms": "0.000000",
-        }
-
-    monkeypatch.setattr(benchmark, "_resolve_benchmark_input", lambda args: (video, "seq", "visible"))
-    monkeypatch.setattr(benchmark, "_run_tracker_benchmark", fake_run_tracker_benchmark)
-    monkeypatch.setattr(Config, "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE", False, raising=False)
-    monkeypatch.setattr(Config, "MSDC_LOW_UPDATE_LOST_BOX_ENABLE", False, raising=False)
-
-    args = argparse.Namespace(
-        output_root=str(tmp_path / "out"),
-        run_id="variant",
-        commit_hash="abc123",
-        frames=0,
-        trackers=["msdc_elt"],
-        progress_interval=0,
-        msdc_variant="low_position_update_on",
-    )
-    benchmark.run_speed_benchmark(args)
-
-    assert seen_config == [
-        {
-            "low_update_active": True,
-            "low_update_lost": True,
-        }
-    ]
-    assert Config.MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE is False
-    assert Config.MSDC_LOW_UPDATE_LOST_BOX_ENABLE is False
 
 
 def test_tracker_benchmark_releases_unopened_capture(tmp_path, monkeypatch):
