@@ -73,6 +73,8 @@ def test_formal_v3_env_freezes_expected_switches():
     assert FORMAL_V3_ENV["MSDC_OUTPUT_NMS_ENABLE"] == "1"
     assert FORMAL_V3_ENV["MSDC_OUTPUT_MAX_REAL_DET_AGE"] == "3"
     assert FORMAL_V3_ENV["MSDC_LOW_OBS_TOPK"] == "32"
+    assert FORMAL_V3_ENV["MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE"] == "0"
+    assert FORMAL_V3_ENV["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "1"
 
 
 def test_main_command_uses_formal_frame_limit_and_all_main_trackers(tmp_path):
@@ -149,6 +151,10 @@ def test_ablation_command_includes_required_variants():
         "low_budget_topk16",
         "low_budget_topk64",
         "removed_recovery_off",
+        "low_position_update_all_off",
+        "low_position_update_on",
+        "removed_recovery_off_low_position_update_all_off",
+        "removed_recovery_off_low_position_update_on",
     }
     variants = cmd[cmd.index("--variants") + 1:cmd.index("--formal-frame-limit")]
     assert variants[0] == FORMAL_MSDC_VARIANT
@@ -528,6 +534,10 @@ def test_formal_v3_ablation_variants_are_available():
         "low_budget_topk16",
         "low_budget_topk64",
         "removed_recovery_off",
+        "low_position_update_all_off",
+        "low_position_update_on",
+        "removed_recovery_off_low_position_update_all_off",
+        "removed_recovery_off_low_position_update_on",
     }
     assert expected <= set(ABLATION_VARIANTS)
 
@@ -546,12 +556,34 @@ def test_formal_v3_ablation_variants_are_available():
     assert formal_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
     assert formal_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
     assert formal_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+    assert formal_env["MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE"] == "0"
+    assert formal_env["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "1"
 
     recovery_off_env = _variant_env("removed_recovery_off")
     assert recovery_off_env["MSDC_REMOVED_GUARD_IOU_THRESH"] == "0.3"
     assert recovery_off_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+
+    low_all_off_env = _variant_env("low_position_update_all_off")
+    assert low_all_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
+    assert low_all_off_env["MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE"] == "0"
+    assert low_all_off_env["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "0"
+
+    low_on_env = _variant_env("low_position_update_on")
+    assert low_on_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
+    assert low_on_env["MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE"] == "1"
+    assert low_on_env["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "1"
+
+    recovery_off_low_all_off_env = _variant_env("removed_recovery_off_low_position_update_all_off")
+    assert recovery_off_low_all_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
+    assert recovery_off_low_all_off_env["MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE"] == "0"
+    assert recovery_off_low_all_off_env["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "0"
+
+    recovery_off_low_on_env = _variant_env("removed_recovery_off_low_position_update_on")
+    assert recovery_off_low_on_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
+    assert recovery_off_low_on_env["MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE"] == "1"
+    assert recovery_off_low_on_env["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "1"
 
 
 def test_formal_v3_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):

@@ -24,6 +24,10 @@ def _obs(frame_idx, source="low_det", score=1.0, box=None, class_id=2, class_nam
     )
 
 
+def _box_values(box):
+    return box.tolist() if hasattr(box, "tolist") else list(box)
+
+
 class FastLifecycleConfig(Config):
     MSDC_ACTIVE_MISSING_PATIENCE = 1
     MSDC_LOST_MAX_AGE = 2
@@ -35,6 +39,16 @@ class ReacquireLifecycleConfig(Config):
     MSDC_LOST_MAX_AGE = 10
     MSDC_REACQUIRE_INTERVAL = 5
     MSDC_REACQUIRE_SCORE = 1.0
+
+
+class LowDetPositionUpdateConfig(ReacquireLifecycleConfig):
+    MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE = True
+    MSDC_LOW_UPDATE_LOST_BOX_ENABLE = True
+
+
+class LowDetPositionUpdateDisabledConfig(ReacquireLifecycleConfig):
+    MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE = False
+    MSDC_LOW_UPDATE_LOST_BOX_ENABLE = False
 
 
 class GuardLifecycleConfig(Config):
@@ -597,6 +611,38 @@ def test_low_detection_supports_active_without_refreshing_primary_box():
     assert events == []
 
 
+def test_low_detection_refreshes_active_primary_box_when_enabled():
+    updater = EvidenceStateUpdater(LowDetPositionUpdateConfig)
+    track = EvidenceTrack(
+        gid=1,
+        public_id=1,
+        state=TrackState.ACTIVE,
+        box=[10, 10, 30, 30],
+        velocity=[0.0, 0.0],
+        evidence_score=3.0,
+        hits=4,
+        misses=0,
+        age=4,
+        last_seen=4,
+        last_real_det_frame=4,
+        real_det_hits=4,
+        class_id=2,
+        class_name="UAV",
+    )
+
+    tracks, events = updater.update_tracks(
+        [track],
+        [_obs(5, source="low_det", score=0.8, box=[45, 10, 65, 30])],
+        frame_idx=5,
+    )
+
+    assert tracks[0].state == TrackState.ACTIVE
+    assert _box_values(tracks[0].box) == [45.0, 10.0, 65.0, 30.0]
+    assert tracks[0].velocity == [35.0, 0.0]
+    assert tracks[0].last_real_det_box.tolist() == [45.0, 10.0, 65.0, 30.0]
+    assert events == []
+
+
 def test_low_only_observation_near_active_uses_wider_spawn_suppression():
     updater = EvidenceStateUpdater(LowSpawnSuppressConfig)
     active = EvidenceTrack(
@@ -705,11 +751,46 @@ def test_lost_track_reacquires_only_on_interval_with_low_detection():
     )
 
     assert tracks[0].state == TrackState.ACTIVE
+    assert _box_values(tracks[0].box) == [102.0, 101.0, 122.0, 121.0]
+    assert tracks[0].velocity == [2.0, 1.0]
     assert tracks[0].misses == 0
     assert tracks[0].last_seen == 10
     assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
     assert updater.last_reacquire_debug["attempted"] is True
     assert updater.last_reacquire_debug["num_matches"] == 1
+
+
+def test_low_detection_does_not_refresh_lost_primary_box_when_disabled():
+    updater = EvidenceStateUpdater(LowDetPositionUpdateDisabledConfig)
+    tracks = [
+        EvidenceTrack(
+            gid=7,
+            public_id=7,
+            state=TrackState.LOST,
+            box=[100, 100, 120, 120],
+            velocity=[0.0, 0.0],
+            evidence_score=1.0,
+            hits=3,
+            misses=2,
+            age=6,
+            last_seen=4,
+            class_id=2,
+            class_name="UAV",
+        )
+    ]
+
+    tracks, events = updater.update_tracks(
+        tracks,
+        [_obs(10, source="low_det", score=1.0, box=[102, 101, 122, 121])],
+        frame_idx=10,
+    )
+
+    assert tracks[0].state == TrackState.ACTIVE
+    assert _box_values(tracks[0].box) == [100, 100, 120, 120]
+    assert tracks[0].velocity == [0.0, 0.0]
+    assert tracks[0].last_real_det_box.tolist() == [102.0, 101.0, 122.0, 121.0]
+    assert [event.event_type for event in events] == ["LOST_REACQUIRED"]
+
 
 def test_reacquire_center_gate_expands_for_large_tracks():
     updater = EvidenceStateUpdater(ReacquireScaleGateConfig)

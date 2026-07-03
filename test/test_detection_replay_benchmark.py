@@ -466,17 +466,24 @@ def test_msdc_variant_context_resets_polluted_config_to_formal_baseline(monkeypa
 
 def test_msdc_variant_context_resets_missing_env_backed_config_key(monkeypatch):
     monkeypatch.setenv("MSDC_LOW_INHERIT_CLASS_MATCH", "0")
+    monkeypatch.setenv("MSDC_LOW_UPDATE_LOST_BOX_ENABLE", "0")
     monkeypatch.setattr(Config, "MSDC_LOW_INHERIT_CLASS_MATCH", False)
+    monkeypatch.setattr(Config, "MSDC_LOW_UPDATE_LOST_BOX_ENABLE", False)
     polluted_baseline = dict(getattr(drb, "_MSDC_CONFIG_IMPORT_BASELINE", {}))
     polluted_baseline["MSDC_LOW_INHERIT_CLASS_MATCH"] = False
+    polluted_baseline["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] = False
     monkeypatch.setattr(drb, "_MSDC_CONFIG_IMPORT_BASELINE", polluted_baseline, raising=False)
 
     with msdc_variant_context("msdc_v3"):
         assert os.environ["MSDC_LOW_INHERIT_CLASS_MATCH"] == "1"
         assert Config.MSDC_LOW_INHERIT_CLASS_MATCH is True
+        assert os.environ["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "1"
+        assert Config.MSDC_LOW_UPDATE_LOST_BOX_ENABLE is True
 
     assert os.environ["MSDC_LOW_INHERIT_CLASS_MATCH"] == "0"
     assert Config.MSDC_LOW_INHERIT_CLASS_MATCH is False
+    assert os.environ["MSDC_LOW_UPDATE_LOST_BOX_ENABLE"] == "0"
+    assert Config.MSDC_LOW_UPDATE_LOST_BOX_ENABLE is False
 
 
 def test_msdc_variant_context_resets_removed_guard_alias(monkeypatch):

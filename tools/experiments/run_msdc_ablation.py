@@ -64,6 +64,8 @@ FORMAL_V3_ENV = {
     "MSDC_REMOVED_RECOVERY_MIN_IOU": "0.20",
     "MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST": "80",
     "MSDC_REMOVED_RECOVERY_MIN_SCORE": "0.35",
+    "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE": "0",
+    "MSDC_LOW_UPDATE_LOST_BOX_ENABLE": "1",
 }
 V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV = {**FORMAL_V3_ENV, "MSDC_REUSE_GUARD_ENABLE": "1"}
 
@@ -95,6 +97,28 @@ ABLATION_VARIANTS = {
         "MSDC_LOW_OBS_MAX_PER_FRAME": "96",
     },
     "removed_recovery_off": {**FORMAL_V3_ENV, "MSDC_REMOVED_RECOVERY_ENABLE": "0"},
+    "low_position_update_all_off": {
+        **FORMAL_V3_ENV,
+        "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE": "0",
+        "MSDC_LOW_UPDATE_LOST_BOX_ENABLE": "0",
+    },
+    "low_position_update_on": {
+        **FORMAL_V3_ENV,
+        "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE": "1",
+        "MSDC_LOW_UPDATE_LOST_BOX_ENABLE": "1",
+    },
+    "removed_recovery_off_low_position_update_all_off": {
+        **FORMAL_V3_ENV,
+        "MSDC_REMOVED_RECOVERY_ENABLE": "0",
+        "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE": "0",
+        "MSDC_LOW_UPDATE_LOST_BOX_ENABLE": "0",
+    },
+    "removed_recovery_off_low_position_update_on": {
+        **FORMAL_V3_ENV,
+        "MSDC_REMOVED_RECOVERY_ENABLE": "0",
+        "MSDC_LOW_UPDATE_ACTIVE_BOX_ENABLE": "1",
+        "MSDC_LOW_UPDATE_LOST_BOX_ENABLE": "1",
+    },
 }
 
 
