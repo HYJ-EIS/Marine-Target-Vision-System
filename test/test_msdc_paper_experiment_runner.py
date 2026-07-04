@@ -529,6 +529,7 @@ def test_formal_v3_ablation_variants_are_available():
         "low_budget_topk64",
         "removed_recovery_off",
         "reacquire_every_frame_low_score",
+        "pending_recovery_candidate",
     }
     assert expected <= set(ABLATION_VARIANTS)
 
@@ -547,6 +548,9 @@ def test_formal_v3_ablation_variants_are_available():
     assert formal_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
     assert formal_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
     assert formal_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+    assert formal_env["MSDC_REACQUIRE_INTERVAL"] == "1"
+    assert formal_env["MSDC_REACQUIRE_SCORE"] == "0.8"
+    assert formal_env["MSDC_PENDING_RECOVERY_ENABLE"] == "0"
 
     recovery_off_env = _variant_env("removed_recovery_off")
     assert recovery_off_env["MSDC_REMOVED_GUARD_IOU_THRESH"] == "0.3"
@@ -558,6 +562,11 @@ def test_formal_v3_ablation_variants_are_available():
     assert every_frame_env["MSDC_REACQUIRE_INTERVAL"] == "1"
     assert every_frame_env["MSDC_REACQUIRE_SCORE"] == "1.0"
     assert every_frame_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
+
+    pending_env = _variant_env("pending_recovery_candidate")
+    assert pending_env["MSDC_PENDING_RECOVERY_ENABLE"] == "1"
+    assert pending_env["MSDC_PENDING_RECOVERY_FRAMES"] == "1"
+    assert pending_env["MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH"] == "1"
 
 
 def test_formal_v3_ablation_execution_env_ignores_ambient_msdc_overrides(monkeypatch):

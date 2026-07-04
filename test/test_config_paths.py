@@ -61,8 +61,8 @@ def test_msdc_v2_tuning_knobs_are_environment_backed(monkeypatch):
             assert reloaded.Config.MSDC_CONFIRM_MIN_HITS == 4
             assert reloaded.Config.MSDC_CONFIRM_SCORE == 2.5
             assert reloaded.Config.MSDC_CANDIDATE_MAX_AGE == 5
-            assert reloaded.Config.MSDC_REACQUIRE_INTERVAL == 5
-            assert reloaded.Config.MSDC_REACQUIRE_SCORE == 1.5
+            assert reloaded.Config.MSDC_REACQUIRE_INTERVAL == 1
+            assert reloaded.Config.MSDC_REACQUIRE_SCORE == 0.8
             assert reloaded.Config.MSDC_REACQUIRE_IOU_THRESH == 0.05
             assert reloaded.Config.MSDC_REACQUIRE_CENTER_DIST == 160.0
     finally:
@@ -112,6 +112,7 @@ def test_msdc_lifecycle_acceleration_knobs_are_environment_backed(monkeypatch):
         "MSDC_LOW_OBS_TRACK_PROXIMITY_IOU",
         "MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST",
         "MSDC_LOW_OBS_MOTION_GATE_IOU",
+        "MSDC_PENDING_RECOVERY_FRAMES",
     ]
 
     try:
@@ -133,6 +134,7 @@ def test_msdc_lifecycle_acceleration_knobs_are_environment_backed(monkeypatch):
             override_env.setenv("MSDC_LOW_OBS_TRACK_PROXIMITY_IOU", "0.07")
             override_env.setenv("MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST", "99")
             override_env.setenv("MSDC_LOW_OBS_MOTION_GATE_IOU", "0.08")
+            override_env.setenv("MSDC_PENDING_RECOVERY_FRAMES", "3")
 
             reloaded = importlib.reload(config_module)
             assert reloaded.Config.MSDC_LOST_MAX_AGE == 33
@@ -151,5 +153,10 @@ def test_msdc_lifecycle_acceleration_knobs_are_environment_backed(monkeypatch):
             assert reloaded.Config.MSDC_LOW_OBS_TRACK_PROXIMITY_IOU == 0.07
             assert reloaded.Config.MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST == 99.0
             assert reloaded.Config.MSDC_LOW_OBS_MOTION_GATE_IOU == 0.08
+            assert reloaded.Config.MSDC_PENDING_RECOVERY_FRAMES == 3
+
+            override_env.delenv("MSDC_PENDING_RECOVERY_FRAMES", raising=False)
+            reloaded = importlib.reload(config_module)
+            assert reloaded.Config.MSDC_PENDING_RECOVERY_FRAMES == 1
     finally:
         importlib.reload(config_module)

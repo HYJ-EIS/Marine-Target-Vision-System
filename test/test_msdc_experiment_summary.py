@@ -244,6 +244,7 @@ def test_ablation_results_reports_formal_v3_variant_switches(tmp_path):
         "hits_only_no_evidence",
         "no_output_nms",
         "low_budget_topk16",
+        "pending_recovery_candidate",
     ]
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [
@@ -260,11 +261,16 @@ def test_ablation_results_reports_formal_v3_variant_switches(tmp_path):
     by_variant = {row["variant"]: row for row in rows}
 
     assert by_variant["msdc_v3"]["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
+    assert by_variant["msdc_v3"]["MSDC_REACQUIRE_INTERVAL"] == "1"
+    assert by_variant["msdc_v3"]["MSDC_REACQUIRE_SCORE"] == "0.8"
+    assert by_variant["msdc_v3"]["MSDC_PENDING_RECOVERY_ENABLE"] == "0"
     assert by_variant["no_low_candidate"]["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
     assert by_variant["hits_only_no_evidence"]["MSDC_EVIDENCE_MODE"] == "hits_only"
     assert by_variant["no_output_nms"]["MSDC_OUTPUT_NMS_ENABLE"] == "0"
     assert by_variant["low_budget_topk16"]["MSDC_LOW_OBS_TOPK"] == "16"
     assert by_variant["low_budget_topk16"]["MSDC_LOW_OBS_MAX_PER_FRAME"] == "32"
+    assert by_variant["pending_recovery_candidate"]["MSDC_PENDING_RECOVERY_ENABLE"] == "1"
+    assert by_variant["pending_recovery_candidate"]["MSDC_PENDING_RECOVERY_FRAMES"] == "1"
 
 
 def test_ablation_switches_normalizes_replay_suffix_for_formal_variants():

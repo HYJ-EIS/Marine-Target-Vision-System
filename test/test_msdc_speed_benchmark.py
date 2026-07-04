@@ -198,6 +198,9 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
                 "debug": Config.MSDC_DEBUG_EVENTS,
                 "topk": Config.MSDC_LOW_OBS_TOPK,
                 "min_conf": Config.MSDC_LOW_OBS_MIN_CONF,
+                "interval": Config.MSDC_REACQUIRE_INTERVAL,
+                "score": Config.MSDC_REACQUIRE_SCORE,
+                "pending": Config.MSDC_PENDING_RECOVERY_ENABLE,
             }
         )
         return {
@@ -241,6 +244,9 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
     monkeypatch.setattr(Config, "MSDC_DEBUG_EVENTS", True, raising=False)
     monkeypatch.setattr(Config, "MSDC_LOW_OBS_TOPK", 0, raising=False)
     monkeypatch.setattr(Config, "MSDC_LOW_OBS_MIN_CONF", 0.0, raising=False)
+    monkeypatch.setattr(Config, "MSDC_REACQUIRE_INTERVAL", 5, raising=False)
+    monkeypatch.setattr(Config, "MSDC_REACQUIRE_SCORE", 1.5, raising=False)
+    monkeypatch.setattr(Config, "MSDC_PENDING_RECOVERY_ENABLE", True, raising=False)
 
     args = argparse.Namespace(
         output_root=str(tmp_path / "out"),
@@ -257,11 +263,17 @@ def test_run_speed_benchmark_applies_and_restores_formal_v3_config(tmp_path, mon
             "debug": False,
             "topk": 32,
             "min_conf": 0.25,
+            "interval": 1,
+            "score": 0.8,
+            "pending": False,
         }
     ]
     assert Config.MSDC_DEBUG_EVENTS is True
     assert Config.MSDC_LOW_OBS_TOPK == 0
     assert Config.MSDC_LOW_OBS_MIN_CONF == 0.0
+    assert Config.MSDC_REACQUIRE_INTERVAL == 5
+    assert Config.MSDC_REACQUIRE_SCORE == 1.5
+    assert Config.MSDC_PENDING_RECOVERY_ENABLE is True
 
 
 def test_run_speed_benchmark_applies_selected_msdc_variant(tmp_path, monkeypatch):
@@ -335,6 +347,123 @@ def test_run_speed_benchmark_applies_selected_msdc_variant(tmp_path, monkeypatch
     assert seen_config == [
         {
             "interval": 1,
+            "score": 1.0,
+            "debug": False,
+        }
+    ]
+    assert Config.MSDC_REACQUIRE_INTERVAL == 5
+    assert Config.MSDC_REACQUIRE_SCORE == 1.5
+    assert Config.MSDC_DEBUG_EVENTS is True
+
+
+def test_run_speed_benchmark_applies_pending_recovery_variant(tmp_path, monkeypatch):
+    from target_module.image_detect_module.config import Config
+
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"not a real video")
+    seen_config = []
+
+    def fake_run_tracker_benchmark(**kwargs):
+        seen_config.append(
+            {
+                "pending": Config.MSDC_PENDING_RECOVERY_ENABLE,
+                "frames": Config.MSDC_PENDING_RECOVERY_FRAMES,
+                "class_match": Config.MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH,
+            }
+        )
+        row = {field: "0" for field in SPEED_FIELDS}
+        row.update(
+            {
+                "run_id": kwargs["run_id"],
+                "commit_hash": kwargs["commit_hash"],
+                "video_path": str(kwargs["input_video"]),
+                "seq_name": kwargs["seq_name"],
+                "tracker": kwargs["tracker_type"],
+                "requested_frames": 0,
+                "processed_frames": 0,
+            }
+        )
+        return row
+
+    monkeypatch.setattr(benchmark, "_resolve_benchmark_input", lambda args: (video, "seq", "visible"))
+    monkeypatch.setattr(benchmark, "_run_tracker_benchmark", fake_run_tracker_benchmark)
+    monkeypatch.setattr(Config, "MSDC_PENDING_RECOVERY_ENABLE", False, raising=False)
+    monkeypatch.setattr(Config, "MSDC_PENDING_RECOVERY_FRAMES", 2, raising=False)
+    monkeypatch.setattr(Config, "MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH", False, raising=False)
+
+    args = argparse.Namespace(
+        output_root=str(tmp_path / "out"),
+        run_id="pending-variant",
+        commit_hash="abc123",
+        frames=0,
+        trackers=["msdc_elt"],
+        progress_interval=0,
+        msdc_variant="pending_recovery_candidate",
+    )
+    benchmark.run_speed_benchmark(args)
+
+    assert seen_config == [
+        {
+            "pending": True,
+            "frames": 1,
+            "class_match": True,
+        }
+    ]
+    assert Config.MSDC_PENDING_RECOVERY_ENABLE is False
+    assert Config.MSDC_PENDING_RECOVERY_FRAMES == 2
+    assert Config.MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH is False
+
+
+def test_run_speed_benchmark_applies_msdc_env_json_after_variant(tmp_path, monkeypatch):
+    from target_module.image_detect_module.config import Config
+
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"not a real video")
+    seen_config = []
+
+    def fake_run_tracker_benchmark(**kwargs):
+        seen_config.append(
+            {
+                "interval": Config.MSDC_REACQUIRE_INTERVAL,
+                "score": Config.MSDC_REACQUIRE_SCORE,
+                "debug": Config.MSDC_DEBUG_EVENTS,
+            }
+        )
+        row = {field: "0" for field in SPEED_FIELDS}
+        row.update(
+            {
+                "run_id": kwargs["run_id"],
+                "commit_hash": kwargs["commit_hash"],
+                "video_path": str(kwargs["input_video"]),
+                "seq_name": kwargs["seq_name"],
+                "tracker": kwargs["tracker_type"],
+                "requested_frames": 0,
+                "processed_frames": 0,
+            }
+        )
+        return row
+
+    monkeypatch.setattr(benchmark, "_resolve_benchmark_input", lambda args: (video, "seq", "visible"))
+    monkeypatch.setattr(benchmark, "_run_tracker_benchmark", fake_run_tracker_benchmark)
+    monkeypatch.setattr(Config, "MSDC_REACQUIRE_INTERVAL", 5, raising=False)
+    monkeypatch.setattr(Config, "MSDC_REACQUIRE_SCORE", 1.5, raising=False)
+    monkeypatch.setattr(Config, "MSDC_DEBUG_EVENTS", True, raising=False)
+
+    args = argparse.Namespace(
+        output_root=str(tmp_path / "out"),
+        run_id="env-json",
+        commit_hash="abc123",
+        frames=0,
+        trackers=["msdc_elt"],
+        progress_interval=0,
+        msdc_variant="reacquire_every_frame_low_score",
+        msdc_env_json='{"MSDC_REACQUIRE_INTERVAL": "8", "MSDC_REACQUIRE_SCORE": "1.0"}',
+    )
+    benchmark.run_speed_benchmark(args)
+
+    assert seen_config == [
+        {
+            "interval": 8,
             "score": 1.0,
             "debug": False,
         }

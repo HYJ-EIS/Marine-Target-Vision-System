@@ -458,7 +458,11 @@ def test_msdc_variant_context_resets_polluted_config_to_formal_baseline(monkeypa
 
     with msdc_variant_context("msdc_v3"):
         assert os.environ["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "1"
+        assert os.environ["MSDC_REACQUIRE_INTERVAL"] == "1"
+        assert os.environ["MSDC_REACQUIRE_SCORE"] == "0.8"
         assert Config.MSDC_CONFIRM_REQUIRE_HIGH_DET is True
+        assert Config.MSDC_REACQUIRE_INTERVAL == 1
+        assert Config.MSDC_REACQUIRE_SCORE == 0.8
 
     assert os.environ["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "0"
     assert Config.MSDC_CONFIRM_REQUIRE_HIGH_DET is False

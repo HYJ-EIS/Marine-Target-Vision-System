@@ -73,6 +73,26 @@ class RecoveryDisabledGuardConfig(RemovedRecoveryConfig):
     MSDC_REMOVED_RECOVERY_ENABLE = False
 
 
+class PendingRecoveryConfig(Config):
+    MSDC_PENDING_RECOVERY_ENABLE = True
+    MSDC_PENDING_RECOVERY_FRAMES = 2
+    MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH = True
+    MSDC_PENDING_RECOVERY_MAX_LOST_AGE = 40
+    MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES = 80
+    MSDC_REMOVED_GUARD_IOU_THRESH = 0.1
+    MSDC_REMOVED_GUARD_CENTER_DIST = 20.0
+    MSDC_REMOVED_RECOVERY_REQUIRE_CLASS_MATCH = True
+    MSDC_CONFIRM_REQUIRE_HIGH_DET = True
+    MSDC_CONFIRM_SCORE = 2.5
+    MSDC_CONFIRM_MIN_HITS = 4
+    MSDC_CONFIRM_MIN_REAL_DET_HITS = 4
+    MSDC_CANDIDATE_MAX_AGE = 8
+    MSDC_ASSOC_CENTER_DIST = 80.0
+    MSDC_REACQUIRE_IOU_THRESH = 0.1
+    MSDC_REACQUIRE_CENTER_DIST = 20.0
+    MSDC_REACQUIRE_MAX_CENTER_DIST = 20.0
+
+
 class GuardDisabledConfig(GuardLifecycleConfig):
     MSDC_REUSE_GUARD_ENABLE = False
 
@@ -207,6 +227,26 @@ def _track(gid, state, score=1.0, last_seen=0):
         real_det_hits=4,
         class_id=2,
         class_name="UAV",
+    )
+
+
+def _ready_candidate(gid=10, box=None, class_id=2, class_name="UAV"):
+    return EvidenceTrack(
+        gid=gid,
+        public_id=None,
+        state=TrackState.CANDIDATE,
+        box=box or [101, 100, 121, 120],
+        velocity=[0.0, 0.0],
+        evidence_score=3.0,
+        hits=4,
+        misses=0,
+        age=4,
+        last_seen=9,
+        last_real_det_frame=9,
+        real_det_hits=4,
+        last_real_det_box=box or [101, 100, 121, 120],
+        class_id=class_id,
+        class_name=class_name,
     )
 
 
@@ -1099,6 +1139,138 @@ def test_removed_guard_recovery_ignores_full_new_candidate_pool():
     assert recovered.public_id == 4
     assert recovered.state == TrackState.LOW_CANDIDATE
     assert sorted(track.gid for track in tracks) == [3, 9]
+
+
+def test_ready_candidate_near_lost_waits_then_inherits_public_id():
+    updater = EvidenceStateUpdater(PendingRecoveryConfig)
+    lost = EvidenceTrack(
+        gid=7,
+        public_id=77,
+        state=TrackState.LOST,
+        box=[100, 100, 120, 120],
+        velocity=[0.0, 0.0],
+        evidence_score=2.0,
+        hits=4,
+        misses=1,
+        age=8,
+        last_seen=9,
+        last_real_det_frame=9,
+        real_det_hits=4,
+        class_id=2,
+        class_name="UAV",
+    )
+    candidate = _ready_candidate(gid=10, box=[101, 100, 121, 120])
+
+    tracks, events = updater.update_tracks(
+        [lost, candidate],
+        [_obs(10, source="high_det", score=1.0, box=[102, 100, 122, 120])],
+        frame_idx=10,
+    )
+
+    event_types = [event.event_type for event in events]
+    candidate = next(track for track in tracks if track.gid == 10)
+    assert "PENDING_RECOVERY_STARTED" in event_types
+    assert "CONFIRM_ACTIVE" not in event_types
+    assert candidate.state == TrackState.CANDIDATE
+    assert candidate.public_id is None
+    assert candidate.pending_recovery["source"] == "lost"
+    assert candidate.pending_recovery["target_gid"] == 7
+    assert candidate.pending_recovery["frames"] == 1
+
+    tracks, events = updater.update_tracks(
+        tracks,
+        [_obs(11, source="high_det", score=1.0, box=[103, 100, 123, 120])],
+        frame_idx=11,
+    )
+
+    event_types = [event.event_type for event in events]
+    inherited = next(track for track in tracks if track.gid == 10)
+    assert "PENDING_RECOVERY_INHERITED_LOST" in event_types
+    assert inherited.state == TrackState.ACTIVE
+    assert inherited.public_id == 77
+    assert inherited.pending_recovery == {}
+    assert all(track.gid != 7 for track in tracks)
+
+
+def test_ready_candidate_near_removed_gets_new_id_after_moving_away():
+    updater = EvidenceStateUpdater(PendingRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+    candidate = _ready_candidate(gid=10, box=[41, 40, 61, 60])
+
+    tracks, events = updater.update_tracks(
+        [removed, candidate],
+        [_obs(6, source="high_det", score=1.0, box=[42, 40, 62, 60], class_id=2, class_name="UAV")],
+        frame_idx=6,
+    )
+
+    candidate = next(track for track in tracks if track.gid == 10)
+    assert "PENDING_RECOVERY_STARTED" in [event.event_type for event in events]
+    assert candidate.state == TrackState.CANDIDATE
+    assert candidate.public_id is None
+    assert candidate.pending_recovery["source"] == "removed"
+    assert candidate.pending_recovery["target_gid"] == 9
+
+    tracks, events = updater.update_tracks(
+        tracks,
+        [_obs(7, source="high_det", score=1.0, box=[85, 40, 105, 60], class_id=2, class_name="UAV")],
+        frame_idx=7,
+    )
+
+    candidate = next(track for track in tracks if track.gid == 10)
+    event_types = [event.event_type for event in events]
+    assert "CONFIRM_ACTIVE" in event_types
+    assert "PENDING_RECOVERY_INHERITED_REMOVED" not in event_types
+    assert candidate.state == TrackState.ACTIVE
+    assert candidate.public_id != 4
+    assert candidate.pending_recovery == {}
+
+
+def test_ready_candidate_near_removed_with_class_mismatch_confirms_new_id():
+    updater = EvidenceStateUpdater(PendingRecoveryConfig)
+    removed = EvidenceTrack(
+        gid=9,
+        public_id=4,
+        state=TrackState.REMOVED,
+        box=[40, 40, 60, 60],
+        retired_signature={
+            "last_box": [40.0, 40.0, 60.0, 60.0],
+            "last_seen": 5,
+            "removed_frame_idx": 5,
+            "class_id": 2,
+            "class_name": "UAV",
+        },
+        class_id=2,
+        class_name="UAV",
+    )
+    candidate = _ready_candidate(gid=10, box=[41, 40, 61, 60], class_id=3, class_name="USV")
+
+    tracks, events = updater.update_tracks(
+        [removed, candidate],
+        [_obs(6, source="high_det", score=1.0, box=[42, 40, 62, 60], class_id=3, class_name="USV")],
+        frame_idx=6,
+    )
+
+    candidate = next(track for track in tracks if track.gid == 10)
+    event_types = [event.event_type for event in events]
+    assert "PENDING_RECOVERY_STARTED" not in event_types
+    assert "CONFIRM_ACTIVE" in event_types
+    assert candidate.state == TrackState.ACTIVE
+    assert candidate.public_id != 4
+    assert candidate.pending_recovery == {}
 
 
 def test_removed_guard_recovery_counts_against_later_spawn_budget():

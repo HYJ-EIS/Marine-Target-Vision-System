@@ -152,6 +152,7 @@ class EvidenceTrack:
     low_det_history: list[dict] = field(default_factory=list)
     source_history: list[str] = field(default_factory=list)
     retired_signature: Any = None
+    pending_recovery: dict = field(default_factory=dict)
     class_id: int = -1
     class_name: str = "unknown"
 
@@ -228,6 +229,7 @@ def track_to_dict(track: EvidenceTrack) -> dict:
         "low_det_history": _json_safe(track.low_det_history),
         "source_history": [str(source) for source in track.source_history],
         "retired_signature": _json_safe(track.retired_signature),
+        "pending_recovery": _json_safe(track.pending_recovery),
         "class_id": int(track.class_id),
         "class_name": str(track.class_name),
     }

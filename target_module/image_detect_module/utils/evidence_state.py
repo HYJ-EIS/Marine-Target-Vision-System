@@ -251,7 +251,7 @@ class EvidenceStateUpdater:
             if reacquire_score is None:
                 reacquire_score = self._evidence_increment(groups[matched_group]) if matched_group is not None else 0.0
             matched_real = matched_group is not None and self._group_has_real_detection(groups[matched_group])
-            events.extend(self._transition_track(track, frame_idx, matched_real, reacquire_score))
+            events.extend(self._transition_track(track, frame_idx, matched_real, reacquire_score, tracks))
 
         spawn_group_indices = self._filter_spawn_groups_near_lost(tracks, groups, unmatched_group_indices)
         spawn_group_indices = self._filter_spawn_groups_near_active(tracks, groups, spawn_group_indices)
@@ -1657,12 +1657,196 @@ class EvidenceStateUpdater:
             )
         )
 
+    def _resolve_candidate_pending_recovery(
+        self,
+        track: EvidenceTrack,
+        tracks: list[EvidenceTrack],
+        frame_idx: int,
+    ) -> tuple[str, dict, list[LifecycleEvent]]:
+        if not bool(self._cfg("MSDC_PENDING_RECOVERY_ENABLE", False)):
+            track.pending_recovery = {}
+            return "allow", {}, []
+        if track.public_id is not None:
+            track.pending_recovery = {}
+            return "allow", {}, []
+
+        conflict = self._candidate_pending_recovery_conflict(track, tracks, frame_idx)
+        if conflict is None:
+            track.pending_recovery = {}
+            return "allow", {}, []
+
+        previous = dict(getattr(track, "pending_recovery", {}) or {})
+        target_key = f"{conflict['source']}:{int(conflict['target_gid'])}"
+        frames = int(previous.get("frames", 0)) + 1 if previous.get("target_key") == target_key else 1
+        track.pending_recovery = {
+            "target_key": target_key,
+            "source": str(conflict["source"]),
+            "target_gid": int(conflict["target_gid"]),
+            "target_public_id": None if conflict.get("target_public_id") is None else int(conflict["target_public_id"]),
+            "frames": int(frames),
+            "first_frame_idx": int(previous.get("first_frame_idx", frame_idx)) if previous.get("target_key") == target_key else int(frame_idx),
+            "last_frame_idx": int(frame_idx),
+            "iou": float(conflict.get("iou", 0.0)),
+            "center_distance": float(conflict.get("center_distance", 0.0)),
+        }
+
+        required_frames = max(1, int(self._cfg("MSDC_PENDING_RECOVERY_FRAMES", 1)))
+        if frames < required_frames:
+            event_type = "PENDING_RECOVERY_WAITING" if frames > 1 else "PENDING_RECOVERY_STARTED"
+            return "wait", {}, [
+                self._make_event(
+                    frame_idx=frame_idx,
+                    track=track,
+                    event_type=event_type,
+                    from_state=TrackState.CANDIDATE,
+                    to_state=TrackState.CANDIDATE,
+                    reason="candidate_near_recent_track_signature",
+                    extra=dict(track.pending_recovery),
+                )
+            ]
+
+        public_id = conflict.get("target_public_id")
+        if public_id is None:
+            track.pending_recovery = {}
+            return "allow", {}, []
+
+        track.public_id = int(public_id)
+        track.pending_recovery = {}
+        source_track = conflict.get("target_track")
+        if conflict["source"] == "lost" and isinstance(source_track, EvidenceTrack):
+            source_track.retired_signature = self._internal_merged_signature(source_track, frame_idx, merged_into_gid=track.gid)
+            source_track.state = TrackState.REMOVED
+
+        return "inherit", {
+            "event_type": f"PENDING_RECOVERY_INHERITED_{str(conflict['source']).upper()}",
+            "reason": "candidate_inherited_recent_track_public_id",
+            "pending_recovery_source": str(conflict["source"]),
+            "inherited_from_gid": int(conflict["target_gid"]),
+            "inherited_public_id": int(public_id),
+            "pending_frames": int(frames),
+            "iou": float(conflict.get("iou", 0.0)),
+            "center_distance": float(conflict.get("center_distance", 0.0)),
+        }, []
+
+    def _candidate_pending_recovery_conflict(
+        self,
+        track: EvidenceTrack,
+        tracks: list[EvidenceTrack],
+        frame_idx: int,
+    ) -> dict | None:
+        lost = self._candidate_lost_pending_conflict(track, tracks, frame_idx)
+        removed = self._candidate_removed_pending_conflict(track, tracks, frame_idx)
+        if lost is None:
+            return removed
+        if removed is None:
+            return lost
+        return lost if (float(lost["iou"]), -float(lost["center_distance"])) >= (
+            float(removed["iou"]),
+            -float(removed["center_distance"]),
+        ) else removed
+
+    def _pending_candidate_class_compatible(self, track: EvidenceTrack, target: EvidenceTrack | dict) -> bool:
+        if not bool(self._cfg("MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH", True)):
+            return True
+        if isinstance(target, EvidenceTrack):
+            return self._classes_compatible(track, target)
+        target_class_id = int(target.get("class_id", -1))
+        track_class_id = int(getattr(track, "class_id", -1))
+        if target_class_id >= 0 and track_class_id >= 0:
+            return target_class_id == track_class_id
+        target_class_name = str(target.get("class_name", "unknown"))
+        track_class_name = str(getattr(track, "class_name", "unknown"))
+        return "unknown" in {target_class_name, track_class_name} or target_class_name == track_class_name
+
+    def _candidate_lost_pending_conflict(
+        self,
+        track: EvidenceTrack,
+        tracks: list[EvidenceTrack],
+        frame_idx: int,
+    ) -> dict | None:
+        group_box = _box_array(track.box).reshape(1, 4)
+        iou_thresh = float(self._cfg("MSDC_REACQUIRE_IOU_THRESH", 0.05))
+        max_lost_age = int(self._cfg("MSDC_PENDING_RECOVERY_MAX_LOST_AGE", self._cfg("MSDC_LOST_MAX_AGE", 40)))
+        best = None
+        for candidate in tracks:
+            if int(candidate.gid) == int(track.gid) or _as_state(candidate.state) != TrackState.LOST:
+                continue
+            if not self._pending_candidate_class_compatible(track, candidate):
+                continue
+            lost_age = int(frame_idx) - int(candidate.last_seen)
+            if lost_age < 0 or lost_age > max_lost_age:
+                continue
+            pred_box = self._predict_box(candidate).reshape(1, 4)
+            iou_score = float(_iou_batch(pred_box, group_box)[0, 0])
+            center_dist = float(_center_distance_batch(pred_box, group_box)[0, 0])
+            center_thresh = self._reacquire_center_threshold(candidate)
+            if iou_score < iou_thresh and center_dist > center_thresh:
+                continue
+            conflict = {
+                "source": "lost",
+                "target_gid": int(candidate.gid),
+                "target_public_id": None if candidate.public_id is None else int(candidate.public_id),
+                "target_track": candidate,
+                "iou": float(round(iou_score, 4)),
+                "center_distance": float(round(center_dist, 4)),
+                "lost_age": int(lost_age),
+            }
+            if best is None or (iou_score, -center_dist) > (float(best["iou"]), -float(best["center_distance"])):
+                best = conflict
+        return best
+
+    def _candidate_removed_pending_conflict(
+        self,
+        track: EvidenceTrack,
+        tracks: list[EvidenceTrack],
+        frame_idx: int,
+    ) -> dict | None:
+        guard_frames = int(self._cfg(
+            "MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES",
+            self._cfg("MSDC_REMOVED_GUARD_FRAMES", 80),
+        ))
+        if guard_frames <= 0:
+            return None
+        guard_data = self._removed_guard_data(tracks, frame_idx, guard_frames)
+        sig_boxes = guard_data["boxes"]
+        if sig_boxes.size == 0:
+            return None
+        group_box = _box_array(track.box).reshape(1, 4)
+        iou_thresh = float(self._cfg("MSDC_REMOVED_GUARD_IOU_THRESH", 0.3))
+        center_thresh = float(self._cfg("MSDC_REMOVED_GUARD_CENTER_DIST", self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0)))
+        ious = _iou_batch(group_box, sig_boxes).reshape(-1)
+        distances = _center_distance_batch(group_box, sig_boxes).reshape(-1)
+        best = None
+        for idx in np.where((ious >= iou_thresh) | (distances <= center_thresh))[0]:
+            index = int(idx)
+            signature = guard_data["signatures"][index]
+            if not self._pending_candidate_class_compatible(track, signature):
+                continue
+            track_index = int(guard_data["track_indices"][index])
+            source_track = tracks[track_index] if 0 <= track_index < len(tracks) else None
+            conflict = {
+                "source": "removed",
+                "target_gid": int(guard_data["gids"][index]),
+                "target_public_id": None if source_track is None or source_track.public_id is None else int(source_track.public_id),
+                "target_track": source_track,
+                "iou": float(round(float(ious[index]), 4)),
+                "center_distance": float(round(float(distances[index]), 4)),
+                "signature_age": int(guard_data["ages"][index]),
+            }
+            if best is None or (float(ious[index]), -float(distances[index])) > (
+                float(best["iou"]),
+                -float(best["center_distance"]),
+            ):
+                best = conflict
+        return best
+
     def _transition_track(
         self,
         track: EvidenceTrack,
         frame_idx: int,
         matched: bool,
         reacquire_score: float,
+        tracks: list[EvidenceTrack] | None = None,
     ) -> list[LifecycleEvent]:
         state = _as_state(track.state)
         current_dt = int(frame_idx) - int(track.last_seen)
@@ -1699,6 +1883,17 @@ class EvidenceStateUpdater:
             if target_state == TrackState.ACTIVE:
                 event_type = "CONFIRM_ACTIVE"
                 reason = "evidence_confirmed"
+                pending_action, pending_extra, pending_events = self._resolve_candidate_pending_recovery(
+                    track=track,
+                    tracks=tracks or [],
+                    frame_idx=frame_idx,
+                )
+                if pending_action == "wait":
+                    return pending_events
+                if pending_action == "inherit":
+                    event_type = str(pending_extra.get("event_type", "CONFIRM_ACTIVE"))
+                    reason = str(pending_extra.get("reason", "pending_recovery_inherited_public_id"))
+                    extra = {key: value for key, value in pending_extra.items() if key not in {"event_type", "reason"}}
             elif int(track.age) > 1 and (
                 int(track.age) > int(self._cfg("MSDC_CANDIDATE_MAX_AGE", 5))
                 or float(track.evidence_score) < float(self._cfg("MSDC_PRUNE_SCORE", 0.1))
@@ -1778,6 +1973,8 @@ class EvidenceStateUpdater:
         if to_state == TrackState.ACTIVE and track.public_id is None:
             track.public_id = self.next_public_id
             self.next_public_id += 1
+        if to_state in {TrackState.ACTIVE, TrackState.REMOVED, TrackState.LOST}:
+            track.pending_recovery = {}
         if to_state == TrackState.REMOVED:
             track.retired_signature = self._make_removed_signature(track, frame_idx)
         track.state = to_state

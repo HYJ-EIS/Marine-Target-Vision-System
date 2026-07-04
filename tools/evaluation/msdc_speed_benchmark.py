@@ -45,6 +45,8 @@ _FORMAL_V3_BOOL_KEYS = {
     "MSDC_REUSE_GUARD_ENABLE",
     "MSDC_DEBUG_EVENTS",
     "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY",
+    "MSDC_PENDING_RECOVERY_ENABLE",
+    "MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH",
 }
 _FORMAL_V3_INT_KEYS = {
     "MSDC_OUTPUT_MAX_REAL_DET_AGE",
@@ -63,6 +65,9 @@ _FORMAL_V3_INT_KEYS = {
     "MSDC_MAX_LOW_CANDIDATES",
     "MSDC_MAX_TOTAL_TRACKS",
     "MSDC_REACQUIRE_INTERVAL",
+    "MSDC_PENDING_RECOVERY_FRAMES",
+    "MSDC_PENDING_RECOVERY_MAX_LOST_AGE",
+    "MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES",
 }
 _FORMAL_V3_FLOAT_KEYS = {
     "MSDC_LOW_OBS_MIN_CONF",
@@ -97,6 +102,28 @@ def _config_overrides_for_variant(variant: str) -> dict[str, bool | int | float]
     for key, value in ABLATION_VARIANTS[variant].items():
         if key in supported_keys:
             overrides[key] = _coerce_formal_v3_value(key, value)
+    overrides["MSDC_DEBUG_EVENTS"] = False
+    return overrides
+
+
+def _parse_msdc_env_json(raw: str) -> dict[str, bool | int | float]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid --msdc-env-json: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("--msdc-env-json must be a JSON object")
+
+    overrides: dict[str, bool | int | float] = {}
+    for key, value in parsed.items():
+        if not isinstance(key, str):
+            raise ValueError("--msdc-env-json keys must be strings")
+        try:
+            overrides[key] = _coerce_formal_v3_value(key, str(value))
+        except KeyError as exc:
+            raise ValueError(str(exc)) from exc
     overrides["MSDC_DEBUG_EVENTS"] = False
     return overrides
 
@@ -471,7 +498,9 @@ def run_speed_benchmark(args: argparse.Namespace) -> tuple[Path, Path]:
     results_path = output_dir / "speed_results.csv"
 
     variant = getattr(args, "msdc_variant", FORMAL_MSDC_VARIANT) or FORMAL_MSDC_VARIANT
-    with _temporary_config_overrides(Config, _config_overrides_for_variant(str(variant))):
+    overrides = _config_overrides_for_variant(str(variant))
+    overrides.update(_parse_msdc_env_json(getattr(args, "msdc_env_json", "") or ""))
+    with _temporary_config_overrides(Config, overrides):
         with timings_path.open("w", encoding="utf-8") as timing_fh:
             rows = [
                 _run_tracker_benchmark(
@@ -506,6 +535,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--frames", type=int, default=1000, help="Requested frame count")
     parser.add_argument("--trackers", nargs="+", choices=PAPER_TRACKER_CHOICES, default=list(PAPER_TRACKER_CHOICES))
     parser.add_argument("--msdc-variant", choices=list(ABLATION_VARIANTS), default=FORMAL_MSDC_VARIANT)
+    parser.add_argument(
+        "--msdc-env-json",
+        default="",
+        help="Optional JSON object of supported MSDC_* config overrides applied after --msdc-variant",
+    )
     parser.add_argument("--progress-interval", type=int, default=0)
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
     args = parser.parse_args(argv)
