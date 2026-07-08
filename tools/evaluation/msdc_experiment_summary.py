@@ -726,7 +726,7 @@ def main() -> None:
         output_root / "diagnostic_results.csv",
     )
 
-    main_baselines = [METHOD_LABELS["ocsort"], METHOD_LABELS["botsort"]]
+    main_baselines = [METHOD_LABELS["official_ocsort"], METHOD_LABELS["official_botsort"], METHOD_LABELS["bytetrack"]]
     analysis_main = build_analysis_text(main_rows, METHOD_LABELS[MAIN_MSDC_TRACKER], main_baselines)
     analysis_ablation = build_analysis_text(ablation_rows, MAIN_MSDC_TRACKER, [row["variant"] for row in ablation_rows if row["variant"] != MAIN_MSDC_TRACKER])
     analysis_speed = "Speed rows are copied from the provided speed CSV when available; missing speed input is reported as N/A."

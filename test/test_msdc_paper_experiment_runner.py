@@ -56,9 +56,9 @@ def test_main_command_uses_full_video_and_render():
     assert "--max-frames" not in cmd
     assert "--render" in cmd
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == [
+        "official_ocsort",
+        "official_botsort",
         "bytetrack",
-        "ocsort",
-        "botsort",
         "msdc_elt",
     ]
     assert cmd[cmd.index("--variants") + 1] == FORMAL_MSDC_VARIANT
@@ -90,9 +90,9 @@ def test_main_command_uses_formal_frame_limit_and_all_main_trackers(tmp_path):
     assert "--formal-frame-limit" in cmd
     assert cmd[cmd.index("--formal-frame-limit") + 1] == "5400"
     assert cmd[cmd.index("--trackers") + 1:cmd.index("--variants")] == [
+        "official_ocsort",
+        "official_botsort",
         "bytetrack",
-        "ocsort",
-        "botsort",
         "msdc_elt",
     ]
 
@@ -248,9 +248,9 @@ def test_speed_command_records_fixed_frame_count():
         progress_interval=100,
     )
     assert cmd[cmd.index("--frames") + 1] == "1000"
+    assert "official_ocsort" in cmd
+    assert "official_botsort" in cmd
     assert "bytetrack" in cmd
-    assert "ocsort" in cmd
-    assert "botsort" in cmd
     assert "msdc_elt" in cmd
 
 

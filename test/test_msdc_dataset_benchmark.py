@@ -46,7 +46,7 @@ def test_formal_frame_limit_controls_printed_export_limit(monkeypatch, tmp_path,
         "--run-id",
         "formal",
         "--trackers",
-        "ocsort",
+        "official_ocsort",
         "--formal-frame-limit",
         "5400",
         "--render",
@@ -151,7 +151,7 @@ def test_print_only_benchmark_does_not_create_run_metadata(monkeypatch, tmp_path
         "--run-id",
         "print_only",
         "--trackers",
-        "ocsort",
+        "official_ocsort",
     ])
 
     main()

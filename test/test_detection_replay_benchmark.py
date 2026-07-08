@@ -118,11 +118,13 @@ def test_render_video_complete_checks_frame_count(tmp_path):
 
 def test_tracker_output_name_marks_replay_mode():
     assert tracker_output_name("bytetrack") == "bytetrack_replay"
+    assert tracker_output_name("official_botsort") == "official_botsort_replay"
+    assert tracker_output_name("official_ocsort") == "official_ocsort_replay"
     assert tracker_output_name("botsort") == "botsort_replay"
     assert tracker_output_name("ocsort") == "ocsort_replay"
     assert tracker_output_name("msdc_elt", "msdc_v3") == "msdc_v3_replay"
     assert tracker_output_name("msdc_elt", "no_low_candidate") == "no_low_candidate_replay"
-    assert DATASET_EXPORT_TRACKER_CHOICES == ("bytetrack", "botsort", "ocsort", "msdc_elt")
+    assert DATASET_EXPORT_TRACKER_CHOICES == ("official_ocsort", "official_botsort", "bytetrack", "msdc_elt")
 
 
 def test_high_and_low_boxes_read_named_cache_columns():
@@ -146,8 +148,8 @@ def test_write_replay_summary_writes_trackeval_fields(tmp_path):
     summary_path = write_replay_summary(
         tmp_path,
         {
-            "botsort_replay": {"HOTA": 1.1, "MOTA": 2.2, "IDF1": 3.3, "IDSW": 4, "FP": 5, "FN": 6},
-            "ocsort_replay": {"HOTA": 7.7, "MOTA": 8.8, "IDF1": 9.9, "IDSW": 10, "FP": 11, "FN": 12},
+            "official_botsort_replay": {"HOTA": 1.1, "MOTA": 2.2, "IDF1": 3.3, "IDSW": 4, "FP": 5, "FN": 6},
+            "official_ocsort_replay": {"HOTA": 7.7, "MOTA": 8.8, "IDF1": 9.9, "IDSW": 10, "FP": 11, "FN": 12},
         },
     )
 
@@ -156,11 +158,11 @@ def test_write_replay_summary_writes_trackeval_fields(tmp_path):
 
     assert summary_path == tmp_path / "summary" / "replay_summary.csv"
     assert set(["tracker", "variant", "replay_detections", "MOTA", "IDF1"]).issubset(rows[0])
-    assert rows[0]["tracker"] == "botsort_replay"
+    assert rows[0]["tracker"] == "official_botsort_replay"
     assert rows[0]["variant"] == ""
     assert rows[0]["replay_detections"] == "True"
     assert rows[0]["HOTA"] == "1.1"
-    assert rows[1]["tracker"] == "ocsort_replay"
+    assert rows[1]["tracker"] == "official_ocsort_replay"
 
 
 def test_write_effective_msdc_config_writes_sorted_json_under_run_root(tmp_path):

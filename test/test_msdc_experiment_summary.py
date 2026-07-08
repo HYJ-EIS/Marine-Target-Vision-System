@@ -32,7 +32,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 
 def _write_summary(path: Path) -> None:
     _write_csv(path, [
-        {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
+        {"tracker": "official_ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
         {"tracker": "v3_candidate_topk_no_roi_no_motion", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
@@ -95,8 +95,9 @@ def _run_summary_cli(
 def test_main_results_maps_trackers_to_method_labels(tmp_path):
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [
-        {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
-        {"tracker": "botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
+        {"tracker": "official_ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
+        {"tracker": "official_botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
+        {"tracker": "bytetrack", "HOTA": "9", "DetA": "19", "AssA": "29", "MOTA": "39", "IDF1": "49", "IDSW": "7", "FP": "8", "FN": "9", "IDTP": "10", "IDFP": "11", "IDFN": "12"},
         {"tracker": "msdc_elt", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
@@ -109,8 +110,9 @@ def test_main_results_maps_trackers_to_method_labels(tmp_path):
     )
 
     assert [row["method"] for row in rows] == [
-        METHOD_LABELS["ocsort"],
-        METHOD_LABELS["botsort"],
+        METHOD_LABELS["official_ocsort"],
+        METHOD_LABELS["official_botsort"],
+        METHOD_LABELS["bytetrack"],
         METHOD_LABELS["msdc_elt"],
     ]
     assert out.read_text(encoding="utf-8-sig").splitlines()[0].startswith("run_name,method,tracker")
@@ -119,8 +121,9 @@ def test_main_results_maps_trackers_to_method_labels(tmp_path):
 def test_main_results_include_v3_candidate_topk_no_roi_no_motion_as_msdc_v3(tmp_path):
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [
-        {"tracker": "ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
-        {"tracker": "botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
+        {"tracker": "official_ocsort", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
+        {"tracker": "official_botsort", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
+        {"tracker": "bytetrack", "HOTA": "9", "DetA": "19", "AssA": "29", "MOTA": "39", "IDF1": "49", "IDSW": "7", "FP": "8", "FN": "9", "IDTP": "10", "IDFP": "11", "IDFN": "12"},
         {"tracker": "v3_candidate_topk_no_roi_no_motion", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
@@ -131,16 +134,16 @@ def test_main_results_include_v3_candidate_topk_no_roi_no_motion_as_msdc_v3(tmp_
         benchmark_root=tmp_path,
     )
 
-    assert [row["tracker"] for row in rows] == ["ocsort", "botsort", "v3_candidate_topk_no_roi_no_motion"]
-    assert rows[2]["method"] == METHOD_LABELS["v3_candidate_topk_no_roi_no_motion"]
+    assert [row["tracker"] for row in rows] == ["official_ocsort", "official_botsort", "bytetrack", "v3_candidate_topk_no_roi_no_motion"]
+    assert rows[3]["method"] == METHOD_LABELS["v3_candidate_topk_no_roi_no_motion"]
 
 
 def test_main_results_include_replay_tracker_names(tmp_path):
     summary = tmp_path / "eval" / "motchallenge_summary.csv"
     _write_csv(summary, [
+        {"tracker": "official_ocsort_replay", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
+        {"tracker": "official_botsort_replay", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
         {"tracker": "bytetrack_replay", "HOTA": "9", "DetA": "19", "AssA": "29", "MOTA": "39", "IDF1": "49", "IDSW": "7", "FP": "8", "FN": "9", "IDTP": "10", "IDFP": "11", "IDFN": "12"},
-        {"tracker": "ocsort_replay", "HOTA": "10", "DetA": "20", "AssA": "30", "MOTA": "40", "IDF1": "50", "IDSW": "6", "FP": "7", "FN": "8", "IDTP": "9", "IDFP": "10", "IDFN": "11"},
-        {"tracker": "botsort_replay", "HOTA": "11", "DetA": "21", "AssA": "31", "MOTA": "41", "IDF1": "51", "IDSW": "5", "FP": "6", "FN": "7", "IDTP": "8", "IDFP": "9", "IDFN": "10"},
         {"tracker": "msdc_v3_replay", "HOTA": "12", "DetA": "22", "AssA": "32", "MOTA": "42", "IDF1": "52", "IDSW": "4", "FP": "5", "FN": "6", "IDTP": "7", "IDFP": "8", "IDFN": "9"},
     ])
 
@@ -152,15 +155,15 @@ def test_main_results_include_replay_tracker_names(tmp_path):
     )
 
     assert [row["tracker"] for row in rows] == [
+        "official_ocsort_replay",
+        "official_botsort_replay",
         "bytetrack_replay",
-        "ocsort_replay",
-        "botsort_replay",
         "msdc_v3_replay",
     ]
     assert [row["method"] for row in rows] == [
+        METHOD_LABELS["official_ocsort"],
+        METHOD_LABELS["official_botsort"],
         METHOD_LABELS["bytetrack"],
-        METHOD_LABELS["ocsort"],
-        METHOD_LABELS["botsort"],
         METHOD_LABELS["msdc_v3"],
     ]
 

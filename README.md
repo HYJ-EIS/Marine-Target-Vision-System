@@ -6,7 +6,7 @@
 
 - 检测类别、模型路径、置信度阈值、NMS 阈值、图片输入输出目录、视频默认输入输出和 MS-DC-ELT 参数集中在 `target_module/image_detect_module/config.py`。
 - 跟踪器选择、正式 MS-DC 变体名、论文方法展示名和速度统计字段集中在 `target_module/image_detect_module/constants.py`。
-- 当前正式 MS-DC-ELT 主变体名为 `msdc_v3`。
+- 当前正式 MS-DC-ELT 主变体名为 `msdc_v3`。论文主对比使用 vendored 官方适配层 `official_ocsort`、`official_botsort`、`bytetrack` 和 `msdc_v3`；`ocsort` / `botsort` 是项目内 legacy/lite 实现，不作为当前论文主对比 baseline。
 - 视频运行和 MOT 导出的逐帧 tracking 分发共用 `target_module/image_detect_module/utils/tracking_update.py`。
 - MS-DC-ELT 当前为单次低阈值检测后拆分高阈值框，并通过 low observation 预算控制候选规模。
 - 正式可视化以 MOT txt 为输入，使用 `tools/evaluation/render_mot_video.py`。
@@ -109,6 +109,15 @@ official_botsort
 msdc_elt
 ```
 
+当前论文实验入口的主对比 tracker 集合为：
+
+```text
+official_ocsort
+official_botsort
+bytetrack
+msdc_elt + msdc_v3
+```
+
 baseline 跟踪器通过 `MultiObjectTracker.update()` 更新；`msdc_elt` 通过 `MSDCLifecycleTracker.update()` 更新。统一分发逻辑在：
 
 ```text
@@ -187,6 +196,8 @@ conda run -n ship_detect python tools/evaluation/validate_msdc_formal_run.py --r
 - 输出路径清单，包括 MOT txt、TrackEval summary、诊断 JSONL/CSV、可视化 MP4、速度/耗时统计文件。
 
 `validate_msdc_formal_run.py` 会检查 `summary/main_results.csv`、`summary/speed_results.csv`、`summary/diagnostic_results.csv`、`summary/path_manifest.csv`、`slice/slice_manifest.csv`、`slice/slice_metrics/slice_metrics.csv`、`sensitivity/sensitivity_full/sensitivity_matrix.csv`、`sensitivity/sensitivity_metrics/eval/motchallenge_summary.csv`、`**/effective_config/*.json`、MOT txt、诊断文件和可视化视频。
+
+如果只运行 full-video no-render replay，例如为了快速比较 `official_ocsort`、`official_botsort`、`bytetrack` 和 `msdc_v3`，可以直接使用 `tools/evaluation/detection_replay_benchmark.py` 且不传 `--render`。这类 run 会生成 MOT txt、TrackEval summary、diagnostics 和 detection cache，但不会生成可视化 MP4，也不会运行 slice/qualitative 分析；因此不能按本节“正式评测交付项”宣称为完整正式评测。
 
 ## 常用评测工具
 
