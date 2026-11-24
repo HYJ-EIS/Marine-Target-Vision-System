@@ -498,7 +498,7 @@ def test_validate_run_rejects_placeholder_values_in_second_speed_row(tmp_path):
     valid_speed_row = {field: "1" for field in REQUIRED_SPEED}
     valid_speed_row["tracker"] = "msdc_elt"
     invalid_speed_row = dict(valid_speed_row)
-    invalid_speed_row["tracker"] = "botsort"
+    invalid_speed_row["tracker"] = "official_botsort"
     invalid_speed_row["mean_low_detection_ms"] = "N/A"
     _write_csv(
         tmp_path / "summary/speed_results.csv",

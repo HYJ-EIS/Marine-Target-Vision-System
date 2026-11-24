@@ -117,8 +117,8 @@
 检测框出来后，会交给 `MultiObjectTracker`：
 
 - 跟踪器类型由 `--tracker` 指定
-- 当前可选 `bytetrack`、`ocsort`、`botsort`、`dist_tracker`、`official_ocsort`、`official_botsort`
-- 历史默认值为 `botsort`
+- 当前可选 `bytetrack`、`official_ocsort`、`official_botsort`、`msdc_elt`
+- 当前默认值为 `official_botsort`
 
 跟踪器初始化时会使用原始视频 FPS，历史最小确认次数默认值为 `1`：
 
@@ -517,7 +517,7 @@ class_id x_center y_center width height
 | --- | --- | --- | --- |
 | `--input-root` | 无当前仓库默认值 | 输入视频根目录 | 只改变扫描范围，不改变抽帧逻辑 |
 | `--output-root` | 无当前仓库默认值 | 输出目录 | 只影响输出位置 |
-| `--tracker` | `botsort` | 跟踪器类型 | 更换跟踪器可能改变 `track_id` 稳定性和 `new_track` 触发频率 |
+| `--tracker` | `official_botsort` | 跟踪器类型 | 更换跟踪器可能改变 `track_id` 稳定性和 `new_track` 触发频率 |
 | `--motion-threshold` | `0.15` | 目标位移触发阈值 | 调大后更不容易触发 `motion_change`；调小后更容易保留运动帧 |
 | `--pose-angle-threshold-deg` | `12.0` | 姿态角变化触发阈值 | 调大后姿态变化更不敏感；调小后更容易保留姿态变化帧 |
 | `--area-threshold` | `0.12` | 面积变化触发阈值 | 调大后缩放变化更难触发；调小后更容易保留尺度变化帧 |

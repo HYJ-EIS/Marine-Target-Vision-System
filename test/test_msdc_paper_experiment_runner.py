@@ -67,12 +67,14 @@ def test_main_command_uses_full_video_and_render():
 def test_formal_v3_env_freezes_expected_switches():
     assert FORMAL_MSDC_VARIANT == "msdc_v3"
     assert ABLATION_VARIANTS[FORMAL_MSDC_VARIANT] == FORMAL_V3_ENV
-    assert FORMAL_V3_ENV["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
+    assert FORMAL_V3_ENV["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
     assert FORMAL_V3_ENV["MSDC_USE_REACQUIRE"] == "1"
     assert FORMAL_V3_ENV["MSDC_LOW_INHERIT_ENABLE"] == "1"
     assert FORMAL_V3_ENV["MSDC_OUTPUT_NMS_ENABLE"] == "1"
     assert FORMAL_V3_ENV["MSDC_OUTPUT_MAX_REAL_DET_AGE"] == "3"
     assert FORMAL_V3_ENV["MSDC_LOW_OBS_TOPK"] == "32"
+    assert FORMAL_V3_ENV["MSDC_ASSOC_METHOD"] == "greedy"
+    assert ABLATION_VARIANTS["gated_hungarian"]["MSDC_ASSOC_METHOD"] == "gated_hungarian"
 
 
 def test_main_command_uses_formal_frame_limit_and_all_main_trackers(tmp_path):
@@ -545,18 +547,18 @@ def test_formal_v3_ablation_variants_are_available():
     assert formal_env["MSDC_LOW_OBS_MIN_CONF"] == "0.25"
     assert formal_env["MSDC_DEBUG_EVENTS"] == "1"
     assert formal_env["MSDC_REMOVED_GUARD_IOU_THRESH"] == "0.3"
-    assert formal_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
+    assert float(formal_env["MSDC_REMOVED_GUARD_CENTER_DIST"]) == 80.0
     assert formal_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "1"
-    assert formal_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+    assert float(formal_env["MSDC_REMOVED_RECOVERY_MIN_IOU"]) == 0.20
     assert formal_env["MSDC_REACQUIRE_INTERVAL"] == "1"
     assert formal_env["MSDC_REACQUIRE_SCORE"] == "0.8"
     assert formal_env["MSDC_PENDING_RECOVERY_ENABLE"] == "0"
 
     recovery_off_env = _variant_env("removed_recovery_off")
     assert recovery_off_env["MSDC_REMOVED_GUARD_IOU_THRESH"] == "0.3"
-    assert recovery_off_env["MSDC_REMOVED_GUARD_CENTER_DIST"] == "80"
+    assert float(recovery_off_env["MSDC_REMOVED_GUARD_CENTER_DIST"]) == 80.0
     assert recovery_off_env["MSDC_REMOVED_RECOVERY_ENABLE"] == "0"
-    assert recovery_off_env["MSDC_REMOVED_RECOVERY_MIN_IOU"] == "0.20"
+    assert float(recovery_off_env["MSDC_REMOVED_RECOVERY_MIN_IOU"]) == 0.20
 
     every_frame_env = _variant_env("reacquire_every_frame_low_score")
     assert every_frame_env["MSDC_REACQUIRE_INTERVAL"] == "1"
@@ -577,5 +579,5 @@ def test_formal_v3_ablation_execution_env_ignores_ambient_msdc_overrides(monkeyp
 
     env = _execution_env(FORMAL_MSDC_VARIANT, _variant_env(FORMAL_MSDC_VARIANT))
 
-    assert "MSDC_CONFIRM_REQUIRE_HIGH_DET" not in env
+    assert env["MSDC_CONFIRM_REQUIRE_HIGH_DET"] == "1"
     assert env["UNRELATED_FLAG"] == "keep"

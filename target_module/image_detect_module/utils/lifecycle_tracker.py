@@ -17,6 +17,7 @@ import numpy as np
 
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.utils.evidence_state import EvidenceStateUpdater
+from target_module.image_detect_module.utils.paper_logging import PaperFrameLogger
 from target_module.image_detect_module.utils.msdc_types import (
     EvidenceTrack,
     Observation,
@@ -48,9 +49,23 @@ class MSDCLifecycleTracker:
         self.last_output_nms_debug: dict[str, Any] = self._empty_output_nms_debug()
         self.last_low_observation_budget_debug: dict[str, Any] = self._empty_low_observation_budget_debug()
         self.last_timing_debug: dict[str, float] = self._empty_timing_debug()
+        self._paper_logger: PaperFrameLogger | None = None
+        self._paper_output_nms: list[dict] = []
 
         if self.debug_events and self.debug_dir is not None:
             self.debug_dir.mkdir(parents=True, exist_ok=True)
+
+    def enable_paper_logging(self, directory: str | Path, sequence: str, method: str) -> None:
+        """Enable complete logs for one fresh sequence replay."""
+        self.close_paper_logging()
+        self._paper_logger = PaperFrameLogger(directory, sequence, method)
+        self.evidence_updater.paper_trace_enabled = True
+
+    def close_paper_logging(self) -> None:
+        if self._paper_logger is not None:
+            self._paper_logger.close()
+            self._paper_logger = None
+        self.evidence_updater.paper_trace_enabled = False
 
     def update(
         self,
@@ -126,17 +141,28 @@ class MSDCLifecycleTracker:
                 output_boxes=output_boxes,
             )
         debug_s = time.perf_counter() - step_start
+        paper_trace_s = 0.0
+        paper_export_s = 0.0
+        if self._paper_logger is not None:
+            paper_trace_s = float(getattr(self.evidence_updater, "paper_trace_s", 0.0))
+            step_start = time.perf_counter()
+            self._write_paper_frame(idx, output_boxes)
+            paper_export_s = time.perf_counter() - step_start
+            debug_s += paper_trace_s + paper_export_s
         self.last_timing_debug = {
             "low_filter_s": float(low_filter_s),
             "observation_build_s": float(observation_build_s),
-            "evidence_update_s": float(evidence_update_s),
+            "evidence_update_s": float(max(0.0, evidence_update_s - paper_trace_s)),
             "output_s": float(output_s),
             "debug_s": float(debug_s),
+            "paper_trace_s": float(paper_trace_s),
+            "paper_export_s": float(paper_export_s),
             "total_update_s": float(time.perf_counter() - update_start),
         }
         return output_boxes
 
     def reset(self) -> None:
+        self.close_paper_logging()
         self.tracks = []
         self.evidence_updater = EvidenceStateUpdater(self.config)
         self.last_events = []
@@ -148,6 +174,75 @@ class MSDCLifecycleTracker:
         self.last_output_nms_debug = self._empty_output_nms_debug()
         self.last_low_observation_budget_debug = self._empty_low_observation_budget_debug()
         self.last_timing_debug = self._empty_timing_debug()
+
+    def _write_paper_frame(self, frame_idx: int, output_boxes: list[dict]) -> None:
+        trace = dict(getattr(self.evidence_updater, "last_paper_trace", {}) or {})
+        # Use actual output boxes (including export rounding), not an inferred
+        # GT-aligned box or bounded debug snapshot.
+        emitted_by_gid = {int(box.get("gid", box["track_id"])): box for box in output_boxes}
+        tracks_by_gid = {int(track.gid): track for track in self.tracks}
+        snapshots = {int(row["gid"]): row for row in trace.get("states", [])}
+        for track in self.tracks:
+            snapshots.setdefault(int(track.gid), track_to_dict(track))
+        outputs = []
+        for gid, snapshot in snapshots.items():
+            track = tracks_by_gid.get(gid)
+            state = str(snapshot.get("state", snapshot.get("state_after", "unknown")))
+            public_id = snapshot.get("public_id")
+            real_frame = int(snapshot.get("last_real_det_frame", -1))
+            if track is not None:
+                state = self._track_state(track).value
+                public_id = track.public_id
+                real_frame = int(track.last_real_det_frame)
+            emitted = emitted_by_gid.get(gid)
+            reason = ""
+            eligible = False
+            candidate = None
+            if track is None or snapshot.get("retained", True) is False:
+                reason = str(snapshot.get("deletion_reason") or "removed_from_pool")
+            elif state == TrackState.ACTIVE.value:
+                candidate = self._track_to_output_box(track, frame_idx)
+                eligible = candidate is not None
+                if not eligible:
+                    if float(track.evidence_score) <= 0:
+                        reason = "nonpositive_score"
+                    elif real_frame < 0:
+                        reason = "no_real_detection"
+                    elif frame_idx - real_frame > int(getattr(self.config, "MSDC_OUTPUT_MAX_REAL_DET_AGE", 3)):
+                        reason = "real_detection_age"
+                    else:
+                        reason = "box_size"
+                elif emitted is None:
+                    reason = "output_nms"
+            elif self.output_candidates and state == TrackState.CANDIDATE.value:
+                candidate = track_to_output_box(track)
+                eligible = True
+            else:
+                reason = f"state_{state}"
+            box = emitted or candidate
+            raw_box = snapshot.get("box_xyxy", snapshot.get("box", []))
+            exported = xywh_to_xyxy(box).tolist() if box is not None else None
+            outputs.append({
+                "gid": gid, "public_id": public_id,
+                "model_class_id": int(track.class_id if track is not None else snapshot.get("model_class_id", snapshot.get("class_id", -1))),
+                "state": state, "box_xyxy": exported if exported is not None else raw_box,
+                "exported_box_xyxy": exported if emitted is not None else None,
+                "current_detection_match": bool(real_frame == frame_idx),
+                "real_det_age": None if real_frame < 0 else max(0, frame_idx - real_frame),
+                "eligible_before_nms": eligible, "emitted": emitted is not None,
+                "rejection_reason": "" if emitted is not None else reason,
+            })
+        events = list(trace.get("events", []))
+        for row in self._paper_output_nms:
+            events.append({
+                "event_type": "output_nms", "branch": "output",
+                "gid": row["gid"], "public_id": row["track_id"],
+                "suppressed_by_gid": row["kept_gid"], "reason": "output_nms",
+                "iou": row["iou"], "distance": row["center_distance"],
+            })
+        trace["events"] = events
+        trace["outputs"] = outputs
+        self._paper_logger.write_frame(frame_idx + 1, trace)
 
     @staticmethod
     def _empty_timing_debug() -> dict[str, float]:
@@ -215,12 +310,13 @@ class MSDCLifecycleTracker:
         return box
 
     def _valid_output_xyxy(self, box: np.ndarray) -> bool:
-        min_size = int(getattr(self.config, "MSDC_OUTPUT_MIN_BOX_SIZE", 12))
+        min_size = int(getattr(self.config, "MSDC_OUTPUT_MIN_BOX_SIZE", Config.MSDC_OUTPUT_MIN_BOX_SIZE))
         width = float(box[2] - box[0])
         height = float(box[3] - box[1])
         return bool(width >= min_size and height >= min_size)
 
     def _nms_output_boxes(self, boxes: list[dict]) -> list[dict]:
+        self._paper_output_nms = []
         enabled = bool(getattr(self.config, "MSDC_OUTPUT_NMS_ENABLE", True))
         if not enabled or len(boxes) <= 1:
             self.last_output_nms_debug = {
@@ -276,6 +372,8 @@ class MSDCLifecycleTracker:
                 suppressed.append(conflict)
 
         kept = [boxes[idx] for idx in kept_indices]
+        if self._paper_logger is not None:
+            self._paper_output_nms = suppressed
         self.last_output_nms_debug = {
             "enabled": True,
             "iou_thresh": float(iou_thresh),

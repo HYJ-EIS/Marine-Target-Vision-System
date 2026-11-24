@@ -1,12 +1,16 @@
 import sys
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from target_module.image_detect_module.config import Config
+import target_module.image_detect_module.utils.evidence_state as evidence_state_module
 from target_module.image_detect_module.utils.evidence_state import EvidenceStateUpdater, assign_state
 from target_module.image_detect_module.utils.msdc_types import EvidenceTrack, Observation, TrackState
 
@@ -175,6 +179,16 @@ class HitsOnlyEvidenceConfig(Config):
     MSDC_CONFIRM_REQUIRE_HIGH_DET = False
 
 
+class GreedyAssociationConfig(Config):
+    MSDC_ASSOC_METHOD = "greedy"
+    MSDC_ASSOC_IOU_THRESH = 0.1
+    MSDC_ASSOC_CENTER_DIST = 0.0
+
+
+class GatedHungarianAssociationConfig(GreedyAssociationConfig):
+    MSDC_ASSOC_METHOD = "gated_hungarian"
+
+
 def test_assign_state_is_priority_ordered_and_complete():
     cases = [
         (0.0, 0.0, 10, 5, TrackState.REMOVED),
@@ -195,6 +209,81 @@ def test_assign_state_requires_observation_for_confirmed_state():
     assert assign_state(3.0, 0.0, 99, 0, config=StateDecisionConfig) == TrackState.CANDIDATE
     assert assign_state(3.0, 0.0, 0, 0, config=StateDecisionConfig) == TrackState.LOST
     assert assign_state(3.0, 1.0, 0, 0, config=StateDecisionConfig) == TrackState.ACTIVE
+
+
+def test_gated_hungarian_finds_global_assignment_that_greedy_misses(monkeypatch):
+    iou = np.asarray([[0.90, 0.80], [0.85, 0.00]])
+    distances = np.full((2, 2), 100.0)
+    tracks = [_track(1, TrackState.ACTIVE), _track(2, TrackState.ACTIVE)]
+    observations = [_obs(1, box=[10, 10, 18, 18]), _obs(1, box=[20, 10, 28, 18])]
+
+    greedy = EvidenceStateUpdater(GreedyAssociationConfig)
+    greedy_groups = greedy.merge_observations(observations)
+    hungarian = EvidenceStateUpdater(GatedHungarianAssociationConfig)
+    hungarian_groups = hungarian.merge_observations(observations)
+    monkeypatch.setattr(evidence_state_module, "_iou_batch", lambda *_: iou)
+    monkeypatch.setattr(evidence_state_module, "_center_distance_batch", lambda *_: distances)
+    greedy_matches, _, _ = greedy.associate_tracks_to_observations(tracks, greedy_groups)
+
+    hungarian_matches, unmatched_tracks, unmatched_groups = hungarian.associate_tracks_to_observations(
+        tracks,
+        hungarian_groups,
+    )
+
+    assert greedy_matches == [(0, 0)]
+    assert sorted(hungarian_matches) == [(0, 1), (1, 0)]
+    assert unmatched_tracks == []
+    assert unmatched_groups == []
+
+
+def test_gated_hungarian_rejects_assignments_outside_geometry_gate(monkeypatch):
+    updater = EvidenceStateUpdater(GatedHungarianAssociationConfig)
+    tracks = [_track(1, TrackState.ACTIVE), _track(2, TrackState.ACTIVE)]
+    groups = updater.merge_observations([
+        _obs(1, box=[10, 10, 18, 18]),
+        _obs(1, box=[20, 10, 28, 18]),
+    ])
+    monkeypatch.setattr(evidence_state_module, "_iou_batch", lambda *_: np.zeros((2, 2)))
+    monkeypatch.setattr(evidence_state_module, "_center_distance_batch", lambda *_: np.full((2, 2), 100.0))
+
+    matches, unmatched_tracks, unmatched_groups = updater.associate_tracks_to_observations(tracks, groups)
+
+    assert matches == []
+    assert unmatched_tracks == [0, 1]
+    assert unmatched_groups == [0, 1]
+
+
+def test_gated_hungarian_maximizes_valid_cardinality_for_rectangular_sparse_gate(monkeypatch):
+    iou = np.asarray([
+        [0.90, 0.80, 0.00],
+        [0.85, 0.00, 0.00],
+    ])
+    updater = EvidenceStateUpdater(GatedHungarianAssociationConfig)
+    tracks = [_track(1, TrackState.ACTIVE), _track(2, TrackState.ACTIVE)]
+    groups = updater.merge_observations([
+        _obs(1, box=[10, 10, 18, 18]),
+        _obs(1, box=[20, 10, 28, 18]),
+        _obs(1, box=[30, 10, 38, 18]),
+    ])
+    monkeypatch.setattr(evidence_state_module, "_iou_batch", lambda *_: iou)
+    monkeypatch.setattr(evidence_state_module, "_center_distance_batch", lambda *_: np.full((2, 3), 100.0))
+
+    matches, unmatched_tracks, unmatched_groups = updater.associate_tracks_to_observations(tracks, groups)
+
+    assert sorted(matches) == [(0, 1), (1, 0)]
+    assert unmatched_tracks == []
+    assert unmatched_groups == [2]
+
+
+def test_unknown_core_association_method_is_rejected():
+    class InvalidAssociationConfig(GreedyAssociationConfig):
+        MSDC_ASSOC_METHOD = "not-a-matcher"
+
+    updater = EvidenceStateUpdater(InvalidAssociationConfig)
+    groups = updater.merge_observations([_obs(1)])
+
+    with pytest.raises(ValueError, match="Unsupported MSDC_ASSOC_METHOD"):
+        updater.associate_tracks_to_observations([_track(1, TrackState.ACTIVE)], groups)
 
 
 def _low_history(start_frame, boxes, score=0.35):

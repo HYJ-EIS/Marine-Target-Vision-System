@@ -54,6 +54,8 @@ def test_speed_fields_include_v3_staged_timing_aliases_and_legacy_fields():
         "mean_low_det_ms",
         "mean_render_ms",
         "mean_write_ms",
+        "variant",
+        "association_method",
     ]:
         assert field in SPEED_FIELDS
 
@@ -143,7 +145,7 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
         run_id="zero",
         commit_hash="abc123",
         frames=0,
-        trackers=["ocsort", "msdc_elt"],
+        trackers=["official_ocsort", "msdc_elt"],
         progress_interval=0,
     )
     results_path, timings_path = benchmark.run_speed_benchmark(args)
@@ -151,7 +153,7 @@ def test_run_speed_benchmark_writes_zero_frame_outputs(tmp_path, monkeypatch):
     assert timings_path.read_text(encoding="utf-8") == ""
     with results_path.open("r", encoding="utf-8-sig", newline="") as fh:
         rows = list(csv.DictReader(fh))
-    assert [row["tracker"] for row in rows] == ["ocsort", "msdc_elt"]
+    assert [row["tracker"] for row in rows] == ["official_ocsort", "msdc_elt"]
     assert {row["processed_frames"] for row in rows} == {"0"}
     assert "mean_read_decode_ms" in rows[0]
     assert "mean_render_write_ms" in rows[0]
@@ -177,7 +179,7 @@ def test_run_speed_benchmark_restores_debug_events_after_exception(tmp_path, mon
         run_id="raises",
         commit_hash="abc123",
         frames=0,
-        trackers=["ocsort"],
+        trackers=["official_ocsort"],
         progress_interval=0,
     )
     with pytest.raises(RuntimeError, match="boom"):
@@ -289,6 +291,8 @@ def test_run_speed_benchmark_applies_selected_msdc_variant(tmp_path, monkeypatch
                 "interval": Config.MSDC_REACQUIRE_INTERVAL,
                 "score": Config.MSDC_REACQUIRE_SCORE,
                 "debug": Config.MSDC_DEBUG_EVENTS,
+                "low_candidate": Config.MSDC_LOW_CANDIDATE_ENABLE,
+                "association": Config.MSDC_ASSOC_METHOD,
             }
         )
         return {
@@ -332,6 +336,8 @@ def test_run_speed_benchmark_applies_selected_msdc_variant(tmp_path, monkeypatch
     monkeypatch.setattr(Config, "MSDC_REACQUIRE_INTERVAL", 5, raising=False)
     monkeypatch.setattr(Config, "MSDC_REACQUIRE_SCORE", 1.5, raising=False)
     monkeypatch.setattr(Config, "MSDC_DEBUG_EVENTS", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_LOW_CANDIDATE_ENABLE", True, raising=False)
+    monkeypatch.setattr(Config, "MSDC_ASSOC_METHOD", "greedy", raising=False)
 
     args = argparse.Namespace(
         output_root=str(tmp_path / "out"),
@@ -349,11 +355,30 @@ def test_run_speed_benchmark_applies_selected_msdc_variant(tmp_path, monkeypatch
             "interval": 1,
             "score": 1.0,
             "debug": False,
+            "low_candidate": False,
+            "association": "greedy",
         }
     ]
     assert Config.MSDC_REACQUIRE_INTERVAL == 5
     assert Config.MSDC_REACQUIRE_SCORE == 1.5
     assert Config.MSDC_DEBUG_EVENTS is True
+    assert Config.MSDC_LOW_CANDIDATE_ENABLE is True
+    assert Config.MSDC_ASSOC_METHOD == "greedy"
+
+
+def test_gated_hungarian_speed_variant_matches_formal_v3_except_association():
+    baseline = benchmark._config_overrides_for_variant("msdc_v3")
+    hungarian = benchmark._config_overrides_for_variant("gated_hungarian")
+
+    assert baseline["MSDC_LOW_CANDIDATE_ENABLE"] is False
+    assert hungarian["MSDC_LOW_CANDIDATE_ENABLE"] is False
+    assert baseline["MSDC_ASSOC_METHOD"] == "greedy"
+    assert hungarian["MSDC_ASSOC_METHOD"] == "gated_hungarian"
+    assert {
+        key: value for key, value in baseline.items() if key != "MSDC_ASSOC_METHOD"
+    } == {
+        key: value for key, value in hungarian.items() if key != "MSDC_ASSOC_METHOD"
+    }
 
 
 def test_run_speed_benchmark_applies_pending_recovery_variant(tmp_path, monkeypatch):
@@ -501,7 +526,7 @@ def test_tracker_benchmark_releases_unopened_capture(tmp_path, monkeypatch):
             input_video=tmp_path / "missing.mp4",
             seq_name="seq",
             file_type="visible",
-            tracker_type="ocsort",
+            tracker_type="official_ocsort",
             requested_frames=1,
             run_id="run",
             commit_hash="abc123",

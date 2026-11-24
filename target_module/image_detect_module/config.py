@@ -51,8 +51,8 @@ class Config:
     # 红外 ONNX 模型文件路径
     ONNX_INFRARED_MODEL_PATH = os.path.join(BASE_DIR, "target_module", "models", "A_S_F_ir_FFCA.onnx")
 
-    # 视频跟踪默认算法，可选 bytetrack / ocsort / botsort / dist_tracker / official_ocsort / official_botsort
-    TRACKER_TYPE = "botsort"
+    # 视频跟踪默认算法，可选 bytetrack / official_ocsort / official_botsort / msdc_elt
+    TRACKER_TYPE = "official_botsort"
     # 新轨迹激活所需的最低检测置信度
     TRACKER_ACTIVATION_THRESH = 0.3
     # 轨迹丢失后允许保留的最大帧数
@@ -61,16 +61,6 @@ class Config:
     TRACKER_MATCH_THRESH = 0.2
     # 轨迹从候选状态转为确认状态所需的最少命中次数
     TRACKER_MIN_HITS = 3
-    # 基于中心点距离做关联时的距离阈值，单位像素
-    TRACKER_DIST_THRESH = 150.0
-
-    # Dist-Tracker FLIT 代价中 L2 距离权重，IoU distance 权重为 1 - gamma
-    DIST_TRACKER_GAMMA = 0.25
-    # Dist-Tracker FLIT 匹配代价阈值，越小越严格
-    DIST_TRACKER_MATCH_THRESH = 0.8
-    # Dist-Tracker FLIT 是否融合检测置信度
-    DIST_TRACKER_FUSE_SCORE = True
-
     # MS-DC-ELT Task 1: 低阈值检测调试开关与参数；默认不影响 baseline 跟踪链路
     MSDC_DEBUG_LOW_DET = False
     # MS-DC-ELT 可见光低阈值检测置信度
@@ -107,6 +97,9 @@ class Config:
     MSDC_NEGATIVE_WEIGHT = 0.5
     # candidate 确认为 active 的证据阈值和最小命中次数
     MSDC_CONFIRM_SCORE = _env_float("MSDC_CONFIRM_SCORE", 2.5)
+    # Paper ablations replace only candidate confirmation; other states retain CONFIRM_SCORE.
+    MSDC_CANDIDATE_CONFIRM_MODE = os.getenv("MSDC_CANDIDATE_CONFIRM_MODE", "evidence").strip().lower()
+    MSDC_CANDIDATE_CONFIRM_SCORE = _env_float("MSDC_CANDIDATE_CONFIRM_SCORE", 2.5)
     MSDC_CONFIRM_MIN_HITS = _env_int("MSDC_CONFIRM_MIN_HITS", 4)
     # 候选确认必须有检测证据，避免无检测证据噪声直接激活
     MSDC_CONFIRM_REQUIRE_DET = _env_bool("MSDC_CONFIRM_REQUIRE_DET", True)
@@ -168,9 +161,12 @@ class Config:
     MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH = _env_bool("MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH", True)
     MSDC_PENDING_RECOVERY_MAX_LOST_AGE = _env_int("MSDC_PENDING_RECOVERY_MAX_LOST_AGE", 40)
     MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES = _env_int("MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES", 80)
-    # evidence state 几何关联与 observation 合并参数
+    # evidence state 几何关联与 observation 合并参数；v3 保留 greedy，实验变体可切换 gated_hungarian
+    MSDC_ASSOC_METHOD = os.getenv("MSDC_ASSOC_METHOD", "greedy").strip().lower()
     MSDC_ASSOC_IOU_THRESH = 0.2
     MSDC_ASSOC_CENTER_DIST = 80.0
+    MSDC_ASSOC_USE_CENTER_GATE = _env_bool("MSDC_ASSOC_USE_CENTER_GATE", True)
+    MSDC_LOST_SPAWN_SUPPRESS_ENABLE = _env_bool("MSDC_LOST_SPAWN_SUPPRESS_ENABLE", True)
     MSDC_OBS_MERGE_IOU_THRESH = 0.5
     MSDC_MAX_ACTIVE_TRACKS = _env_int("MSDC_MAX_ACTIVE_TRACKS", 64)
     MSDC_MAX_LOST_TRACKS = _env_int("MSDC_MAX_LOST_TRACKS", 32)
@@ -191,7 +187,7 @@ class Config:
     MSDC_OUTPUT_NMS_FRAGMENT_AREA_RATIO = _env_float("MSDC_OUTPUT_NMS_FRAGMENT_AREA_RATIO", 0.35)
     MSDC_OUTPUT_NMS_CONTAINMENT_RATIO = _env_float("MSDC_OUTPUT_NMS_CONTAINMENT_RATIO", 0.50)
     MSDC_OUTPUT_MAX_REAL_DET_AGE = _env_int("MSDC_OUTPUT_MAX_REAL_DET_AGE", 3)
-    MSDC_OUTPUT_MIN_BOX_SIZE = _env_int("MSDC_OUTPUT_MIN_BOX_SIZE", 12)
+    MSDC_OUTPUT_MIN_BOX_SIZE = _env_int("MSDC_OUTPUT_MIN_BOX_SIZE", 5)
 
     # 低阈值候选进入 lifecycle 关联前的预算；当前正式 v3 默认启用 Top-K。
     MSDC_LOW_OBS_TOPK = _env_int("MSDC_LOW_OBS_TOPK", 32)
@@ -205,10 +201,15 @@ class Config:
     MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST = _env_float("MSDC_LOW_OBS_MOTION_GATE_CENTER_DIST", MSDC_LOW_OBS_TRACK_PROXIMITY_CENTER_DIST)
     MSDC_LOW_OBS_MOTION_GATE_IOU = _env_float("MSDC_LOW_OBS_MOTION_GATE_IOU", MSDC_LOW_OBS_TRACK_PROXIMITY_IOU)
 
-    # 全局运动补偿算法类型，主要供 BoT-SORT 使用
+    # ByteTrack 对齐 msdc_v3 的对应参数；独立于其他 baseline 的 TRACKER_*。
+    # 高分/新轨迹阈值共用上面的 VISIBLE_CONF_THRESH / INFRARED_CONF_THRESH。
+    BYTETRACK_LOST_BUFFER = MSDC_LOST_MAX_AGE  # 实际帧数，不按 FPS 缩放
+    BYTETRACK_MIN_HITS = MSDC_CONFIRM_MIN_REAL_DET_HITS  # 包含创建帧
+    # supervision 使用融合置信度后的代价 1 - IoU * score；非 MSDC 的完整门控。
+    BYTETRACK_MATCH_COST_THRESH = 1.0 - MSDC_ASSOC_IOU_THRESH
+
+    # 全局运动补偿算法类型，供官方 BoT-SORT 适配层使用
     GMC_METHOD = "sparse_flow"
-    # 全局运动补偿前的下采样倍率
-    GMC_DOWNSCALE = 2
 
     # 图片离散跟踪场景下首次输出轨迹所需的最少命中次数
     IMAGE_TRACKER_MIN_HITS = 1
@@ -221,3 +222,75 @@ class Config:
     VIDEO_RTSP_OUTPUT = "rtsp://localhost:8554/output"
     # 视频处理默认本地输出文件路径
     VIDEO_OUTPUT_PATH = os.path.join(OUTPUT_DIR, "output.mp4")
+
+
+def _apply_msdc_environment():
+    """Apply exported profiles, including fields previously defined as literals."""
+    for key, current in vars(Config).copy().items():
+        if not key.startswith("MSDC_") or key not in os.environ:
+            continue
+        if isinstance(current, bool):
+            value = _env_bool(key, current)
+        elif isinstance(current, int):
+            value = _env_int(key, current)
+        elif isinstance(current, float):
+            value = _env_float(key, current)
+        elif isinstance(current, str):
+            value = os.environ[key]
+            if key == "MSDC_ASSOC_METHOD":
+                value = value.strip().lower()
+        else:
+            continue
+        setattr(Config, key, value)
+    Config.MSDC_removed_GUARD_FRAMES = Config.MSDC_REMOVED_GUARD_FRAMES
+
+
+_apply_msdc_environment()
+
+# 正式 msdc_v3 的专用配置：这里只列出与基础 Config 不同的参数。
+# 公共参数直接修改上方 Config；仅影响 v3 的参数在此修改或添加。
+# 修改文件后重启进程；消融、replay、速度测试和预标注共用下方生成的配置。
+MSDC_V3_OVERRIDES = {
+    "MSDC_LOW_CANDIDATE_ENABLE": False,
+    "MSDC_DEBUG_EVENTS": True,
+    "MSDC_MAX_ACTIVE_TRACKS": 128,
+    "MSDC_MAX_LOST_TRACKS": 64,
+    "MSDC_MAX_CANDIDATES": 64,
+    "MSDC_MAX_LOW_CANDIDATES": 48,
+    "MSDC_MAX_TOTAL_TRACKS": 256,
+}
+
+
+def build_msdc_v3_config(base_config=Config):
+    """Resolve the full v3 profile from shared settings and explicit overrides."""
+    profile = {
+        key: getattr(base_config, key)
+        for key in dir(base_config)
+        if key.startswith("MSDC_")
+        and isinstance(getattr(base_config, key), (bool, int, float, str))
+    }
+    unknown = MSDC_V3_OVERRIDES.keys() - profile.keys()
+    if unknown:
+        raise ValueError(f"Unknown msdc_v3 config keys: {sorted(unknown)}")
+    profile.update(MSDC_V3_OVERRIDES)
+    profile["MSDC_removed_GUARD_FRAMES"] = profile["MSDC_REMOVED_GUARD_FRAMES"]
+    return profile
+
+
+def msdc_config_to_env(profile):
+    return {
+        key: ("1" if value else "0") if isinstance(value, bool) else str(value)
+        for key, value in profile.items()
+    }
+
+
+# 启动时保存独立快照，避免前一个实验临时修改 Config 后污染下一个变体。
+MSDC_V3_CONFIG = build_msdc_v3_config()
+FORMAL_V3_ENV = msdc_config_to_env(MSDC_V3_CONFIG)
+
+if os.environ.get("PAPER_EXPERIMENT_SPEC"):
+    from target_module.image_detect_module.paper_config import apply_frozen_paper_config
+
+    apply_frozen_paper_config(
+        Config, MSDC_V3_CONFIG, FORMAL_V3_ENV, os.environ["PAPER_EXPERIMENT_SPEC"]
+    )

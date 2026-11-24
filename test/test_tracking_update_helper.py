@@ -35,7 +35,7 @@ class DummyLifecycleTracker:
 
 def test_is_msdc_tracker_only_matches_msdc_elt():
     assert is_msdc_tracker("msdc_elt") is True
-    assert is_msdc_tracker("ocsort") is False
+    assert is_msdc_tracker("official_ocsort") is False
     assert is_msdc_tracker(None) is False
 
 
@@ -66,7 +66,7 @@ def test_baseline_update_calls_tracker_with_frame_for_gmc():
     boxes = [{"x": 1, "y": 2, "w": 3, "h": 4}]
 
     tracked = update_tracking_for_frame(
-        tracker_type="botsort",
+        tracker_type="official_botsort",
         tracker=tracker,
         lifecycle_tracker=None,
         detector=object(),
@@ -136,7 +136,7 @@ def test_update_raises_when_required_tracker_is_missing():
 
     with pytest.raises(RuntimeError, match="Baseline tracker"):
         update_tracking_for_frame(
-            tracker_type="ocsort",
+            tracker_type="official_ocsort",
             tracker=None,
             lifecycle_tracker=None,
             detector=object(),

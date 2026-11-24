@@ -263,7 +263,7 @@ def test_ablation_results_reports_formal_v3_variant_switches(tmp_path):
     )
     by_variant = {row["variant"]: row for row in rows}
 
-    assert by_variant["msdc_v3"]["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
+    assert by_variant["msdc_v3"]["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
     assert by_variant["msdc_v3"]["MSDC_REACQUIRE_INTERVAL"] == "1"
     assert by_variant["msdc_v3"]["MSDC_REACQUIRE_SCORE"] == "0.8"
     assert by_variant["msdc_v3"]["MSDC_PENDING_RECOVERY_ENABLE"] == "0"
@@ -277,6 +277,7 @@ def test_ablation_results_reports_formal_v3_variant_switches(tmp_path):
 
 
 def test_ablation_switches_normalizes_replay_suffix_for_formal_variants():
+    assert _ablation_switches("low_candidate_on_replay")["MSDC_LOW_CANDIDATE_ENABLE"] == "1"
     assert _ablation_switches("no_low_candidate_replay")["MSDC_LOW_CANDIDATE_ENABLE"] == "0"
     assert _ablation_switches("no_direct_reacquire_replay")["MSDC_USE_REACQUIRE"] == "0"
     assert _ablation_switches("hits_only_no_evidence_replay")["MSDC_EVIDENCE_MODE"] == "hits_only"
@@ -305,10 +306,10 @@ def test_ablation_results_include_variant_key_after_variant_for_replay_names(tmp
 
 def test_analysis_text_reports_direction_without_inventing_values():
     rows = [
-        {"method": "FFCA-YOLO + OC-SORT", "IDF1": "50", "IDSW": "10", "HOTA": "20", "AssA": "30", "FP": "5", "FN": "100"},
+        {"method": "FFCA-YOLO + OC-SORT (official)", "IDF1": "50", "IDSW": "10", "HOTA": "20", "AssA": "30", "FP": "5", "FN": "100"},
         {"method": "FFCA-YOLO + MS-DC-ELT", "IDF1": "55", "IDSW": "8", "HOTA": "25", "AssA": "35", "FP": "7", "FN": "90"},
     ]
-    text = build_analysis_text(rows, focus_name="FFCA-YOLO + MS-DC-ELT", baseline_names=["FFCA-YOLO + OC-SORT"])
+    text = build_analysis_text(rows, focus_name="FFCA-YOLO + MS-DC-ELT", baseline_names=["FFCA-YOLO + OC-SORT (official)"])
     assert "IDF1" in text
     assert "55" in text
     assert "10" in text
@@ -316,7 +317,7 @@ def test_analysis_text_reports_direction_without_inventing_values():
 
 
 def test_path_manifest_lists_existing_outputs(tmp_path):
-    mot_file = tmp_path / "trackers" / "ocsort" / "data" / "seq.txt"
+    mot_file = tmp_path / "trackers" / "official_ocsort" / "data" / "seq.txt"
     mot_file.parent.mkdir(parents=True)
     mot_file.write_text("", encoding="utf-8")
     rows = write_path_manifest(tmp_path, tmp_path / "manifest.csv")
@@ -370,7 +371,7 @@ def test_cli_normalizes_speed_csv_missing_columns_to_stable_schema(tmp_path, mon
     speed_csv = tmp_path / "speed" / "speed_results.csv"
     _write_csv(speed_csv, [{
         "run_id": "r1",
-        "tracker": "ocsort",
+        "tracker": "official_ocsort",
         "mean_fps": "12.5",
         "mean_render_ms": "0",
         "mean_write_ms": "0",
@@ -384,7 +385,7 @@ def test_cli_normalizes_speed_csv_missing_columns_to_stable_schema(tmp_path, mon
 
     assert reader.fieldnames == [*SPEED_FIELDS, "status", "failure"]
     assert rows[0]["run_id"] == "r1"
-    assert rows[0]["tracker"] == "ocsort"
+    assert rows[0]["tracker"] == "official_ocsort"
     assert rows[0]["mean_fps"] == "12.5"
     assert rows[0]["commit_hash"] == "N/A"
     assert rows[0]["p95_latency_ms"] == "N/A"
@@ -410,7 +411,7 @@ def test_cli_reports_empty_speed_csv_as_malformed(tmp_path, monkeypatch):
 
 def test_cli_manifest_includes_generated_report_artifacts(tmp_path, monkeypatch):
     speed_csv = tmp_path / "speed" / "speed_results.csv"
-    _write_csv(speed_csv, [{"run_id": "r1", "tracker": "ocsort", "mean_fps": "12.5"}])
+    _write_csv(speed_csv, [{"run_id": "r1", "tracker": "official_ocsort", "mean_fps": "12.5"}])
 
     output_root, report_output, docs_output = _run_summary_cli(monkeypatch, tmp_path, speed_csv)
     manifest_rows = load_metric_rows(output_root / "path_manifest.csv")

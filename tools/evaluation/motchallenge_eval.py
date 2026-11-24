@@ -1,7 +1,10 @@
 """
-Run formal MOTChallenge-style tracking evaluation with vendored TrackEval.
+Run class-consistent aggregate tracking evaluation with vendored TrackEval.
 
 Expected input layout:
+
+Prediction and GT column 8 must both use Config.CLASSES indices plus one.
+Only same-class boxes are eligible to match; wrong classes count as FP/FN.
 
 GT root:
     <gt-root>/<seq>/seqinfo.ini
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -35,6 +39,8 @@ if not hasattr(np, "int"):
     np.int = int  # type: ignore[attr-defined]
 
 import third_party.trackeval as trackeval
+from tools.evaluation.class_aware_mot import ClassAwareMotChallenge2DBox, validate_gt_labels, validate_mot_class_file
+from tools.evaluation.class_mapping import class_names
 
 MetricValue = float | int | str
 
@@ -109,6 +115,12 @@ def _summary_from_trackeval(output_res: dict, trackers: list[str]) -> dict[str, 
             "IDF1": round(idf1, 5),
             "DetA": _mean_hota_field(combined, "DetA"),
             "AssA": _mean_hota_field(combined, "AssA"),
+            "LocA": _mean_hota_field(combined, "LocA"),
+            "MOTP": round(float(combined["CLEAR"]["MOTP"]) * 100.0, 5),
+            "IDP": round(float(combined["Identity"]["IDP"]) * 100.0, 5),
+            "IDR": round(float(combined["Identity"]["IDR"]) * 100.0, 5),
+            "TP": int(combined["CLEAR"]["CLR_TP"]),
+            "Frag": int(combined["CLEAR"]["Frag"]),
             "IDSW": int(combined["CLEAR"]["IDSW"]),
             "FP": int(combined["CLEAR"]["CLR_FP"]),
             "FN": int(combined["CLEAR"]["CLR_FN"]),
@@ -127,6 +139,12 @@ def _write_summary_csv(summary: dict[str, dict[str, MetricValue]], output_root: 
         "HOTA",
         "DetA",
         "AssA",
+        "LocA",
+        "MOTP",
+        "IDP",
+        "IDR",
+        "TP",
+        "Frag",
         "MOTA",
         "IDF1",
         "IDSW",
@@ -152,7 +170,7 @@ def run_motchallenge_eval(
     sequences: Iterable[str] | None = None,
     print_results: bool = True,
 ) -> dict[str, dict[str, MetricValue]]:
-    """Run official TrackEval HOTA/CLEAR/Identity metrics and return key scores."""
+    """Run TrackEval metrics with same-class matching required for every pair."""
     gt_root = Path(gt_root)
     trackers_root = Path(trackers_root)
     output_root = Path(output_root)
@@ -160,6 +178,33 @@ def run_motchallenge_eval(
     seq_list = list(sequences) if sequences else _discover_sequences(gt_root)
     tracker_list = list(trackers) if trackers else _discover_trackers(trackers_root)
     _validate_inputs(gt_root, trackers_root, tracker_list, seq_list)
+
+    # Fail before writing any metric files if old classless results or a local
+    # GT codebook would silently change the meaning of a target class.
+    for seq in seq_list:
+        gt_file = gt_root / seq / "gt" / "gt.txt"
+        validate_gt_labels(gt_file)
+        validate_mot_class_file(gt_file)
+        for tracker in tracker_list:
+            validate_mot_class_file(trackers_root / tracker / "data" / f"{seq}.txt")
+    protocol = {
+        "schema_version": 1,
+        "matching": "same_class_and_iou",
+        "class_consistency_required": True,
+        "model_classes_zero_based": {str(i): name for i, name in enumerate(class_names())},
+        "mot_classes_one_based": {str(i + 1): name for i, name in enumerate(class_names())},
+        "prediction_class_column_one_based": 8,
+        "gt_class_column_one_based": 8,
+        "track_ids_split_by_class": False,
+        "aggregate_output_slot": "pedestrian",
+        "aggregate_output_slot_meaning": "all model classes with class-consistent matching",
+    }
+    protocol_file = output_root / "evaluation_protocol.json"
+    if protocol_file.exists():
+        if json.loads(protocol_file.read_text(encoding="utf-8")) != protocol:
+            raise ValueError("Use a new evaluation output directory when changing the class matching protocol")
+    elif (output_root / "motchallenge_summary.csv").exists():
+        raise ValueError("Use a new evaluation output directory for class-aware results; existing results have no matching protocol")
 
     eval_config = trackeval.Evaluator.get_default_eval_config()
     eval_config.update({
@@ -194,7 +239,7 @@ def run_motchallenge_eval(
 
     metric_config = {"THRESHOLD": 0.5, "PRINT_CONFIG": False}
     evaluator = trackeval.Evaluator(eval_config)
-    dataset_list = [trackeval.datasets.MotChallenge2DBox(dataset_config)]
+    dataset_list = [ClassAwareMotChallenge2DBox(dataset_config)]
     metrics_list = [
         trackeval.metrics.HOTA(metric_config),
         trackeval.metrics.CLEAR(metric_config),
@@ -203,6 +248,7 @@ def run_motchallenge_eval(
     output_res, _ = evaluator.evaluate(dataset_list, metrics_list)
     summary = _summary_from_trackeval(output_res, tracker_list)
     _write_summary_csv(summary, output_root)
+    protocol_file.write_text(json.dumps(protocol, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return summary
 
 
@@ -227,7 +273,7 @@ def main() -> None:
         sequences=args.sequences,
         print_results=not args.quiet,
     )
-    print("\nFormal MOTChallenge metrics (percent, TrackEval):")
+    print("\nClass-consistent MOT metrics (percent, TrackEval):")
     for tracker, values in summary.items():
         print(
             f"{tracker}: HOTA={_format_percent_metric(values['HOTA'])}, "

@@ -1,0 +1,32 @@
+{
+  "document": "/home/hyj/Anti_Drone_Project/Marine-Target-Vision-System/docs/research/7个科研问题_证据累计与轨迹生命周期管理修订版_20261012.docx",
+  "questions": 7,
+  "native_math_objects": 55,
+  "display_equations": 6,
+  "inline_math_objects": 49,
+  "chinese_font": "宋体",
+  "latin_font": "Times New Roman",
+  "font_size_pt": 14,
+  "native_math_structure_verified": true,
+  "no_equation_images": true,
+  "input_sha256": "e1518c82ee584bdad7a4bb2ccc88eae0e4fda9f20e25ddb58025fef582b0848a",
+  "output_sha256": "cfd2ae6fe5477dd042352cc95bfa7949440b3445d46ed78e3dc1e62dd0379dfe",
+  "source_hashes": {
+    "target_module/image_detect_module/config.py": "d9a0cc8fd008027d1470755688aa4fad9297095631d98e5a0700e8d6a5c21d86",
+    "target_module/image_detect_module/utils/evidence_state.py": "4a3cebcbea14400d484f0a76072a7fcc8ddaffda99f0974581ba413483b1bb66",
+    "target_module/image_detect_module/utils/lifecycle_tracker.py": "eacf6e8669bf5b428a8903a47ddb469a58f2c0bea5954b596d0e3b3de777127d"
+  },
+  "native_word_open_verified": true,
+  "native_word_pages": 8,
+  "native_word_equation_count": 55,
+  "native_word_pdf_visually_reviewed_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ]
+}

@@ -1,9 +1,9 @@
 """
 Render MOTChallenge tracker results back onto a source video.
 
-The MOT result format does not contain class labels, so this renderer can
-optionally run the existing detector once per frame and match detections back
-to tracker boxes to recover class text for visualization.
+Project MOT rows preserve the evaluated one-based class in column 8.
+Those labels are displayed directly. Detector/cache recovery remains available
+for historical classless MOT files.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -26,6 +27,9 @@ import target_module.image_detect_module.target_detection as td
 import visualization as vis
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.utils.file_utils import get_file_type
+from tools.evaluation.stage_timing import StageTiming
+from tools.evaluation.video_encoding import H264VideoWriter
+from tools.evaluation.class_mapping import class_name_from_gt_id, normalize_prediction_class
 
 
 def load_mot_results(path: str | Path) -> dict[int, list[dict]]:
@@ -46,6 +50,11 @@ def load_mot_results(path: str | Path) -> dict[int, list[dict]]:
                 "h": float(row[5]),
                 "confidence": float(row[6]),
             }
+            if len(row) >= 8 and row[7].strip() not in {"", "-1", "-1.0"}:
+                class_name = class_name_from_gt_id(row[7])
+                mot_class_id = int(float(row[7]))
+                box.update({"class": class_name, "class_id": mot_class_id - 1,
+                            "mot_class_id": mot_class_id})
             rows_by_frame.setdefault(frame_id, []).append(box)
     return rows_by_frame
 
@@ -123,6 +132,16 @@ def _assign_classes(
     annotated = []
     for box in track_boxes:
         track_id = int(box["track_id"])
+        if "class" in box or "mot_class_id" in box or "class_id" in box:
+            class_id = normalize_prediction_class(box)
+            out = dict(box)
+            class_name = class_name_from_gt_id(class_id)
+            class_conf = float(out.get("class_confidence", out.get("confidence", 0.0)))
+            class_cache[track_id] = (class_name, class_conf)
+            out.update({"id": track_id, "class": class_name, "class_id": class_id - 1,
+                        "mot_class_id": class_id, "class_confidence": class_conf})
+            annotated.append(out)
+            continue
         best_det = None
         best_iou = 0.0
         for det in detections:
@@ -172,7 +191,13 @@ def render_mot_video(
     detections_cache: str | Path | None = None,
     class_iou_threshold: float = 0.1,
     progress_interval: int = 100,
+    start_frame: int = 1,
+    end_frame: int = 0,
+    max_output_width: int = 0,
+    video_codec: str = "mp4v",
+    ffmpeg_executable: str | None = None,
 ) -> Path:
+    timing = StageTiming()
     input_video = Path(input_video)
     mot_results = Path(mot_results)
     output_video = Path(output_video)
@@ -182,6 +207,12 @@ def render_mot_video(
         raise FileNotFoundError(f"MOT result file does not exist: {mot_results}")
     if scale <= 0:
         raise ValueError("--scale must be positive")
+    if start_frame < 1 or (end_frame > 0 and end_frame < start_frame):
+        raise ValueError("Frame interval must be 1-based with end >= start")
+    if max_output_width < 0:
+        raise ValueError("max_output_width must be nonnegative")
+    if video_codec not in {"mp4v", "h264"}:
+        raise ValueError(f"Unsupported video codec: {video_codec}")
 
     results_by_frame = load_mot_results(mot_results)
     resolved_type = file_type or get_file_type(input_video.stem)
@@ -191,10 +222,15 @@ def render_mot_video(
     detector = None
     conf_override = None
     cached_detections: dict[int, list[dict]] = {}
-    if class_source == "detector":
+    if class_source not in {"detector", "cache", "none", "mot"}:
+        raise ValueError(f"Unsupported class source: {class_source}")
+    needs_class_recovery = any("class" not in box for boxes in results_by_frame.values() for box in boxes)
+    if class_source == "mot" and needs_class_recovery:
+        raise ValueError("MOT file has classless rows; re-export predictions with class IDs in column 8")
+    if needs_class_recovery and class_source == "detector":
         detector = td.get_detector()
         conf_override = _low_conf_for_file_type(resolved_type)
-    elif class_source == "cache":
+    elif needs_class_recovery and class_source == "cache":
         if detections_cache is None:
             raise ValueError("--detections-cache is required when --class-source=cache")
         cached_detections = load_detection_class_cache(detections_cache, max_frames=max_frames)
@@ -206,17 +242,25 @@ def render_mot_video(
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if max_output_width > 0:
+        scale = min(scale, max_output_width / max(1, frame_w))
     out_w = max(1, int(round(frame_w * scale)))
     out_h = max(1, int(round(frame_h * scale)))
     output_video.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(
-        str(output_video),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (out_w, out_h),
-    )
+    started = time.perf_counter()
+    try:
+        if video_codec == "h264":
+            writer = H264VideoWriter(output_video, fps, (out_w, out_h), executable=ffmpeg_executable)
+        else:
+            writer = cv2.VideoWriter(str(output_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, out_h))
+    except BaseException:
+        cap.release()
+        raise
+    timing.add("write_export", started)
     if not writer.isOpened():
         cap.release()
+        if video_codec == "h264":
+            writer.abort()
         raise RuntimeError(f"Failed to open VideoWriter: {output_video}")
 
     class_cache: dict[int, tuple[str, float]] = {}
@@ -225,18 +269,26 @@ def render_mot_video(
     frame_id = 0
     try:
         while True:
+            if max_frames > 0 and frame_id >= max_frames:
+                break
+            if end_frame > 0 and frame_id >= end_frame:
+                break
+            started = time.perf_counter()
             ret, frame = cap.read()
+            timing.add("read_decode", started)
             if not ret:
                 break
             frame_id += 1
             if max_frames > 0 and frame_id > max_frames:
                 break
 
+            started = time.perf_counter()
             track_boxes = results_by_frame.get(frame_id, [])
             detections = []
-            if detector is not None and track_boxes:
+            frame_needs_classes = any("class" not in box for box in track_boxes)
+            if detector is not None and frame_needs_classes:
                 detections = _detect_frame_classes(detector, frame, resolved_type, conf_override)
-            elif cached_detections and track_boxes:
+            elif cached_detections and frame_needs_classes:
                 detections = cached_detections.get(frame_id, [])
             annotated_boxes = _assign_classes(track_boxes, detections, class_cache, class_iou_threshold)
 
@@ -253,6 +305,10 @@ def render_mot_video(
                 if len(pts) > trail_len:
                     del pts[:-trail_len]
 
+            if frame_id < start_frame:
+                timing.add("render", started)
+                continue
+
             vis_frame = vis.visualize_detections(
                 frame,
                 "video",
@@ -260,15 +316,33 @@ def render_mot_video(
                 frame_num=frame_id,
                 track_history=track_history,
             )
+            timing.add("render", started)
+            started = time.perf_counter()
             writer.write(vis_frame)
+            timing.add("write_export", started)
+            timing.frames += 1
 
             if progress_interval > 0 and frame_id % progress_interval == 0:
                 suffix = f"/{max_frames}" if max_frames > 0 else ""
                 print(f"[PROGRESS] rendered frame {frame_id}{suffix}", flush=True)
+    except BaseException:
+        if video_codec == "h264":
+            writer.abort()
+        raise
     finally:
         cap.release()
+        started = time.perf_counter()
         writer.release()
+        timing.add("write_export", started)
 
+    timing.write(output_video.with_suffix(".timing.json"), phase="render",
+                 class_source=class_source if needs_class_recovery else "mot",
+                 source_start_frame=start_frame, source_last_frame=frame_id,
+                 render_scale=scale, source_width=frame_w, source_height=frame_h,
+                 output_width=out_w, output_height=out_h,
+                 **({**writer.metadata, "encoder_frames_written": writer.frames_written,
+                     "encoder_time_accounting": "write_export includes stdin blocking and final encoder drain"}
+                    if video_codec == "h264" else {"video_codec": "mp4v"}))
     print(f"[OK] annotated video: {output_video.resolve()}", flush=True)
     return output_video
 
@@ -281,10 +355,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file-type", default="", choices=["", "visible", "infrared"])
     parser.add_argument("--max-frames", type=int, default=0, help="0 means render until video/result end")
     parser.add_argument("--scale", type=float, default=1.0, help="Output scale, e.g. 0.5 for half-size")
-    parser.add_argument("--class-source", choices=["detector", "cache", "none"], default="detector")
+    parser.add_argument("--class-source", choices=["detector", "cache", "none", "mot"], default="detector")
     parser.add_argument("--detections-cache", default="", help="Replay detection JSONL for --class-source=cache")
     parser.add_argument("--class-iou-threshold", type=float, default=0.1)
     parser.add_argument("--progress-interval", type=int, default=100)
+    parser.add_argument("--start-frame", type=int, default=1, help="First original 1-based frame to export")
+    parser.add_argument("--end-frame", type=int, default=0, help="Last original frame, 0 means no extra limit")
+    parser.add_argument("--max-output-width", type=int, default=0, help="Cap visualization width; 0 keeps scale")
+    parser.add_argument("--video-codec", choices=["mp4v", "h264"], default="mp4v")
+    parser.add_argument("--ffmpeg-executable", default="", help="Frozen FFmpeg binary for H.264; otherwise PAPER_FFMPEG_EXECUTABLE")
     return parser.parse_args()
 
 
@@ -301,6 +380,11 @@ def main() -> None:
         detections_cache=args.detections_cache or None,
         class_iou_threshold=args.class_iou_threshold,
         progress_interval=args.progress_interval,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        max_output_width=args.max_output_width,
+        video_codec=args.video_codec,
+        ffmpeg_executable=args.ffmpeg_executable or None,
     )
 
 

@@ -40,73 +40,41 @@ from tools.experiments.run_msdc_ablation import (  # noqa: E402
 )
 
 
-_FORMAL_V3_BOOL_KEYS = {
-    "MSDC_USE_REACQUIRE",
-    "MSDC_REUSE_GUARD_ENABLE",
-    "MSDC_DEBUG_EVENTS",
-    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY",
-    "MSDC_PENDING_RECOVERY_ENABLE",
-    "MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH",
-}
-_FORMAL_V3_INT_KEYS = {
-    "MSDC_OUTPUT_MAX_REAL_DET_AGE",
-    "MSDC_OUTPUT_MIN_BOX_SIZE",
-    "MSDC_LOW_CONFIRM_MIN_HITS",
-    "MSDC_LOW_CONFIRM_WINDOW",
-    "MSDC_CONFIRM_MIN_REAL_DET_HITS",
-    "MSDC_CANDIDATE_MAX_AGE",
-    "MSDC_LOW_OBS_TOPK",
-    "MSDC_LOW_OBS_GLOBAL_TOPK",
-    "MSDC_LOW_OBS_PER_TRACK_NEAREST",
-    "MSDC_LOW_OBS_MAX_PER_FRAME",
-    "MSDC_MAX_ACTIVE_TRACKS",
-    "MSDC_MAX_LOST_TRACKS",
-    "MSDC_MAX_CANDIDATES",
-    "MSDC_MAX_LOW_CANDIDATES",
-    "MSDC_MAX_TOTAL_TRACKS",
-    "MSDC_REACQUIRE_INTERVAL",
-    "MSDC_PENDING_RECOVERY_FRAMES",
-    "MSDC_PENDING_RECOVERY_MAX_LOST_AGE",
-    "MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES",
-}
-_FORMAL_V3_FLOAT_KEYS = {
-    "MSDC_LOW_OBS_MIN_CONF",
-    "MSDC_REACQUIRE_SCORE",
-    "MSDC_REACQUIRE_CENTER_DIST",
-    "MSDC_REACQUIRE_MAX_CENTER_DIST",
-}
+def _coerce_formal_v3_value(key: str, value: str) -> bool | int | float | str:
+    from target_module.image_detect_module.config import Config
 
-
-def _coerce_formal_v3_value(key: str, value: str) -> bool | int | float:
-    if key in _FORMAL_V3_BOOL_KEYS:
+    if not key.startswith("MSDC_") or not hasattr(Config, key):
+        raise KeyError(f"Unsupported formal v3 speed config key: {key}")
+    current = getattr(Config, key)
+    if isinstance(current, bool):
         return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
-    if key in _FORMAL_V3_INT_KEYS:
+    if isinstance(current, int):
         return int(value)
-    if key in _FORMAL_V3_FLOAT_KEYS:
+    if isinstance(current, float):
         return float(value)
+    if isinstance(current, str):
+        return str(value)
     raise KeyError(f"Unsupported formal v3 speed config key: {key}")
 
 
 FORMAL_V3_CONFIG_OVERRIDES = {
     key: _coerce_formal_v3_value(key, V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV[key])
-    for key in [*_FORMAL_V3_BOOL_KEYS, *_FORMAL_V3_INT_KEYS, *_FORMAL_V3_FLOAT_KEYS]
+    for key in V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV
 }
 FORMAL_V3_CONFIG_OVERRIDES["MSDC_DEBUG_EVENTS"] = False
 
 
-def _config_overrides_for_variant(variant: str) -> dict[str, bool | int | float]:
+def _config_overrides_for_variant(variant: str) -> dict[str, bool | int | float | str]:
     if variant not in ABLATION_VARIANTS:
         raise ValueError(f"Unknown MS-DC variant: {variant}")
     overrides = dict(FORMAL_V3_CONFIG_OVERRIDES)
-    supported_keys = _FORMAL_V3_BOOL_KEYS | _FORMAL_V3_INT_KEYS | _FORMAL_V3_FLOAT_KEYS
     for key, value in ABLATION_VARIANTS[variant].items():
-        if key in supported_keys:
-            overrides[key] = _coerce_formal_v3_value(key, value)
+        overrides[key] = _coerce_formal_v3_value(key, value)
     overrides["MSDC_DEBUG_EVENTS"] = False
     return overrides
 
 
-def _parse_msdc_env_json(raw: str) -> dict[str, bool | int | float]:
+def _parse_msdc_env_json(raw: str) -> dict[str, bool | int | float | str]:
     if not raw:
         return {}
     try:
@@ -116,7 +84,7 @@ def _parse_msdc_env_json(raw: str) -> dict[str, bool | int | float]:
     if not isinstance(parsed, dict):
         raise ValueError("--msdc-env-json must be a JSON object")
 
-    overrides: dict[str, bool | int | float] = {}
+    overrides: dict[str, bool | int | float | str] = {}
     for key, value in parsed.items():
         if not isinstance(key, str):
             raise ValueError("--msdc-env-json keys must be strings")
@@ -270,7 +238,7 @@ def _reset_detector_singleton(td_module: Any) -> None:
 
 
 @contextmanager
-def _temporary_config_overrides(config: Any, overrides: dict[str, bool | int | float]) -> Iterator[None]:
+def _temporary_config_overrides(config: Any, overrides: dict[str, bool | int | float | str]) -> Iterator[None]:
     previous = {
         key: (hasattr(config, key), getattr(config, key, None))
         for key in overrides
@@ -297,6 +265,7 @@ def _run_tracker_benchmark(
     seq_name: str,
     file_type: str,
     tracker_type: str,
+    variant: str = "",
     requested_frames: int,
     run_id: str,
     commit_hash: str,
@@ -411,7 +380,16 @@ def _run_tracker_benchmark(
 
                 stage_start = time.perf_counter()
                 with processor.use_stage("tracker_update"):
-                    tracker.update(boxes, frame.shape, frame=frame)
+                    update_tracking_for_frame(
+                        tracker_type=tracker_type,
+                        tracker=tracker,
+                        lifecycle_tracker=None,
+                        detector=detector,
+                        frame=frame,
+                        frame_idx=processed_frames,
+                        file_type=file_type,
+                        boxes=boxes,
+                    )
                 tracker_s = time.perf_counter() - stage_start
 
             total_s = time.perf_counter() - frame_start
@@ -426,6 +404,8 @@ def _run_tracker_benchmark(
             timing_row = {
                 "frame_id": processed_frames,
                 "tracker": tracker_type,
+                "variant": variant,
+                "association_method": str(getattr(Config, "MSDC_ASSOC_METHOD", "N/A")),
                 "read_s": read_s,
                 "high_det_s": high_det_s,
                 "low_det_s": low_det_s,
@@ -447,6 +427,8 @@ def _run_tracker_benchmark(
             "video_path": str(input_video),
             "seq_name": seq_name,
             "tracker": tracker_type,
+            "variant": variant,
+            "association_method": str(getattr(Config, "MSDC_ASSOC_METHOD", "N/A")),
             "method": METHOD_LABELS.get(tracker_type, tracker_type),
             "resolution": resolution,
             "requested_frames": int(requested_frames),
@@ -508,6 +490,7 @@ def run_speed_benchmark(args: argparse.Namespace) -> tuple[Path, Path]:
                     seq_name=seq_name,
                     file_type=file_type,
                     tracker_type=tracker_type,
+                    variant=str(variant) if tracker_type == "msdc_elt" else "",
                     requested_frames=int(args.frames),
                     run_id=run_id,
                     commit_hash=commit_hash,

@@ -74,7 +74,7 @@ def test_metadata_and_failure_records_are_written(tmp_path):
         commit_hash="abcdef0",
         dataset_roots=[tmp_path / "dataset_a", tmp_path / "dataset_b"],
         output_root=tmp_path / "out",
-        trackers=["ocsort", "botsort", "msdc_elt"],
+        trackers=["official_ocsort", "official_botsort", "msdc_elt"],
         variants=["v3_candidate_topk_no_roi_no_motion"],
         max_frames=0,
         duration_seconds=0.0,
@@ -91,7 +91,7 @@ def test_metadata_and_failure_records_are_written(tmp_path):
     commands_path = tmp_path / "commands.jsonl"
     write_command_record(
         commands_path,
-        label="EXPORT:ocsort",
+        label="EXPORT:official_ocsort",
         command=["python", "script.py"],
         env_delta={"A": "1"},
         status="planned",
@@ -100,14 +100,14 @@ def test_metadata_and_failure_records_are_written(tmp_path):
         returncode=0,
     )
     command_record = json.loads(commands_path.read_text(encoding="utf-8").strip())
-    assert command_record["label"] == "EXPORT:ocsort"
+    assert command_record["label"] == "EXPORT:official_ocsort"
     assert command_record["env_delta"] == {"A": "1"}
 
     failures_path = tmp_path / "failures.csv"
     write_failure_record(
         failures_path,
         stage="export",
-        label="ocsort",
+        label="official_ocsort",
         command="python script.py",
         returncode=2,
         message="failed",
@@ -115,7 +115,7 @@ def test_metadata_and_failure_records_are_written(tmp_path):
     rows = list(csv.DictReader(failures_path.open(encoding="utf-8-sig")))
     assert rows == [{
         "stage": "export",
-        "label": "ocsort",
+        "label": "official_ocsort",
         "command": "python script.py",
         "returncode": "2",
         "message": "failed",
@@ -172,7 +172,7 @@ def test_run_logged_command_records_launch_exception(monkeypatch, tmp_path):
     with pytest.raises(OSError, match="cannot launch"):
         run_logged_command(
             "render",
-            "ocsort",
+            "official_ocsort",
             ["missing-command"],
             {},
             commands_path,
@@ -180,14 +180,14 @@ def test_run_logged_command_records_launch_exception(monkeypatch, tmp_path):
         )
 
     command_record = json.loads(commands_path.read_text(encoding="utf-8").strip())
-    assert command_record["label"] == "RENDER:ocsort"
+    assert command_record["label"] == "RENDER:official_ocsort"
     assert command_record["status"] == "failed"
     assert command_record["returncode"] is None
 
     rows = list(csv.DictReader(failures_path.open(encoding="utf-8-sig")))
     assert rows == [{
         "stage": "render",
-        "label": "ocsort",
+        "label": "official_ocsort",
         "command": "missing-command",
         "returncode": "",
         "message": "cannot launch",
@@ -350,9 +350,9 @@ def test_compute_per_gt_diagnostics_reports_fragmented_identity(tmp_path):
     )
     tracker_file.write_text(
         "\n".join([
-            "1,4,10,10,10,10,0.9,-1,-1,-1",
-            "2,4,11,10,10,10,0.9,-1,-1,-1",
-            "4,5,13,10,10,10,0.9,-1,-1,-1",
+            "1,4,10,10,10,10,0.9,1,-1,-1",
+            "2,4,11,10,10,10,0.9,1,-1,-1",
+            "4,5,13,10,10,10,0.9,1,-1,-1",
             "",
         ]),
         encoding="utf-8",
@@ -414,8 +414,8 @@ def test_compute_per_gt_stage_coverage_reports_detection_stage_gaps(tmp_path):
     )
     stage_file.write_text(
         "\n".join([
-            '{"frame_idx": 0, "boxes": [{"stage": "high_det", "x": 10, "y": 10, "w": 10, "h": 10}]}',
-            '{"frame_idx": 1, "boxes": [{"stage": "low_det", "x": 11, "y": 10, "w": 10, "h": 10}, {"stage": "output", "track_id": 4, "x": 11, "y": 10, "w": 10, "h": 10}]}',
+            '{"frame_idx": 0, "boxes": [{"stage": "high_det", "class": "USV", "x": 10, "y": 10, "w": 10, "h": 10}]}',
+            '{"frame_idx": 1, "boxes": [{"stage": "low_det", "class": "USV", "x": 11, "y": 10, "w": 10, "h": 10}, {"stage": "output", "class": "USV", "track_id": 4, "x": 11, "y": 10, "w": 10, "h": 10}]}',
             '{"frame_idx": 2, "boxes": []}',
             "",
         ]),
@@ -441,6 +441,85 @@ def test_compute_per_gt_stage_coverage_reports_detection_stage_gaps(tmp_path):
             "missing_after_stage_segments": "3-3",
         }
     ]
+
+
+def test_per_gt_diagnostics_excludes_wrong_class_even_with_same_track_and_box(tmp_path):
+    gt_file = tmp_path / "gt.txt"
+    tracker_file = tmp_path / "tracker.txt"
+    gt_file.write_text(
+        "1,3,10,10,10,10,1,1,1\n2,3,10,10,10,10,1,1,1\n", encoding="utf-8",
+    )
+    tracker_file.write_text(
+        "1,4,10,10,10,10,0.9,1,-1,-1\n2,4,10,10,10,10,0.9,3,-1,-1\n",
+        encoding="utf-8",
+    )
+
+    row, = compute_per_gt_diagnostics(gt_file, tracker_file)
+
+    assert row["gt_frame_count"] == 2
+    assert row["tracked_frame_count"] == 1
+    assert row["missed_frame_count"] == 1
+    assert row["coverage_ratio"] == 0.5
+    assert row["predicted_ids"] == "4"
+    assert row["matched_segments"] == "1-1"
+    assert row["missed_segments"] == "2-2"
+
+
+@pytest.mark.parametrize("prediction_class", [-1, 0, 4, 1.5])
+def test_per_gt_diagnostics_rejects_missing_or_invalid_prediction_class(tmp_path, prediction_class):
+    gt_file = tmp_path / "gt.txt"
+    tracker_file = tmp_path / "tracker.txt"
+    gt_file.write_text("1,3,10,10,10,10,1,1,1\n", encoding="utf-8")
+    tracker_file.write_text(
+        f"1,4,10,10,10,10,0.9,{prediction_class},-1,-1\n", encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="class in column 8"):
+        compute_per_gt_diagnostics(gt_file, tracker_file)
+
+
+@pytest.mark.parametrize("class_fields, expected_hits", [
+    ({"class": "USV"}, 1),
+    ({"class_id": 0}, 1),
+    ({"mot_class_id": 1}, 1),
+    ({"class": "fishship"}, 0),
+    ({"class": "UAV"}, 0),
+    ({"class": "unknown"}, 0),
+    ({}, 0),
+])
+def test_stage_coverage_requires_same_class_for_detection_and_output(tmp_path, class_fields, expected_hits):
+    gt_file = tmp_path / "gt.txt"
+    stage_file = tmp_path / "stage_observations.jsonl"
+    gt_file.write_text("1,3,10,10,10,10,1,1,1\n", encoding="utf-8")
+    boxes = [
+        {"stage": stage, "track_id": 4, "x": 10, "y": 10, "w": 10, "h": 10, **class_fields}
+        for stage in ("high_det", "low_det", "low_only", "output")
+    ]
+    stage_file.write_text(json.dumps({"frame_idx": 0, "boxes": boxes}) + "\n", encoding="utf-8")
+
+    row, = compute_per_gt_stage_coverage(gt_file, stage_file)
+
+    for stage in ("high_det", "low_det", "low_only", "output"):
+        assert row[f"{stage}_frame_count"] == expected_hits
+        assert row[f"{stage}_coverage"] == float(expected_hits)
+    assert row["output_predicted_id_count"] == expected_hits
+    assert row["output_predicted_ids"] == ("4" if expected_hits else "")
+    assert row["missing_after_stage_segments"] == ("" if expected_hits else "1-1")
+
+
+def test_auxiliary_coverage_rejects_old_gt_label_order(tmp_path):
+    gt_file = tmp_path / "gt.txt"
+    tracker_file = tmp_path / "tracker.txt"
+    stage_file = tmp_path / "stage_observations.jsonl"
+    gt_file.write_text("1,3,10,10,10,10,1,1,1\n", encoding="utf-8")
+    (tmp_path / "labels.txt").write_text("UAV\nUSV\nfishship\n", encoding="utf-8")
+    tracker_file.write_text("1,4,10,10,10,10,0.9,1,-1,-1\n", encoding="utf-8")
+    stage_file.write_text('{"frame_idx": 0, "boxes": []}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="labels must follow"):
+        compute_per_gt_diagnostics(gt_file, tracker_file)
+    with pytest.raises(ValueError, match="labels must follow"):
+        compute_per_gt_stage_coverage(gt_file, stage_file)
 
 
 def test_export_video_to_mot_results_uses_tracker_output_name(monkeypatch, tmp_path):
@@ -474,10 +553,10 @@ def test_export_video_to_mot_results_uses_tracker_output_name(monkeypatch, tmp_p
     output_file = export_mot_results.export_video_to_mot_results(
         input_video=video,
         output_root=tmp_path / "results",
-        tracker_type="botsort",
-        tracker_output_name="baseline_botsort",
+        tracker_type="official_botsort",
+        tracker_output_name="baseline_official_botsort",
         seq_name="seq1",
     )
 
-    assert output_file == tmp_path / "results" / "baseline_botsort" / "data" / "seq1.txt"
+    assert output_file == tmp_path / "results" / "baseline_official_botsort" / "data" / "seq1.txt"
     assert output_file.is_file()

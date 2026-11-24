@@ -1,11 +1,12 @@
 """
-Export project tracker output to MOTChallenge result format.
+Export tracker output to project MOT rows with one-based classes in column 8.
 
 Output layout:
     <output-root>/<tracker>/data/<seq-name>.txt
 
-Each result row follows MOTChallenge tracker result columns:
-    frame, id, bb_left, bb_top, bb_width, bb_height, conf, -1, -1, -1
+Each project result row contains:
+    frame, id, bb_left, bb_top, bb_width, bb_height, conf, class_id, -1, -1
+Class IDs use Config.CLASSES order plus one, matching the normalized GT.
 """
 
 from __future__ import annotations
@@ -36,15 +37,17 @@ from target_module.image_detect_module.utils.tracking_update import (
     update_tracking_for_frame,
 )
 from target_module.image_detect_module.utils.tracker import MultiObjectTracker
+from tools.evaluation.class_mapping import normalize_prediction_class
 
 
 def format_mot_result_line(frame_id: int, box: dict) -> str:
-    """Format one tracked box as a MOTChallenge tracker-result row."""
+    """Format a tracked box, preserving its class as a one-based MOT/GT ID."""
+    class_id = normalize_prediction_class(box)
     return (
         f"{int(frame_id)},{int(box['track_id'])},"
         f"{float(box['x']):.2f},{float(box['y']):.2f},"
         f"{float(box['w']):.2f},{float(box['h']):.2f},"
-        f"{float(box.get('confidence', 1.0)):.4f},-1,-1,-1"
+        f"{float(box.get('confidence', 1.0)):.4f},{class_id},-1,-1"
     )
 
 

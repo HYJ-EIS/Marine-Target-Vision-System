@@ -1,18 +1,19 @@
 """
 MS-DC-ELT-lite evidence accumulation and lifecycle state updates.
 
-This module is intentionally standalone: it does not connect to video_main.py or
-the baseline OC-SORT / BoT-SORT path.  The local geometry helpers mirror the
-tracker helpers so importing this evidence layer does not pull in tracker
-adapters that are unrelated to isolated lifecycle tests.
+This module is intentionally standalone and keeps its geometry helpers local so
+isolated lifecycle tests do not import unrelated tracker adapters.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import wraps
+from time import perf_counter
 from typing import Any
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from target_module.image_detect_module.config import Config
 from target_module.image_detect_module.utils.msdc_types import (
@@ -29,6 +30,20 @@ _SOURCE_PRIORITY = {
     "low_det": 1,
     "reacquire": 2,
 }
+
+
+def _paper_trace_cost(function):
+    """Account only trace construction, leaving evidence computation in tracker time."""
+    @wraps(function)
+    def wrapped(self, *args, **kwargs):
+        if not self.paper_trace_enabled:
+            return None
+        started = perf_counter()
+        try:
+            return function(self, *args, **kwargs)
+        finally:
+            self.paper_trace_s += perf_counter() - started
+    return wrapped
 
 
 def _box_array(box: Any) -> np.ndarray:
@@ -151,6 +166,10 @@ class EvidenceStateUpdater:
         self.last_spawn_suppression_debug = self._empty_spawn_suppression_debug()
         self._removed_guard_cache_key = None
         self._removed_guard_cache = None
+        self.paper_trace_enabled = False
+        self.last_paper_trace = {name: [] for name in ("observations", "associations", "states", "events")}
+        self.paper_trace_s = 0.0
+        self._paper_identity_origin: dict[int, str] = {}
 
     def update(
         self,
@@ -174,6 +193,8 @@ class EvidenceStateUpdater:
         """
         tracks = list(tracks or [])
         observations = list(observations or [])
+        self.paper_trace_s = 0.0
+        self._paper_begin(tracks)
         self._ensure_next_gid(tracks)
         self._ensure_next_public_id(tracks)
 
@@ -185,6 +206,7 @@ class EvidenceStateUpdater:
         self._removed_guard_cache = None
 
         groups = self.merge_observations(observations)
+        self._paper_observations(groups)
         normal_track_indices = [
             idx
             for idx, track in enumerate(tracks)
@@ -195,11 +217,17 @@ class EvidenceStateUpdater:
             groups,
             track_indices=normal_track_indices,
         )
+        self._paper_association_phase("ordinary", tracks, groups, matches, normal_track_indices, range(len(groups)))
+        lost_available_groups = unmatched_group_indices
         reacquire_matches = self._reacquire_lost_track_indices(
             tracks=tracks,
             groups=groups,
             available_group_indices=unmatched_group_indices,
             frame_idx=frame_idx,
+        )
+        self._paper_association_phase(
+            "lost", tracks, groups,
+            reacquire_matches, None, lost_available_groups,
         )
         if reacquire_matches:
             reacquired_groups = {match.group_idx for match in reacquire_matches}
@@ -255,12 +283,229 @@ class EvidenceStateUpdater:
 
         spawn_group_indices = self._filter_spawn_groups_near_lost(tracks, groups, unmatched_group_indices)
         spawn_group_indices = self._filter_spawn_groups_near_active(tracks, groups, spawn_group_indices)
+        self._paper_start_removed(tracks, groups, spawn_group_indices)
         new_tracks, new_events = self.spawn_candidates([groups[idx] for idx in spawn_group_indices], frame_idx, tracks)
         tracks.extend(new_tracks)
         events.extend(new_events)
+        self._paper_finish_removed(tracks)
         tracks = self._prune_stale_removed_tracks(tracks, frame_idx)
         tracks = self._enforce_track_caps(tracks, frame_idx)
+        self._paper_finish(tracks, frame_idx)
         return tracks, events
+
+    @staticmethod
+    def _paper_track_values(track: EvidenceTrack) -> dict:
+        return {
+            "gid": int(track.gid),
+            "public_id": None if track.public_id is None else int(track.public_id),
+            "state": _state_value(track.state),
+            "box_xyxy": _box_array(track.box).tolist(),
+            "model_class_id": int(track.class_id),
+            "class_name": str(track.class_name),
+            "evidence_score": float(track.evidence_score),
+            "hits": int(track.hits), "real_det_hits": int(track.real_det_hits),
+            "misses": int(track.misses), "age": int(track.age),
+            "last_seen": int(track.last_seen),
+            "last_real_det_frame": int(track.last_real_det_frame),
+        }
+
+    @_paper_trace_cost
+    def _paper_begin(self, tracks: list[EvidenceTrack]) -> None:
+        self.last_paper_trace = {name: [] for name in ("observations", "associations", "states", "events")}
+        self._paper_before = {int(track.gid): self._paper_track_values(track) for track in tracks}
+        self._paper_tracks = {int(track.gid): track for track in tracks}
+        self._paper_matched_groups: dict[int, int] = {}
+        self._paper_deletion_reasons: dict[int, str] = {}
+        self._paper_group_ids: dict[int, int] = {}
+        self._paper_removed_before: dict[int, dict] = {}
+        self._paper_removed_groups: list[int] = []
+        self._paper_removed_selected: set[int] = set()
+        self._paper_removed_used_groups: set[int] = set()
+
+    @_paper_trace_cost
+    def _paper_observations(self, groups: list[_ObservationGroup]) -> None:
+        self._paper_group_ids = {id(group): idx for idx, group in enumerate(groups)}
+        self._paper_groups = groups
+        self.last_paper_trace["observations"] = [
+            {
+                "group_id": idx, "box_xyxy": group.box.tolist(),
+                "model_class_id": int(group.class_id), "class_name": str(group.class_name),
+                "source_scores": {str(key): float(value) for key, value in group.source_scores.items()},
+                "source_history": list(group.source_history),
+                "observations": [
+                    {"box_xyxy": _box_array(obs.box).tolist(), "source": str(obs.source),
+                     "score": float(obs.score), "reliability": float(obs.reliability),
+                     "model_class_id": int(obs.class_id), "class_name": str(obs.class_name)}
+                    for obs in group.observations
+                ],
+            }
+            for idx, group in enumerate(groups)
+        ]
+
+    def _paper_association_values(self, phase, track_values, pred_box, group, group_id, outcome, score=None):
+        record = {
+            "phase": phase, "outcome": outcome,
+            "gid": None if track_values is None else track_values["gid"],
+            "public_id": None if track_values is None else track_values["public_id"],
+            "group_id": group_id,
+            "state_before": None if track_values is None else track_values["state"],
+            "model_class_id": int(group.class_id) if group is not None else track_values["model_class_id"],
+            "pred_box_xyxy": None if pred_box is None else _box_array(pred_box).tolist(),
+            "obs_box_xyxy": None if group is None else group.box.tolist(),
+            "IoU": None, "distance": None, "association_score": score,
+        }
+        if pred_box is not None and group is not None:
+            pred = _box_array(pred_box).reshape(1, 4)
+            obs = group.box.reshape(1, 4)
+            record["IoU"] = float(_iou_batch(pred, obs)[0, 0])
+            record["distance"] = float(_center_distance_batch(pred, obs)[0, 0])
+            if phase == "ordinary":
+                center = max(float(self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0)), 1e-6)
+                record["association_score"] = record["IoU"] + 0.5 * max(0.0, 1.0 - record["distance"] / center)
+        return record
+
+    @_paper_trace_cost
+    def _paper_association_phase(self, phase, tracks, groups, matches, track_indices, group_indices, scores=None):
+        selected_tracks, selected_groups = set(), set()
+        if track_indices is None:
+            track_indices = [idx for idx, track in enumerate(tracks) if _as_state(track.state) == TrackState.LOST]
+        for match in matches:
+            if isinstance(match, _ReacquireMatch):
+                track_idx, group_idx, score = match.track_idx, match.group_idx, match.score
+            else:
+                track_idx, group_idx = match
+                score = (scores or {}).get(track_idx)
+            track = tracks[track_idx]
+            self._paper_matched_groups[int(track.gid)] = int(group_idx)
+            self.last_paper_trace["associations"].append(self._paper_association_values(
+                phase, self._paper_track_values(track), self._predict_box(track),
+                groups[group_idx], int(group_idx), "matched", score,
+            ))
+            selected_tracks.add(track_idx)
+            selected_groups.add(group_idx)
+        for track_idx in track_indices:
+            if track_idx not in selected_tracks:
+                track = tracks[track_idx]
+                self.last_paper_trace["associations"].append(self._paper_association_values(
+                    phase, self._paper_track_values(track), self._predict_box(track), None, None, "unmatched_track",
+                ))
+        for group_idx in group_indices:
+            if group_idx not in selected_groups:
+                self.last_paper_trace["associations"].append(self._paper_association_values(
+                    phase, None, None, groups[group_idx], int(group_idx), "unmatched_group",
+                ))
+
+    @_paper_trace_cost
+    def _paper_start_removed(self, tracks, groups, group_indices):
+        self._paper_removed_before = {
+            int(track.gid): self._paper_track_values(track)
+            for track in tracks if _as_state(track.state) == TrackState.REMOVED
+        }
+        self._paper_removed_groups = list(group_indices)
+
+    @_paper_trace_cost
+    def _paper_removed_match(self, track, group, conflict):
+        group_id = self._paper_group_ids.get(id(group))
+        signature = conflict.get("removed_signature") or {}
+        predicted = signature.get("last_box", track.box)
+        values = self._paper_track_values(track)
+        self.last_paper_trace["associations"].append(self._paper_association_values(
+            "removed", values, predicted, group, group_id, "matched", self._spawn_evidence_score(group),
+        ))
+        self._paper_matched_groups[int(track.gid)] = group_id
+        self._paper_removed_selected.add(int(track.gid))
+        self._paper_removed_used_groups.add(group_id)
+        self._paper_identity_origin[int(track.gid)] = "removed"
+
+    @_paper_trace_cost
+    def _paper_finish_removed(self, tracks):
+        self._paper_tracks.update({int(track.gid): track for track in tracks})
+        for gid, values in self._paper_removed_before.items():
+            if gid not in self._paper_removed_selected:
+                self.last_paper_trace["associations"].append(self._paper_association_values(
+                    "removed", values, values["box_xyxy"], None, None, "unmatched_track",
+                ))
+        for group_id in self._paper_removed_groups:
+            if group_id not in self._paper_removed_used_groups:
+                self.last_paper_trace["associations"].append(self._paper_association_values(
+                    "removed", None, None, self._paper_groups[group_id], group_id, "unmatched_group",
+                ))
+
+    @_paper_trace_cost
+    def _paper_bind_spawn(self, track, group):
+        self._paper_tracks[int(track.gid)] = track
+        self._paper_matched_groups[int(track.gid)] = self._paper_group_ids.get(id(group))
+        self._paper_identity_origin[int(track.gid)] = "new"
+
+    @_paper_trace_cost
+    def _paper_action(self, event_type, track=None, group=None, **extra):
+        lifecycle_event = extra.pop("lifecycle_event", None)
+        if lifecycle_event is not None:
+            extra.update({
+                "reason": lifecycle_event.reason,
+                "from_state": _state_value(lifecycle_event.from_state),
+                "to_state": _state_value(lifecycle_event.to_state),
+                **{key: value for key, value in lifecycle_event.extra.items() if key != "public_id"},
+            })
+        values = self._paper_track_values(track) if track is not None else {}
+        gid = values.get("gid")
+        before = self._paper_before.get(gid, {})
+        group_id = self._paper_group_ids.get(id(group)) if group is not None else self._paper_matched_groups.get(gid)
+        old_public_id = before.get("public_id")
+        branch = "lost" if event_type == "LOST_REACQUIRED" else (
+            "removed" if self._paper_identity_origin.get(gid) == "removed" else "candidate"
+        )
+        if event_type == "REMOVED_ID_RECOVERY_CANDIDATE":
+            branch = "removed"
+        record = {
+            "event_type": event_type, "gid": gid, "public_id": values.get("public_id"),
+            "old_gid": before.get("gid"), "new_gid": gid,
+            "old_public_id": old_public_id, "new_public_id": values.get("public_id"),
+            "group_id": group_id, "branch": branch,
+            "id_origin": "reused" if old_public_id is not None else "new",
+            "accepted": True, "reason": "", "suppressed_by_gid": None,
+            "box_xyxy": group.box.tolist() if group is not None else values.get("box_xyxy"),
+            "model_class_id": int(group.class_id) if group is not None else values.get("model_class_id"),
+            "class_name": str(group.class_name) if group is not None else values.get("class_name"),
+        }
+        record.update(extra)
+        self.last_paper_trace["events"].append(record)
+        if gid is not None and (event_type.startswith("PRUNED") or event_type.startswith("CAPACITY")):
+            self._paper_deletion_reasons[gid] = ",".join(record.get("prune_reasons", [])) or str(record["reason"])
+
+    @_paper_trace_cost
+    def _paper_discard(self, track, reason):
+        self._paper_deletion_reasons[int(track.gid)] = reason
+
+    @_paper_trace_cost
+    def _paper_finish(self, tracks, frame_idx):
+        retained = {int(track.gid) for track in tracks}
+        self._paper_tracks.update({int(track.gid): track for track in tracks})
+        mode = self._candidate_confirmation_mode()
+        threshold = float(self._cfg("MSDC_CANDIDATE_CONFIRM_SCORE", 2.5))
+        for gid, track in self._paper_tracks.items():
+            values = self._paper_track_values(track)
+            before = self._paper_before.get(gid, {})
+            group_id = self._paper_matched_groups.get(gid)
+            current_match = group_id is not None
+            values.update({
+                "state_before": before.get("state"), "state_after": values["state"],
+                "evidence_score_before": before.get("evidence_score"),
+                "matched_group": group_id, "current_detection_match": current_match,
+                "retained": gid in retained, "deletion_reason": self._paper_deletion_reasons.get(gid),
+                "real_det_age": int(frame_idx) - int(track.last_real_det_frame),
+                "confirmation_conditions": {
+                    "mode": mode, "score_threshold": threshold,
+                    "score_above_threshold": float(track.evidence_score) > threshold,
+                    "score_required": mode == "evidence", "high_history_required": mode == "evidence" and bool(self._cfg("MSDC_CONFIRM_REQUIRE_HIGH_DET", True)),
+                    "high_history_present": "high_det" in track.source_history,
+                    "hits_sufficient": int(track.hits) >= int(self._cfg("MSDC_CONFIRM_MIN_HITS", 4)),
+                    "real_det_hits_sufficient": int(track.real_det_hits) >= int(self._cfg("MSDC_CONFIRM_MIN_REAL_DET_HITS", 4)),
+                    "current_detection_match": current_match,
+                },
+            })
+            self.last_paper_trace["states"].append(values)
+        self._paper_identity_origin = {gid: value for gid, value in self._paper_identity_origin.items() if gid in retained}
 
     def merge_observations(self, observations: list[Observation]) -> list[_ObservationGroup]:
         groups: list[_ObservationGroup] = []
@@ -306,18 +551,39 @@ class EvidenceStateUpdater:
 
         center_thresh = float(self._cfg("MSDC_ASSOC_CENTER_DIST", 80.0))
         iou_thresh = float(self._cfg("MSDC_ASSOC_IOU_THRESH", 0.2))
-        valid_pairs = np.logical_or(iou >= iou_thresh, distances <= center_thresh)
-        local_track_rows, group_cols = np.where(valid_pairs)
-        if local_track_rows.size:
-            center_bonus = np.maximum(0.0, 1.0 - distances[local_track_rows, group_cols] / max(center_thresh, 1e-6))
-            scores = iou[local_track_rows, group_cols] + 0.5 * center_bonus
-            candidates = [
-                (float(score), int(track_indices[int(local_track_idx)]), int(group_idx))
-                for score, local_track_idx, group_idx in zip(scores, local_track_rows, group_cols)
-            ]
+        valid_pairs = iou >= iou_thresh
+        if bool(self._cfg("MSDC_ASSOC_USE_CENTER_GATE", True)):
+            valid_pairs = np.logical_or(valid_pairs, distances <= center_thresh)
+        center_bonus = np.maximum(0.0, 1.0 - distances / max(center_thresh, 1e-6))
+        scores = iou + 0.5 * center_bonus
+        method = str(self._cfg("MSDC_ASSOC_METHOD", "greedy")).strip().lower()
+        if method == "greedy":
+            matches = self._greedy_gated_assignment(scores, valid_pairs, track_indices)
+        elif method == "gated_hungarian":
+            matches = self._hungarian_gated_assignment(scores, valid_pairs, track_indices)
         else:
-            candidates = []
+            raise ValueError(
+                f"Unsupported MSDC_ASSOC_METHOD={method!r}; expected 'greedy' or 'gated_hungarian'"
+            )
 
+        used_tracks = {track_idx for track_idx, _ in matches}
+        used_groups = {group_idx for _, group_idx in matches}
+
+        unmatched_tracks = [idx for idx in track_indices if idx not in used_tracks]
+        unmatched_groups = [idx for idx in range(len(observation_groups)) if idx not in used_groups]
+        return matches, unmatched_tracks, unmatched_groups
+
+    @staticmethod
+    def _greedy_gated_assignment(
+        scores: np.ndarray,
+        valid_pairs: np.ndarray,
+        track_indices: list[int],
+    ) -> list[tuple[int, int]]:
+        local_track_rows, group_cols = np.where(valid_pairs)
+        candidates = [
+            (float(scores[local_track_idx, group_idx]), int(track_indices[int(local_track_idx)]), int(group_idx))
+            for local_track_idx, group_idx in zip(local_track_rows, group_cols)
+        ]
         matches: list[tuple[int, int]] = []
         used_tracks: set[int] = set()
         used_groups: set[int] = set()
@@ -327,10 +593,27 @@ class EvidenceStateUpdater:
             matches.append((track_idx, group_idx))
             used_tracks.add(track_idx)
             used_groups.add(group_idx)
+        return matches
 
-        unmatched_tracks = [idx for idx in track_indices if idx not in used_tracks]
-        unmatched_groups = [idx for idx in range(len(observation_groups)) if idx not in used_groups]
-        return matches, unmatched_tracks, unmatched_groups
+    @staticmethod
+    def _hungarian_gated_assignment(
+        scores: np.ndarray,
+        valid_pairs: np.ndarray,
+        track_indices: list[int],
+    ) -> list[tuple[int, int]]:
+        if not np.any(valid_pairs):
+            return []
+
+        assignment_size = min(scores.shape)
+        max_score = float(np.max(np.abs(scores[valid_pairs]))) if np.any(valid_pairs) else 0.0
+        invalid_cost = (assignment_size + 1) * (max_score + 1.0)
+        cost_matrix = np.where(valid_pairs, -scores, invalid_cost)
+        local_track_rows, group_cols = linear_sum_assignment(cost_matrix)
+        return [
+            (int(track_indices[int(local_track_idx)]), int(group_idx))
+            for local_track_idx, group_idx in zip(local_track_rows, group_cols)
+            if bool(valid_pairs[local_track_idx, group_idx])
+        ]
 
     def spawn_candidates(
         self,
@@ -352,8 +635,9 @@ class EvidenceStateUpdater:
         recovered_signature_conflicts: list[dict] = []
         recovered_gids: set[int] = set()
         removed_guard_debug = None
-        for group in observation_groups:
+        for group_position, group in enumerate(observation_groups):
             if not self._group_can_spawn_candidate(group):
+                self._paper_action("SPAWN_REJECTED", group=group, accepted=False, reason="birth_confidence_below_gate")
                 continue
             recovered_track_conflict = self._recovered_spawn_conflict(recovered_tracks, group)
             evidence_score = self._spawn_evidence_score(group)
@@ -392,6 +676,11 @@ class EvidenceStateUpdater:
                 group,
             )
             if recovered_track_conflict is not None or recovered_signature_conflict is not None:
+                conflict = recovered_track_conflict or recovered_signature_conflict
+                self._paper_action(
+                    "SPAWN_SUPPRESSED", group=group, accepted=False, branch="removed",
+                    reason="already_recovered_neighborhood", suppressed_by_gid=int(conflict["gid"]),
+                )
                 continue
 
             removed_conflict = next(
@@ -399,6 +688,9 @@ class EvidenceStateUpdater:
                 None,
             )
             if active_candidates + len(tracks) + len(recovered_tracks) >= max_candidates:
+                if self.paper_trace_enabled:
+                    for blocked_group in observation_groups[group_position:]:
+                        self._paper_action("SPAWN_CAPACITY_REJECTED", group=blocked_group, accepted=False, reason="candidate_birth_capacity")
                 break
             removed_guard_debug = self._merge_removed_guard_debug(
                 removed_guard_debug,
@@ -430,6 +722,7 @@ class EvidenceStateUpdater:
                 class_name=str(group.class_name),
             )
             tracks.append(track)
+            self._paper_bind_spawn(track, group)
             if removed_conflict is not None:
                 events.append(self._make_removed_guard_event(
                     frame_idx=frame_idx,
@@ -904,7 +1197,7 @@ class EvidenceStateUpdater:
         group_indices: list[int],
     ) -> list[int]:
         lost_tracks = [track for track in tracks if _as_state(track.state) == TrackState.LOST]
-        if not bool(self._cfg("MSDC_USE_REACQUIRE", True)) or not lost_tracks or not group_indices:
+        if not bool(self._cfg("MSDC_LOST_SPAWN_SUPPRESS_ENABLE", True)) or not lost_tracks or not group_indices:
             return group_indices
 
         kept = []
@@ -917,6 +1210,10 @@ class EvidenceStateUpdater:
             else:
                 conflict["group_idx"] = int(group_idx)
                 suppressed.append(conflict)
+                self._paper_action(
+                    "SPAWN_SUPPRESSED", group=group, accepted=False, branch="lost",
+                    reason="lost_neighborhood", suppressed_by_gid=int(conflict["gid"]),
+                )
 
         if suppressed:
             self.last_reacquire_debug["num_suppressed_spawn_groups"] = int(len(suppressed))
@@ -947,6 +1244,10 @@ class EvidenceStateUpdater:
             else:
                 conflict["group_idx"] = int(group_idx)
                 suppressed.append(conflict)
+                self._paper_action(
+                    "SPAWN_SUPPRESSED", group=group, accepted=False, branch="active",
+                    reason="active_neighborhood", suppressed_by_gid=int(conflict["gid"]),
+                )
 
         self.last_spawn_suppression_debug.update({
             "enabled": True,
@@ -1421,6 +1722,7 @@ class EvidenceStateUpdater:
             conflict["recovery_block_reason"] = "track_not_removed"
             return None, None
 
+        self._paper_removed_match(track, group, conflict)
         evidence_score = self._spawn_evidence_score(group)
         real_det_hits = 1 if self._group_has_real_detection(group) else 0
         state = TrackState.LOW_CANDIDATE if self._group_should_spawn_low_candidate(group) else TrackState.CANDIDATE
@@ -1467,6 +1769,10 @@ class EvidenceStateUpdater:
             self._cfg("MSDC_REMOVED_GUARD_FRAMES", 120),
         ))
         if guard_frames <= 0:
+            for track in tracks:
+                if _as_state(track.state) == TrackState.REMOVED:
+                    self._paper_discard(track, "removed_guard_disabled")
+                    self._paper_action("REMOVED_SIGNATURE_DELETED", track=track, reason="removed_guard_disabled")
             return [track for track in tracks if _as_state(track.state) != TrackState.REMOVED]
 
         kept = []
@@ -1476,10 +1782,15 @@ class EvidenceStateUpdater:
                 continue
             signature = track.retired_signature or self._make_removed_signature(track, int(frame_idx))
             if bool(signature.get("skip_removed_guard", False)):
+                self._paper_discard(track, "skip_removed_guard")
+                self._paper_action("REMOVED_SIGNATURE_DELETED", track=track, reason="skip_removed_guard")
                 continue
             removed_frame_idx = int(signature.get("removed_frame_idx", signature.get("last_seen", int(track.last_seen))))
             if int(frame_idx) - removed_frame_idx <= guard_frames:
                 kept.append(track)
+            else:
+                self._paper_discard(track, "removed_signature_expired")
+                self._paper_action("REMOVED_SIGNATURE_DELETED", track=track, reason="removed_signature_expired")
         return kept
 
     def _enforce_track_caps(self, tracks: list[EvidenceTrack], frame_idx: int) -> list[EvidenceTrack]:
@@ -1522,6 +1833,10 @@ class EvidenceStateUpdater:
             track.state = overflow_state
             if overflow_state == TrackState.LOST:
                 track.misses = max(int(track.misses), 1)
+            self._paper_action(
+                "CAPACITY_STATE_CHANGE", track=track, reason=f"{state.value}_pool_capacity",
+                from_state=state.value, to_state=overflow_state.value,
+            )
 
     def _cap_total_track_list(
         self,
@@ -1537,10 +1852,14 @@ class EvidenceStateUpdater:
                     continue
                 track.retired_signature = self._make_removed_signature(track, frame_idx)
                 track.state = TrackState.REMOVED
+                self._paper_action("CAPACITY_STATE_CHANGE", track=track, reason="total_live_capacity", to_state="removed")
 
         if len(tracks) <= limit:
             return tracks
         ordered = sorted(tracks, key=self._total_keep_key, reverse=True)
+        for track in ordered[limit:]:
+            self._paper_discard(track, "total_pool_capacity")
+            self._paper_action("CAPACITY_DELETED", track=track, reason="total_pool_capacity")
         return ordered[:limit]
 
     @staticmethod
@@ -1868,21 +2187,20 @@ class EvidenceStateUpdater:
                 event_type = "PRUNED_LOW_CANDIDATE"
                 reason = "low_candidate_pruned"
         elif state == TrackState.CANDIDATE:
+            count_confirmation = self._candidate_confirmation_mode() == "count"
             confirm_ready = (
-                float(track.evidence_score) >= float(self._cfg("MSDC_CONFIRM_SCORE", 2.5))
-                and int(track.hits) >= int(self._cfg("MSDC_CONFIRM_MIN_HITS", 3))
-                and self._candidate_has_required_detection(track)
+                int(track.hits) >= int(self._cfg("MSDC_CONFIRM_MIN_HITS", 4))
+                and (
+                    int(track.real_det_hits) >= int(self._cfg("MSDC_CONFIRM_MIN_REAL_DET_HITS", 4))
+                    if count_confirmation else self._candidate_has_required_detection(track)
+                )
+                and (count_confirmation or float(track.evidence_score) > float(self._cfg("MSDC_CANDIDATE_CONFIRM_SCORE", 2.5)))
             )
-            target_state = assign_state(
-                p_t=float(track.evidence_score),
-                v_t=1.0 if confirm_ready and matched else 0.0,
-                m_t=0.0 if confirm_ready else float(self._cfg("MSDC_STATE_THETA_M", 1.0)),
-                dt=current_dt,
-                config=self.config,
-            )
+            # Candidate-only thresholds must not re-enter assign_state's global score gate.
+            target_state = TrackState.ACTIVE if confirm_ready and matched else state
             if target_state == TrackState.ACTIVE:
                 event_type = "CONFIRM_ACTIVE"
-                reason = "evidence_confirmed"
+                reason = "count_confirmed" if count_confirmation else "evidence_confirmed"
                 pending_action, pending_extra, pending_events = self._resolve_candidate_pending_recovery(
                     track=track,
                     tracks=tracks or [],
@@ -1896,11 +2214,17 @@ class EvidenceStateUpdater:
                     extra = {key: value for key, value in pending_extra.items() if key not in {"event_type", "reason"}}
             elif int(track.age) > 1 and (
                 int(track.age) > int(self._cfg("MSDC_CANDIDATE_MAX_AGE", 5))
-                or float(track.evidence_score) < float(self._cfg("MSDC_PRUNE_SCORE", 0.1))
+                or (not count_confirmation and float(track.evidence_score) < float(self._cfg("MSDC_PRUNE_SCORE", 0.1)))
             ):
                 target_state = TrackState.REMOVED
                 event_type = "PRUNED_CANDIDATE"
                 reason = "candidate_pruned"
+                extra = {"prune_reasons": [
+                    reason_name for condition, reason_name in (
+                        (int(track.age) > int(self._cfg("MSDC_CANDIDATE_MAX_AGE", 5)), "candidate_age"),
+                        (not count_confirmation and float(track.evidence_score) < float(self._cfg("MSDC_PRUNE_SCORE", 0.1)), "candidate_score"),
+                    ) if condition
+                ]}
             else:
                 target_state = state
         elif state == TrackState.ACTIVE:
@@ -2012,7 +2336,7 @@ class EvidenceStateUpdater:
             payload_extra["removed_signature"] = track.retired_signature
         if extra:
             payload_extra.update(extra)
-        return LifecycleEvent(
+        event = LifecycleEvent(
             frame_idx=int(frame_idx),
             gid=int(track.gid),
             event_type=event_type,
@@ -2023,6 +2347,8 @@ class EvidenceStateUpdater:
             box=track.box,
             extra=payload_extra,
         )
+        self._paper_action(event_type, track=track, lifecycle_event=event)
+        return event
 
     def _evidence_increment(self, group: _ObservationGroup) -> float:
         total = 0.0
@@ -2037,6 +2363,12 @@ class EvidenceStateUpdater:
 
     def _hits_only_mode(self) -> bool:
         return str(self._cfg("MSDC_EVIDENCE_MODE", "score")).strip().lower() == "hits_only"
+
+    def _candidate_confirmation_mode(self) -> str:
+        mode = str(self._cfg("MSDC_CANDIDATE_CONFIRM_MODE", "evidence")).strip().lower()
+        if mode not in {"evidence", "count"}:
+            raise ValueError(f"Unsupported MSDC_CANDIDATE_CONFIRM_MODE={mode!r}")
+        return mode
 
     def _source_weight(self, source: str) -> float:
         mapping = {

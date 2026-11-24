@@ -7,10 +7,8 @@
 
 支持多种追踪算法（通过 Config.TRACKER_TYPE 或 --tracker 参数）：
   - bytetrack: 两阶段 IoU 匹配
-  - ocsort:    OC-SORT 虚拟轨迹 + 方向一致性 + 距离回捞
-  - botsort:   OC-SORT + 全局相机运动补偿 GMC（推荐）
-  - dist_tracker: Dist-Tracker FLIT L2-IoU 融合匹配
   - official_ocsort / official_botsort: vendored 官方源码适配层
+  - msdc_elt: MS-DC-ELT 生命周期跟踪器
 
 用法：
   # RTSP 模式（默认）
@@ -20,7 +18,7 @@
   python video_main.py --input "D:/path/to/video.mp4"
 
   # 指定追踪算法
-  python video_main.py --input "video.mp4" --tracker ocsort
+  python video_main.py --input "video.mp4" --tracker official_ocsort
 """
 
 import sys

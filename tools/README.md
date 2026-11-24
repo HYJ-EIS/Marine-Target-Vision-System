@@ -30,8 +30,8 @@ conda run -n ship_detect python <script> ...
 - `export_mot_results.py`：把项目 tracker 输出导出为 `<tracker>/data/<seq>.txt`
 - `motchallenge_eval.py`：调用 vendored TrackEval 计算 HOTA、MOTA、IDF1
 - `msdc_dataset_benchmark.py`：解析双单序列标注数据集，编排 MOT 导出、TrackEval、诊断和可选可视化
-- `detection_replay_benchmark.py`：先缓存 high/low detector 输出，再回放给 baseline 与 MS-DC-ELT，保证主实验和消融使用同一 detector 输入；replay 可视化默认从缓存取类别并可跳过已完整产物以恢复中断 run。
-- `msdc_speed_benchmark.py`：在不渲染、不发 MQ、不跑 TrackEval 的条件下，对 OC-SORT、BoT-SORT、MS-DC-ELT 做固定帧数速度统计
+- `detection_replay_benchmark.py`：先缓存 high/low detector 输出，再回放给 baseline 与 MS-DC-ELT，保证主实验和消融使用同一 detector 输入；新 MOT 在第 8 列保存统一的一基预测类别，评测要求同类才能匹配；可视化优先显示 MOT 中的预测类别，旧无类别视频预览才从缓存取类别并可跳过已完整产物以恢复中断 run。
+- `msdc_speed_benchmark.py`：在不渲染、不发 MQ、不跑 TrackEval 的条件下，对官方 OC-SORT、官方 BoT-SORT、ByteTrack 和 MS-DC-ELT 做固定帧数速度统计
 - `msdc_diagnostic_metrics.py`：汇总 low_candidate、inherit、reacquire、fragmentation 和 track break 诊断指标。
 - `msdc_experiment_summary.py`：把 TrackEval summary、速度、敏感性、slice、诊断结果和输出路径汇总为论文实验 CSV 与 Markdown 报告；缺失的可选源文件只写 `status=missing`/`failure=<path>`，不补造指标。
 - `msdc_slice_eval.py`：从 per-GT diagnostics 生成短时漏检/低置信片段切片清单。

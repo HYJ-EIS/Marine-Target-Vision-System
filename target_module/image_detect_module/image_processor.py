@@ -22,15 +22,16 @@ class ImageProcessor:
             print(f"Failed to load visible detector: {e}")
             self.visible_detector = None
 
-        print("Initializing Infrared ONNX Detector...")
-        try:
-            self.infrared_detector = OnnxDetector(
-                onnx_path=Config.ONNX_INFRARED_MODEL_PATH,
-                conf_thres=Config.INFRARED_CONF_THRESH,
-            )
-        except Exception as e:
-            print(f"Failed to load infrared detector: {e}")
-            self.infrared_detector = None
+        self.infrared_detector = None
+        if not os.environ.get("PAPER_EXPERIMENT_SPEC"):
+            print("Initializing Infrared ONNX Detector...")
+            try:
+                self.infrared_detector = OnnxDetector(
+                    onnx_path=Config.ONNX_INFRARED_MODEL_PATH,
+                    conf_thres=Config.INFRARED_CONF_THRESH,
+                )
+            except Exception as e:
+                print(f"Failed to load infrared detector: {e}")
 
         self.processing_times = []
         self._all_detections = []

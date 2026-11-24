@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -18,15 +20,13 @@ from target_module.image_detect_module.constants import (
     TRACKER_CHOICES,
 )
 from target_module.image_detect_module import constants as shared_constants
+from target_module.image_detect_module.utils.tracker import MultiObjectTracker
 from tools.evaluation import msdc_experiment_summary, msdc_speed_benchmark
 
 
 def test_tracker_choice_constants_preserve_cli_contracts():
     assert TRACKER_CHOICES == (
         "bytetrack",
-        "ocsort",
-        "botsort",
-        "dist_tracker",
         "official_ocsort",
         "official_botsort",
         "msdc_elt",
@@ -36,6 +36,12 @@ def test_tracker_choice_constants_preserve_cli_contracts():
     assert OPTIONAL_BASELINE_TRACKER_CHOICES == ("", *BASELINE_TRACKER_CHOICES)
     assert PAPER_TRACKER_CHOICES == ("official_ocsort", "official_botsort", "bytetrack", "msdc_elt")
     assert DATASET_EXPORT_TRACKER_CHOICES == ("official_ocsort", "official_botsort", "bytetrack", "msdc_elt")
+
+
+@pytest.mark.parametrize("tracker_type", ["ocsort", "botsort", "dist_tracker"])
+def test_removed_lite_trackers_are_rejected(tracker_type):
+    with pytest.raises(ValueError, match="不支持的追踪器类型"):
+        MultiObjectTracker(tracker_type=tracker_type)
 
 
 def test_formal_v3_and_baseline_tracker_contract():

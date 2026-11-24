@@ -189,7 +189,10 @@ class TargetDetector:
                 frame = detection_stats.pop("_frame", None)
                 frame_shape = frame.shape if frame is not None else (1080, 1920, 3)
                 with self._tracking_lock:
-                    tracked = self._get_tracker().update(boxes, frame_shape, frame=frame)
+                    tracked = self._get_tracker().update(
+                        boxes, frame_shape, frame=frame,
+                        file_type=detection_stats.get("type", file_type),
+                    )
                 for tb in tracked:
                     tb["id"] = tb["track_id"]
                 boxes = tracked

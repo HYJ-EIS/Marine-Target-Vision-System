@@ -1,5 +1,4 @@
 import csv
-import shutil
 import sys
 from pathlib import Path
 
@@ -15,10 +14,7 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_motchallenge_eval_reports_formal_metrics_for_perfect_track():
-    tmp_path = _ROOT / "results" / "_pytest_motchallenge_eval"
-    if tmp_path.exists():
-        shutil.rmtree(tmp_path)
+def test_motchallenge_eval_reports_formal_metrics_for_perfect_track(tmp_path):
     gt_root = tmp_path / "gt"
     trackers_root = tmp_path / "trackers"
     output_root = tmp_path / "eval"
@@ -49,8 +45,8 @@ def test_motchallenge_eval_reports_formal_metrics_for_perfect_track():
     _write_text(
         trackers_root / "perfect" / "data" / f"{seq_name}.txt",
         "\n".join([
-            "1,1,10,10,20,20,0.99,-1,-1,-1",
-            "2,1,12,10,20,20,0.98,-1,-1,-1",
+            "1,1,10,10,20,20,0.99,1,-1,-1",
+            "2,1,12,10,20,20,0.98,1,-1,-1",
             "",
         ]),
     )
@@ -70,6 +66,10 @@ def test_motchallenge_eval_reports_formal_metrics_for_perfect_track():
     assert perfect["HOTA"] == 100.0
     assert perfect["DetA"] == 100.0
     assert perfect["AssA"] == 100.0
+    for field in ("LocA", "MOTP", "IDP", "IDR"):
+        assert perfect[field] == 100.0
+    assert perfect["TP"] == 2
+    assert perfect["Frag"] == 0
 
     with (output_root / "motchallenge_summary.csv").open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)

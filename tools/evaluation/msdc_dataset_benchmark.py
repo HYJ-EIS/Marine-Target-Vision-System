@@ -189,6 +189,9 @@ def write_motchallenge_gt_sequence(
     max_frames: int = 0,
 ) -> Path:
     """Create <gt-root>/<seq>/gt/gt.txt plus seqinfo.ini for TrackEval."""
+    from tools.evaluation.class_aware_mot import validate_gt_labels, validate_mot_class_file
+    validate_gt_labels(dataset.gt_file, labels_file=dataset.labels_file)
+    validate_mot_class_file(dataset.gt_file)
     output_gt_root = Path(output_gt_root)
     seq_dir = output_gt_root / dataset.seq_name
     gt_dir = seq_dir / "gt"
@@ -220,6 +223,10 @@ def write_motchallenge_gt_sequence(
         "",
     ])
     (seq_dir / "seqinfo.ini").write_text(seqinfo, encoding="utf-8")
+    # Preserve the global codebook alongside copied GT so later evaluation can
+    # reject a dataset whose local labels have a different order.
+    from tools.evaluation.class_mapping import class_names
+    (gt_dir / "labels.txt").write_text("\n".join(class_names()) + "\n", encoding="utf-8")
     return seq_dir
 
 
@@ -236,6 +243,22 @@ def _load_mot_rows(path: str | Path) -> dict[int, list[tuple[int, tuple[float, f
             conf = float(row[6]) if len(row) > 6 else 1.0
             rows_by_frame.setdefault(frame_id, []).append((obj_id, box, conf))
     return rows_by_frame
+
+
+def _load_mot_classes(path: str | Path, *, is_gt: bool = False) -> dict[tuple[int, int], int]:
+    """Read validated one-based classes without changing geometric row loaders."""
+    from tools.evaluation.class_aware_mot import validate_gt_labels, validate_mot_class_file
+    if is_gt:
+        validate_gt_labels(path)
+    validate_mot_class_file(path)
+    classes = {}
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as fh:
+        for row in csv.reader(fh):
+            if not row or not any(value.strip() for value in row):
+                continue
+            frame_id, obj_id = int(float(row[0])), int(float(row[1]))
+            classes[(frame_id, obj_id)] = int(float(row[7]))
+    return classes
 
 
 def _center(box: tuple[float, float, float, float]) -> tuple[float, float]:
@@ -287,7 +310,9 @@ def compute_per_gt_diagnostics(
     iou_threshold: float = 0.1,
     center_threshold: float = 120.0,
 ) -> list[dict]:
-    """Summarize coverage and identity fragmentation for each GT trajectory."""
+    """Summarize same-class spatial coverage for each GT trajectory."""
+    gt_classes = _load_mot_classes(gt_file, is_gt=True)
+    tracker_classes = _load_mot_classes(tracker_file)
     gt_rows = _load_mot_rows(gt_file)
     tracker_rows = _load_mot_rows(tracker_file)
     gt_ids = sorted({obj_id for rows in gt_rows.values() for obj_id, _, _ in rows})
@@ -303,6 +328,8 @@ def compute_per_gt_diagnostics(
                 continue
             gt_frames.add(frame_id)
             for pred_id, pred_box, _ in tracker_rows.get(frame_id, []):
+                if tracker_classes[(frame_id, pred_id)] != gt_classes[(frame_id, gt_id)]:
+                    continue
                 if _iou(gt_box, pred_box) >= iou_threshold or _center_dist(gt_box, pred_box) <= center_threshold:
                     matched_frames.add(frame_id)
                     matched_ids.add(pred_id)
@@ -394,7 +421,9 @@ def compute_per_gt_stage_coverage(
     iou_threshold: float = 0.1,
     center_threshold: float = 120.0,
 ) -> list[dict]:
-    """Compute per-GT coverage by detection/debug stage from stage_observations.jsonl."""
+    """Compute same-class per-GT spatial coverage by detection/debug stage."""
+    from tools.evaluation.class_mapping import normalize_prediction_class
+    gt_classes = _load_mot_classes(gt_file, is_gt=True)
     gt_rows = _load_mot_rows(gt_file)
     stage_rows = _load_stage_rows(stage_observations)
     gt_ids = sorted({obj_id for rows in gt_rows.values() for obj_id, _, _ in rows})
@@ -406,11 +435,20 @@ def compute_per_gt_stage_coverage(
     }
 
     for frame_id, rows in gt_rows.items():
-        boxes = stage_rows.get(frame_id, [])
+        boxes = []
+        for box in stage_rows.get(frame_id, []):
+            stage = str(box.get("stage", ""))
+            if stage not in stages:
+                continue
+            try:
+                predicted_class = normalize_prediction_class(box)
+            except ValueError:
+                # A missing/unknown class cannot establish same-class coverage.
+                continue
+            boxes.append((box, stage, predicted_class))
         for gt_id, gt_box, _ in rows:
-            for box in boxes:
-                stage = str(box.get("stage", ""))
-                if stage not in stages:
+            for box, stage, predicted_class in boxes:
+                if predicted_class != gt_classes[(frame_id, gt_id)]:
                     continue
                 stage_box = _stage_box_tuple(box)
                 if _iou(gt_box, stage_box) >= iou_threshold or _center_dist(gt_box, stage_box) <= center_threshold:

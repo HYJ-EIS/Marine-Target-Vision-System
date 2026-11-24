@@ -27,3 +27,12 @@
 | 2026-06-25 18:31 | /paper-writing | paper-prepare/检测不稳定条件下小目标 MOT 的证据引导轨迹生命周期管理_v1.md | paper | latest ELTTrack Introduction, Related Work, and Method rewrite |
 | 2026-06-25 18:31 | /auto-review-loop | review-stage/AUTO_REVIEW.md | review | Gemini Round 1 review log appended for ELTTrack core sections rewrite |
 | 2026-06-25 18:31 | /auto-review-loop | review-stage/REVIEW_STATE.json | review | completed review loop state for ELTTrack core sections rewrite |
+| 2026-09-07 22:31 | /experiment-bridge | refine-logs/EXPERIMENT_RESULTS_20260907_223159.md | implementation | timestamped gated Hungarian versus current v3 formal comparison |
+| 2026-09-07 22:31 | /experiment-bridge | refine-logs/EXPERIMENT_RESULTS.md | implementation | latest gated Hungarian comparison result |
+| 2026-09-07 22:31 | /experiment-bridge | refine-logs/EXPERIMENT_TRACKER_20260907_223159.md | implementation | timestamped experiment execution tracker |
+| 2026-09-07 22:31 | /experiment-bridge | refine-logs/EXPERIMENT_TRACKER.md | implementation | latest experiment execution tracker |
+| 2026-09-07 22:31 | /experiment-bridge | refine-logs/EXPERIMENT_CODE_REVIEW_20260907_223159.md | implementation | timestamped independent code review record |
+| 2026-09-07 22:31 | /experiment-bridge | refine-logs/EXPERIMENT_CODE_REVIEW.md | implementation | latest independent code review record |
+| 2026-09-07 22:31 | /experiment-bridge | results/msdc_gated_hungarian_compare/20260907_215952_formal_5400/summary/comparison.json | implementation | machine-readable formal comparison |
+| 2026-09-07 22:31 | /experiment-bridge | results/msdc_gated_hungarian_compare/20260907_215952_formal_5400/summary/speed_comparison.csv | implementation | aggregated speed and stage timing comparison |
+| 2026-09-07 22:31 | /experiment-bridge | results/msdc_gated_hungarian_compare/20260907_215952_formal_5400/summary/path_manifest.csv | implementation | formal run output path inventory |

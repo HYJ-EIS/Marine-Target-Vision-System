@@ -56,6 +56,34 @@ def test_detection_cache_round_trips_jsonl_rows(tmp_path):
     assert json.loads(raw_lines[1])["boxes"] == []
 
 
+def test_formal_replay_separates_diagnostic_time_and_records_profile(monkeypatch, tmp_path):
+    cache = write_detection_cache(tmp_path / "cache.jsonl", [
+        {"frame_id": i, "high_boxes": [], "low_boxes": []} for i in (1, 2)
+    ])
+    monkeypatch.setattr(drb.cv2, "VideoCapture", lambda *a: SimpleNamespace(
+        isOpened=lambda: True, read=lambda: (True, np.zeros((20, 20, 3), dtype=np.uint8)), release=lambda: None,
+    ))
+    original_debug = Config.MSDC_DEBUG_EVENTS
+    result = drb.replay_tracker_from_cache(
+        input_video="unused.mp4", detection_cache=cache, output_root=tmp_path / "trackers",
+        tracker_type="msdc_elt", variant="msdc_v3", seq_name="seq", file_type="visible",
+        frame_rate=25, max_frames=2, baseline_input="all",
+    )
+    effective = json.loads((tmp_path / "effective_config/msdc_v3_replay.json").read_text())
+    assert effective["MSDC_LOW_CANDIDATE_ENABLE"] is False
+    assert effective["MSDC_OUTPUT_MIN_BOX_SIZE"] == Config.MSDC_OUTPUT_MIN_BOX_SIZE
+    assert effective["MSDC_DEBUG_EVENTS"] is True
+    assert Config.MSDC_DEBUG_EVENTS == original_debug
+    rows = [json.loads(line) for line in result.with_suffix(".frames.jsonl").read_text().splitlines()]
+    timing = json.loads(result.with_suffix(".timing.json").read_text())
+    assert [r["frame_id"] for r in rows] == [1, 2]
+    assert timing["diagnostic_seconds"] > 0
+    assert timing["stage_seconds"]["tracker"] == pytest.approx(sum(r["tracker_s"] for r in rows))
+    assert timing["raw_update_seconds"] == pytest.approx(timing["stage_seconds"]["tracker"] + timing["diagnostic_seconds"])
+    assert timing["stage_seconds"]["write_export"] >= timing["diagnostic_seconds"]
+    assert timing["tracker_includes_debug_io"] is False
+
+
 def test_load_detection_cache_can_clip_to_frame_count(tmp_path):
     cache_path = tmp_path / "detections.jsonl"
     write_detection_cache(
@@ -90,7 +118,7 @@ def test_detection_cache_contiguous_requires_every_requested_frame(tmp_path):
     assert not is_detection_cache_contiguous(tmp_path / "missing.jsonl", max_frames=3)
 
 
-def test_mot_result_complete_requires_last_requested_frame(tmp_path):
+def test_mot_result_complete_requires_processed_frame_evidence(tmp_path):
     mot_path = tmp_path / "seq.txt"
     mot_path.write_text(
         "1,1,10,10,20,20,0.9,-1,-1,-1\n"
@@ -98,9 +126,27 @@ def test_mot_result_complete_requires_last_requested_frame(tmp_path):
         encoding="utf-8",
     )
 
+    assert not is_mot_result_complete(mot_path, max_frames=3)
+    mot_path.with_suffix(".timing.json").write_text(json.dumps({"processed_frames": 3}))
+    mot_path.with_suffix(".frames.jsonl").write_text(
+        "".join(json.dumps({"frame_id": i}) + "\n" for i in range(1, 4)))
     assert is_mot_result_complete(mot_path, max_frames=3)
     assert not is_mot_result_complete(mot_path, max_frames=4)
     assert not is_mot_result_complete(tmp_path / "missing.txt", max_frames=3)
+
+
+def test_complete_empty_mot_and_missing_tail_outputs_are_reused(tmp_path):
+    mot = tmp_path / "seq.txt"
+    mot.with_suffix(".timing.json").write_text(json.dumps({"processed_frames": 100}))
+    mot.with_suffix(".frames.jsonl").write_text(
+        "".join(json.dumps({"frame_id": i}) + "\n" for i in range(1, 101)))
+    mot.write_text("")
+    assert is_mot_result_complete(mot, 100)
+    mot.write_text("99,1,10,10,20,20,0.9,3,-1,-1\n")
+    assert is_mot_result_complete(mot, 100)
+    mot.with_suffix(".frames.jsonl").write_text(
+        "".join(json.dumps({"frame_id": i}) + "\n" for i in range(1, 100)))
+    assert not is_mot_result_complete(mot, 100)
 
 
 def test_render_video_complete_checks_frame_count(tmp_path):
@@ -120,8 +166,6 @@ def test_tracker_output_name_marks_replay_mode():
     assert tracker_output_name("bytetrack") == "bytetrack_replay"
     assert tracker_output_name("official_botsort") == "official_botsort_replay"
     assert tracker_output_name("official_ocsort") == "official_ocsort_replay"
-    assert tracker_output_name("botsort") == "botsort_replay"
-    assert tracker_output_name("ocsort") == "ocsort_replay"
     assert tracker_output_name("msdc_elt", "msdc_v3") == "msdc_v3_replay"
     assert tracker_output_name("msdc_elt", "no_low_candidate") == "no_low_candidate_replay"
     assert DATASET_EXPORT_TRACKER_CHOICES == ("official_ocsort", "official_botsort", "bytetrack", "msdc_elt")
@@ -134,6 +178,31 @@ def test_high_and_low_boxes_read_named_cache_columns():
 
     assert high_boxes_from_cache_row(row) == high_boxes
     assert low_boxes_from_cache_row(row) == low_boxes
+
+
+@pytest.mark.parametrize("policy,expected_scores", [("high", [0.8]), ("all", [0.8, 0.2])])
+def test_replay_baseline_input_reaches_tracker_without_duplicate_high_boxes(monkeypatch, tmp_path, policy, expected_scores):
+    high = {"confidence": 0.8}
+    low = {"confidence": 0.2}
+    cache = write_detection_cache(tmp_path / "cache.jsonl", [
+        {"frame_id": 1, "high_boxes": [high], "low_boxes": [high, low]},
+    ])
+    received = []
+    monkeypatch.setattr(drb.cv2, "VideoCapture", lambda *a: SimpleNamespace(
+        isOpened=lambda: True, read=lambda: (True, np.zeros((10, 10, 3), dtype=np.uint8)), release=lambda: None,
+    ))
+    def update(boxes, shape, frame=None, file_type=None):
+        assert file_type == "visible"
+        received.extend(b["confidence"] for b in boxes)
+        return []
+    monkeypatch.setattr(drb, "MultiObjectTracker", lambda **kwargs: SimpleNamespace(update=update))
+    result = drb.replay_tracker_from_cache(
+        input_video="unused.mp4", detection_cache=cache, output_root=tmp_path / "out",
+        tracker_type="bytetrack", seq_name="seq", file_type="visible", frame_rate=25,
+        max_frames=1, baseline_input=policy,
+    )
+    assert received == expected_scores
+    assert json.loads(result.with_suffix(".timing.json").read_text())["baseline_input"] == policy
 
 
 def test_high_and_low_boxes_fall_back_to_legacy_boxes_column():
@@ -366,6 +435,9 @@ def test_run_exports_effective_config_when_msdc_replay_mot_is_skipped(monkeypatc
     tracker_file = run_root / "trackers" / "no_low_candidate_replay" / "data" / "seq_a.txt"
     tracker_file.parent.mkdir(parents=True)
     tracker_file.write_text("3,1,10,10,20,20,0.9,-1,-1,-1\n", encoding="utf-8")
+    tracker_file.with_suffix(".timing.json").write_text(json.dumps({"processed_frames": 3}))
+    tracker_file.with_suffix(".frames.jsonl").write_text(
+        "".join(json.dumps({"frame_id": i}) + "\n" for i in range(1, 4)))
 
     monkeypatch.setattr(
         drb,
@@ -515,4 +587,25 @@ def test_dynamic_empty_msdc_env_override_uses_formal_v3_baseline(tmp_path):
     assert effective_config["MSDC_MAX_ACTIVE_TRACKS"] == 128
     assert effective_config["MSDC_MAX_TOTAL_TRACKS"] == 256
     assert effective_config["MSDC_DEBUG_EVENTS"] is True
-    assert effective_config["MSDC_LOW_CANDIDATE_ENABLE"] is True
+    assert effective_config["MSDC_LOW_CANDIDATE_ENABLE"] is False
+
+
+def test_preserve_config_keeps_msdc_debug_disabled(tmp_path, monkeypatch):
+    from target_module.image_detect_module.utils import lifecycle_tracker as lt
+    video=tmp_path/'tiny.mp4'
+    writer=cv2.VideoWriter(str(video),cv2.VideoWriter_fourcc(*'mp4v'),25,(16,16))
+    writer.write(np.zeros((16,16,3),dtype=np.uint8)); writer.release()
+    cache=tmp_path/'cache.jsonl'
+    write_detection_cache(cache,[{'frame_id':1,'high_boxes':[],'low_boxes':[]}])
+    monkeypatch.setattr(Config,'MSDC_DEBUG_EVENTS',False)
+    seen=[]
+    class FakeTracker:
+        def __init__(self,config,**kwargs): seen.append(config.MSDC_DEBUG_EVENTS)
+        def update(self,**kwargs): return []
+    monkeypatch.setattr(lt,'MSDCLifecycleTracker',FakeTracker)
+    out=drb.replay_tracker_from_cache(input_video=video,detection_cache=cache,
+        output_root=tmp_path/'trackers',tracker_type='msdc_elt',seq_name='tiny',
+        file_type='visible',frame_rate=25,max_frames=0,preserve_config=True)
+    assert seen==[False]
+    assert Config.MSDC_DEBUG_EVENTS is False
+    assert json.loads(out.with_suffix('.timing.json').read_text())['processed_frames']==1

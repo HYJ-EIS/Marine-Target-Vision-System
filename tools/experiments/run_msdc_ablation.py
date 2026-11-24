@@ -20,64 +20,29 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from target_module.image_detect_module.config import FORMAL_V3_ENV  # noqa: E402
 from target_module.image_detect_module.constants import (  # noqa: E402
     DATASET_EXPORT_TRACKER_CHOICES,
     FORMAL_MSDC_VARIANT,
 )
 
 
-FORMAL_V3_ENV = {
-    "MSDC_LOW_CANDIDATE_ENABLE": "1",
-    "MSDC_USE_REACQUIRE": "1",
-    "MSDC_LOW_INHERIT_ENABLE": "1",
-    "MSDC_OUTPUT_NMS_ENABLE": "1",
-    "MSDC_OUTPUT_MAX_REAL_DET_AGE": "3",
-    "MSDC_OUTPUT_MIN_BOX_SIZE": "12",
-    "MSDC_LOW_CONFIRM_MIN_HITS": "5",
-    "MSDC_LOW_CONFIRM_WINDOW": "8",
-    "MSDC_CONFIRM_MIN_REAL_DET_HITS": "4",
-    "MSDC_CANDIDATE_MAX_AGE": "5",
-    "MSDC_LOW_OBS_TOPK": "32",
-    "MSDC_LOW_OBS_GLOBAL_TOPK": "32",
-    "MSDC_LOW_OBS_PER_TRACK_NEAREST": "1",
-    "MSDC_LOW_OBS_MAX_PER_FRAME": "64",
-    "MSDC_LOW_OBS_MIN_CONF": "0.25",
-    "MSDC_LOW_OBS_REQUIRE_TRACK_PROXIMITY": "1",
-    "MSDC_REACQUIRE_INTERVAL": "1",
-    "MSDC_REACQUIRE_CENTER_DIST": "160",
-    "MSDC_REACQUIRE_MAX_CENTER_DIST": "240",
-    "MSDC_REACQUIRE_SCORE": "0.8",
-    "MSDC_LOW_INHERIT_SCORE": "0.40",
-    "MSDC_EVIDENCE_ALPHA": "0.85",
-    "MSDC_CONFIRM_SCORE": "2.5",
-    "MSDC_DEBUG_EVENTS": "1",
-    "MSDC_MAX_ACTIVE_TRACKS": "128",
-    "MSDC_MAX_LOST_TRACKS": "64",
-    "MSDC_MAX_CANDIDATES": "64",
-    "MSDC_MAX_LOW_CANDIDATES": "48",
-    "MSDC_MAX_TOTAL_TRACKS": "256",
-    "MSDC_REMOVED_GUARD_IOU_THRESH": "0.3",
-    "MSDC_REMOVED_GUARD_CENTER_DIST": "80",
-    "MSDC_REMOVED_RECOVERY_ENABLE": "1",
-    "MSDC_REMOVED_RECOVERY_REQUIRE_CLASS_MATCH": "1",
-    "MSDC_REMOVED_RECOVERY_MAX_AGE": "80",
-    "MSDC_REMOVED_RECOVERY_MIN_IOU": "0.20",
-    "MSDC_REMOVED_RECOVERY_MAX_CENTER_DIST": "80",
-    "MSDC_REMOVED_RECOVERY_MIN_SCORE": "0.35",
-    "MSDC_PENDING_RECOVERY_ENABLE": "0",
-    "MSDC_PENDING_RECOVERY_FRAMES": "1",
-    "MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH": "1",
-    "MSDC_PENDING_RECOVERY_MAX_LOST_AGE": "40",
-    "MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES": "80",
-}
-V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV = {**FORMAL_V3_ENV, "MSDC_REUSE_GUARD_ENABLE": "1"}
+# Compatibility export; the formal profile is owned by config.py.
+V3_CANDIDATE_TOPK_NO_ROI_NO_MOTION_ENV = dict(FORMAL_V3_ENV)
 
 
 ABLATION_VARIANTS = {
     FORMAL_MSDC_VARIANT: dict(FORMAL_V3_ENV),
+    "gated_hungarian": {**FORMAL_V3_ENV, "MSDC_ASSOC_METHOD": "gated_hungarian"},
+    "low_candidate_on": {**FORMAL_V3_ENV, "MSDC_LOW_CANDIDATE_ENABLE": "1"},
+    # Retained as a compatibility alias for historical commands and reports.
     "no_low_candidate": {**FORMAL_V3_ENV, "MSDC_LOW_CANDIDATE_ENABLE": "0"},
     "no_direct_reacquire": {**FORMAL_V3_ENV, "MSDC_USE_REACQUIRE": "0"},
-    "no_low_inheritance": {**FORMAL_V3_ENV, "MSDC_LOW_INHERIT_ENABLE": "0"},
+    "no_low_inheritance": {
+        **FORMAL_V3_ENV,
+        "MSDC_LOW_CANDIDATE_ENABLE": "1",
+        "MSDC_LOW_INHERIT_ENABLE": "0",
+    },
     "hits_only_no_evidence": {**FORMAL_V3_ENV, "MSDC_EVIDENCE_MODE": "hits_only"},
     "no_output_nms": {**FORMAL_V3_ENV, "MSDC_OUTPUT_NMS_ENABLE": "0"},
     "no_output_real_det_age_gate": {**FORMAL_V3_ENV, "MSDC_OUTPUT_MAX_REAL_DET_AGE": "999999"},
@@ -107,6 +72,7 @@ ABLATION_VARIANTS = {
     },
     "pending_recovery_candidate": {
         **FORMAL_V3_ENV,
+        "MSDC_LOW_CANDIDATE_ENABLE": "1",
         "MSDC_PENDING_RECOVERY_ENABLE": "1",
         "MSDC_PENDING_RECOVERY_FRAMES": "1",
         "MSDC_PENDING_RECOVERY_REQUIRE_CLASS_MATCH": "1",
@@ -114,6 +80,37 @@ ABLATION_VARIANTS = {
         "MSDC_PENDING_RECOVERY_REMOVED_GUARD_FRAMES": "80",
     },
 }
+
+
+# Fixed paper matrix. Every entry owns a complete copy of the frozen Full profile.
+PAPER_VARIANT_OVERRIDES = {
+    "paper_no_a": {"MSDC_ASSOC_USE_CENTER_GATE": "0"},
+    "paper_count_e": {"MSDC_CANDIDATE_CONFIRM_MODE": "count"},
+    "paper_no_r": {"MSDC_USE_REACQUIRE": "0", "MSDC_REMOVED_RECOVERY_ENABLE": "0"},
+    "paper_count_e_no_r": {
+        "MSDC_CANDIDATE_CONFIRM_MODE": "count",
+        "MSDC_USE_REACQUIRE": "0", "MSDC_REMOVED_RECOVERY_ENABLE": "0",
+    },
+    "paper_full_s0": {"MSDC_LOST_SPAWN_SUPPRESS_ENABLE": "0"},
+    "paper_no_r_s0": {
+        "MSDC_USE_REACQUIRE": "0", "MSDC_REMOVED_RECOVERY_ENABLE": "0",
+        "MSDC_LOST_SPAWN_SUPPRESS_ENABLE": "0",
+    },
+    "paper_lost_only_s0": {
+        "MSDC_REMOVED_RECOVERY_ENABLE": "0", "MSDC_LOST_SPAWN_SUPPRESS_ENABLE": "0",
+    },
+    "paper_removed_only_s0": {
+        "MSDC_USE_REACQUIRE": "0", "MSDC_LOST_SPAWN_SUPPRESS_ENABLE": "0",
+    },
+    **{f"paper_assoc_d{distance}": {"MSDC_ASSOC_CENTER_DIST": str(distance)}
+       for distance in (40, 60, 100, 120)},
+    **{f"paper_candidate_t{label}": {"MSDC_CANDIDATE_CONFIRM_SCORE": str(value)}
+       for label, value in ((15, 1.5), (20, 2.0), (30, 3.0), (35, 3.5))},
+}
+ABLATION_VARIANTS.update({
+    name: {**FORMAL_V3_ENV, **overrides}
+    for name, overrides in PAPER_VARIANT_OVERRIDES.items()
+})
 
 
 def _quote_command(argv: list[str]) -> str:

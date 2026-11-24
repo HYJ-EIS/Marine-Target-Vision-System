@@ -35,4 +35,6 @@ def update_tracking_for_frame(
 
     if tracker is None:
         raise RuntimeError("Baseline tracker is not initialized")
+    if tracker_type == "bytetrack":
+        return tracker.update(boxes, frame.shape, frame=frame, file_type=file_type)
     return tracker.update(boxes, frame.shape, frame=frame)

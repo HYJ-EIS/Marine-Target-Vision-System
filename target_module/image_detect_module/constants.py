@@ -2,9 +2,6 @@
 
 TRACKER_CHOICES = (
     "bytetrack",
-    "ocsort",
-    "botsort",
-    "dist_tracker",
     "official_ocsort",
     "official_botsort",
     "msdc_elt",
@@ -40,6 +37,8 @@ SPEED_FIELDS = (
     "video_path",
     "seq_name",
     "tracker",
+    "variant",
+    "association_method",
     "method",
     "resolution",
     "requested_frames",
@@ -79,8 +78,6 @@ SPEED_OUTPUT_FIELDS = (*SPEED_FIELDS, "status", "failure")
 
 METHOD_LABELS = {
     "bytetrack": "FFCA-YOLO + ByteTrack",
-    "ocsort": "FFCA-YOLO + OC-SORT",
-    "botsort": "FFCA-YOLO + BoT-SORT",
     "official_ocsort": "FFCA-YOLO + OC-SORT (official)",
     "official_botsort": "FFCA-YOLO + BoT-SORT (official)",
     "msdc_elt": "FFCA-YOLO + MS-DC-ELT",

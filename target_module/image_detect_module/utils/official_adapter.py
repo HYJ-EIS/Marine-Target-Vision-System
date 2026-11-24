@@ -1,10 +1,9 @@
 """
 Adapter for vendored official OC-SORT and BoT-SORT trackers.
 
-The project keeps its existing tracker implementations as the default baseline.
-This module only translates the project detection/result dictionaries to and
-from the official tracker APIs so experiments can compare the association layer
-on the same detector outputs.
+This module translates the project detection/result dictionaries to and from
+the official tracker APIs so experiments can compare the association layer on
+the same detector outputs.
 """
 
 from __future__ import annotations
